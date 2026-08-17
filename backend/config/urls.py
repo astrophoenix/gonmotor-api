@@ -1,0 +1,50 @@
+"""
+URL configuration for config project.
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/5.1/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+
+urlpatterns = [
+    # Panel de administración de Django
+    path('admin/', admin.site.urls),
+
+    # 1. Endpoints globales de infraestructura (Health Check, etc.)
+    path('api/core/', include('apps.core.urls')),
+
+    # 2. Endpoints globales de autenticación y autorización (Login, Refresh Token, Perfil de Usuario)
+    path('api/auth/', include('apps.authentication.urls')),
+
+    # 3. Endpoints del Módulo de Clientes
+    path('api/clientes/', include('apps.clientes.urls')),
+
+    # 4. Endpoints del Módulo de Vehículos
+    path('api/vehiculos/', include('apps.vehiculos.urls')),
+
+    # 5. Endpoints del Módulo de Cotizaciones
+    path('api/cotizaciones/', include('apps.cotizaciones.urls')),
+
+    # 6. Endpoints del Módulo de Órdenes de Trabajo
+    path('api/ordenes/', include('apps.ordenes.urls')),
+]
+
+# Servir archivos multimedia (fotos, documentos) durante el desarrollo
+if settings.DEBUG:
+    urlpatterns += static(
+        settings.MEDIA_URL,
+        document_root=settings.MEDIA_ROOT
+    )
