@@ -1,5 +1,6 @@
 from django.db import models
 from apps.core.models import BaseModel
+from django_countries.fields import CountryField
 
 
 class Vehiculo(BaseModel):
@@ -17,13 +18,34 @@ class Vehiculo(BaseModel):
         HIBRIDO = 'HIB', 'Híbrido'
         ELECTRICO = 'ELE', 'Eléctrico'
 
-    # Relación con el Cliente usando la cadena 'clientes.Cliente'
-    cliente = models.ForeignKey(
-        'clientes.Cliente',
-        on_delete=models.CASCADE,
-        related_name='vehiculos',
-        verbose_name="Propietario / Cliente"
-    )
+    class TipoVehiculo(models.TextChoices):
+        # Particular y Pasajeros
+        AUTOMOVIL = 'AUTO', 'Automóvil'
+        JEEP = 'JEEP', 'Jeep'
+        CAMIONETA = 'CAMN', 'Camioneta'
+        
+        # Dos y Tres Ruedas
+        MOTOCICLETA = 'MOTO', 'Motocicleta'
+        MOTONETA = 'MTNA', 'Motoneta'
+        TRICIMOTO = 'TRIC', 'Tricimoto'
+        CUATRIMOTO = 'CUAT', 'Cuatrimoto'
+        
+        # Transporte Comercial
+        BUS = 'BUS', 'Bus / Autobús'
+        BUSETA = 'BUSE', 'Buseta'
+        MICROBUS = 'MICR', 'Microbús / Furgoneta'
+        
+        # Carga
+        CAMION = 'CAMI', 'Camión'
+        TRACTOCAMION = 'TRAC', 'Tractocamión'
+        VOLQUETA = 'VOLQ', 'Volqueta'
+        FURGON = 'FURG', 'Furgón'
+        
+        # Especiales
+        REMOLQUE = 'REMO', 'Remolque / Semirremolque'
+        MAQUINARIA_AGRI = 'MAGR', 'Maquinaria Agrícola'
+        MAQUINARIA_CAMI = 'MCAM', 'Maquinaria Caminera'
+
 
     placa = models.CharField(
         verbose_name="Placa",
@@ -81,6 +103,28 @@ class Vehiculo(BaseModel):
         blank=True,
         default=""
     )
+    tipo = models.CharField(
+        max_length=4,
+        choices=TipoVehiculo.choices,
+        default=TipoVehiculo.AUTOMOVIL,
+    )
+    pais_origen = CountryField(
+        default='EC',
+        help_text="País de fabricación o procedencia original"
+    )
+    imagen = models.ImageField(
+        verbose_name="Imagen del Vehículo",
+        upload_to='vehiculos/%Y/%m/%d',
+        blank=True,
+        null=True,
+        help_text="JPG, PNG o WebP. Máximo 2MB."
+    )
+    empresas = models.ManyToManyField(
+        'empresas.Empresa',
+        related_name='vehiculos',
+        blank=True,
+        verbose_name="Empresas"
+    )
 
     class Meta:
         verbose_name = "Vehículo"
@@ -94,3 +138,31 @@ class Vehiculo(BaseModel):
         if self.placa:
             self.placa = self.placa.strip().upper()
         super().save(*args, **kwargs)
+
+
+class VehiculoPropietario(BaseModel):
+    vehiculo = models.ForeignKey(
+        'vehiculos.Vehiculo', 
+        on_delete=models.CASCADE, 
+        related_name='propietarios'
+    )
+    cliente = models.ForeignKey(
+        'clientes.Cliente', 
+        on_delete=models.CASCADE, 
+        related_name='vehiculos_asociados'
+    )
+    es_actual = models.BooleanField(default=True, verbose_name="¿Es el dueño activo?")
+    fecha_inicio = models.DateField(auto_now_add=True)
+    fecha_fin = models.DateField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Relación Vehículo-Propietario"
+        constraints = [
+            # ⛔ REGLA CLAVE: Evita registrar el mismo vehículo 2 veces 
+            # con el mismo cliente mientras la relación esté activa.
+            models.UniqueConstraint(
+                fields=['vehiculo', 'cliente'],
+                condition=models.Q(es_actual=True),
+                name='unique_vehiculo_cliente_activo'
+            )
+        ]

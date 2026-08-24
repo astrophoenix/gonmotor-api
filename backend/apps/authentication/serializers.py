@@ -1,6 +1,6 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
-
+from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.contrib.auth.password_validation import validate_password
@@ -9,27 +9,133 @@ from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
 
 from .models import UserProfile
-
+from .models import UsuarioEmpresa
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    Serializer personalizado de JWT para aceptar username o email en el mismo campo.
-    """
+    
     def validate(self, attrs):
-        # attrs contiene 'username' y 'password' enviados desde el cliente
-        data = super().validate(attrs)
+        username = attrs.get(self.username_field, '')
+        password = attrs.get('password', '')
 
-        # Opcional: Agregar información útil del usuario a la respuesta del Login
-        data['user'] = {
-            'id': self.user.id,
-            'username': self.user.username,
-            'email': self.user.email,
-            'first_name': self.user.first_name,
-            'last_name': self.user.last_name,
-            'rol': self.user.profile.rol if hasattr(self.user, 'profile') else None,
-            'empresa_id': self.user.profile.empresa_id if hasattr(self.user, 'profile') else None,
+        user = authenticate(
+            request=self.context.get('request'),
+            username=username,
+            password=password
+        )
+
+        if user is None:
+            raise serializers.ValidationError({
+                "detail": "Correo o contraseña incorrectos. Por favor, verifica tus datos e intenta nuevamente."
+            })
+
+        if not user.is_active:
+            raise serializers.ValidationError({
+                "detail": "Tu cuenta está desactivada. Contacta al administrador del sistema."
+            })
+
+        self.user = user
+
+        relaciones = UsuarioEmpresa.objects.filter(
+            user=user,
+            is_active=True,
+            empresa__is_active=True
+        ).select_related('empresa')
+        
+        if not relaciones.exists():
+            raise serializers.ValidationError({
+                "detail": "El usuario no tiene empresas asignadas o activas."
+            })
+        
+        if relaciones.count() == 1:
+            relacion = relaciones.first()
+            empresa = relacion.empresa
+            
+            refresh = self.get_token_with_empresa(user, empresa.id, relacion.rol)
+            
+            data = {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'requires_company_selection': False,
+                'user': {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "rol": relacion.rol,
+                    "empresa_id": empresa.id,
+                    "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', ''))
+                }
+            }
+            return data
+
+        empresas_list = [
+            {
+                "id": rel.empresa.id,
+                "nombre_comercial": getattr(rel.empresa, 'nombre_comercial', getattr(rel.empresa, 'nombre', '')),
+                "ruc": getattr(rel.empresa, 'ruc', ''),
+                "rol": rel.rol
+            }
+            for rel in relaciones
+        ]
+
+        return {
+            "requires_company_selection": True,
+            "user_id": user.id,
+            "empresas": empresas_list
         }
-        return data
+
+    @classmethod
+    def get_token_with_empresa(cls, user, empresa_id, rol):
+        token = super().get_token(user)
+        # 🔒 Inyección del ID de empresa y del rol específico en la firma del JWT
+        token['empresa_id'] = empresa_id
+        token['rol'] = rol
+        return token
+
+
+class RegistrationSerializer(serializers.Serializer):
+    """Valida y crea cuentas nuevas desde el registro público."""
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    password_confirmation = serializers.CharField(write_only=True, trim_whitespace=False)
+    accepted_terms = serializers.BooleanField(write_only=True)
+
+    def validate_email(self, value):
+        value = value.lower().strip()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('Ya existe una cuenta con este correo electrónico.')
+        return value
+
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password_confirmation']:
+            raise serializers.ValidationError({
+                'password_confirmation': 'Las contraseñas no coinciden.'
+            })
+
+        if not attrs['accepted_terms']:
+            raise serializers.ValidationError({
+                'accepted_terms': 'Debes aceptar los términos y condiciones.'
+            })
+
+        try:
+            validate_password(attrs['password'])
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({'password': list(error.messages)})
+
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('password_confirmation')
+        validated_data.pop('accepted_terms')
+        email = validated_data['email']
+
+        return User.objects.create_user(
+            username=email,
+            email=email,
+            password=validated_data['password']
+        )
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -81,6 +187,44 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
+
+
+class UserProfileUpdateSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, max_length=150)
+    email = serializers.EmailField(required=False)
+    first_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
+    last_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
+    telefono = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_email(self, value):
+        user = self.context.get('request').user
+        if User.objects.filter(email__iexact=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError('Ya existe una cuenta con este correo electrónico.')
+        return value
+
+    def validate_username(self, value):
+        user = self.context.get('request').user
+        if User.objects.filter(username__iexact=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError('Ya existe una cuenta con este nombre de usuario.')
+        return value
+
+    def update(self, instance, validated_data):
+        profile_data = {}
+        if 'telefono' in validated_data:
+            profile_data['telefono'] = validated_data.pop('telefono')
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+
+        if profile_data:
+            profile, _ = UserProfile.objects.get_or_create(user=instance)
+            for attr, value in profile_data.items():
+                setattr(profile, attr, value)
+            profile.save()
+
+        return instance
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -149,3 +293,25 @@ class UserAdminSerializer(serializers.ModelSerializer):
                 instance.profile.talleres.set(talleres)
 
         return instance
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, required=True)
+
+    def validate_old_password(self, value):
+        user = self.context.get('request').user
+        if not user.check_password(value):
+            raise serializers.ValidationError('La contraseña actual es incorrecta.')
+        return value
+
+    def validate_new_password(self, value):
+        user = self.context.get('request').user
+        validate_password(value, user=user)
+        return value
+
+    def save(self, **kwargs):
+        user = self.context.get('request').user
+        user.set_password(self.validated_data['new_password'])
+        user.save()
+        return user

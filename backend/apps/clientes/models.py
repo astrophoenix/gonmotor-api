@@ -58,6 +58,15 @@ class Cliente(BaseModel):
         verbose_name_plural = "Clientes"
         ordering = ['-created_at']  # Muestra los clientes más recientes primero
 
+        # Un mismo RUC/Cédula no se duplica dentro de la MISMA empresa,
+        # pero SI puede existir en OTRAS empresas distintas.
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'identificacion'], 
+                name='unique_cliente_per_empresa'
+            )
+        ]
+
     def __str__(self):
         return f"{self.nombre} ({self.identificacion})"
 

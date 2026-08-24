@@ -5,6 +5,9 @@ cd backend
 # 2. Activar el entorno virtual (macOS / Linux)
 source venv/bin/activate
 
+cd /Users/astrophoenix/Desktop/gonmotor/gonmotor-api/backend
+./venv/bin/python manage.py runserver 0.0.0.0:8000
+
 # 3. Levantar el servidor de desarrollo de Django
 python manage.py runserver
 
@@ -26,21 +29,45 @@ Env: Local AdminUser:
     pass: pegazo13
 
     user: mantify
+    email: mantify3216@gmail.com
     pass: Kimera2489
+
+    user:palvarez
+    user: palvarez@gmail.com
+    pass: Pegazo13@
+    palvarez -> empresa motor line (id 2)
+
+
+    user: cmontes
+    user: cmontes@gmail.com
+    pass: Pegazo13@
+    cmontes -> empresa motor line (id 2) y astro car (1)
+
 
 Desactivar el entorno virtual (cuando termines de trabajar):
 deactivate
 
 ================================================
-⚡ 2. Levantar el Frontend (Vue 3 + Vite)
-# 1. Entrar a la carpeta del frontend
-cd frontend
-
-# 2. Levantar el servidor de desarrollo de Vite
-npm run dev
+# 1. Levantar el servidor de desarrollo UI
+cd /Users/astrophoenix/Desktop/gonmotor/gonmotor-ui         
+npm run start
 
 Detener el servidor: 
 Presiona Ctrl + C en la terminal.
 
 Instalar un nuevo paquete/librería (ejemplo: Axios o FontAwesome):
 npm install nombre-del-paquete
+
+crear error en el servidor a propósito
+raise Exception("Error temporal provocado para pruebas en el backend")
+
+Nombres para el sistema
+gonmotor.com
+GonMotor Web → gestión administrativa
+GonMotor Check → check-in del vehículo
+GonMotor Mobile → aplicación móvil
+GonMotor Parts → repuestos
+GonMotor Reports → reportes
+
+
+consultar placas: https://servicios.axiscloud.ec/CRV/?ps_empresa=02

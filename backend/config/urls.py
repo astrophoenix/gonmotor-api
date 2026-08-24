@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
     # Panel de administración de Django
@@ -28,9 +29,13 @@ urlpatterns = [
 
     # 2. Endpoints globales de autenticación y autorización (Login, Refresh Token, Perfil de Usuario)
     path('api/auth/', include('apps.authentication.urls')),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     # 3. Endpoints del Módulo de Clientes
     path('api/clientes/', include('apps.clientes.urls')),
+
+    # 3.1 Endpoints del Módulo de Empresas
+    path('api/empresas/', include('apps.empresas.urls')),
 
     # 4. Endpoints del Módulo de Vehículos
     path('api/vehiculos/', include('apps.vehiculos.urls')),

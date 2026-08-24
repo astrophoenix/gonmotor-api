@@ -56,14 +56,6 @@ class OrdenTrabajo(BaseModel):
         related_name='orden_trabajo',
         help_text='Cotización previa de la cual se derivó esta orden (si aplica)'
     )
-    cotizacion_origen = models.ForeignKey(
-        'cotizaciones.Cotizacion',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='ordenes_derivadas',
-        help_text="Cotización que dio origen o autorizó los trabajos de esta OT"
-    )
 
     numero_orden = models.CharField(max_length=20, unique=True, verbose_name='Número de OT')
     estado = models.CharField(max_length=20, choices=EstadoOrden.choices, default=EstadoOrden.INGRESADO)

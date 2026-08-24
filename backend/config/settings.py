@@ -41,7 +41,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # Librerías de terceros
+    'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
 
     'apps.core',
     'apps.authentication',
@@ -53,6 +55,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -127,7 +130,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es-ec'
 
 TIME_ZONE = 'UTC'
 
@@ -158,17 +161,6 @@ LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
 
 
-# Configuración global de Django REST Framework
-REST_FRAMEWORK = {
-    # Permisos por defecto (Permite acceso completo en desarrollo)
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
-    ],
-    # Paginación básica para las respuestas JSON
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,
-}
-
 from datetime import timedelta
 
 # Configuración de Django REST Framework
@@ -185,8 +177,8 @@ REST_FRAMEWORK = {
 
 # Configuración de JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),     # Duración del token de acceso (jornada laboral)
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),     # Duración del token de refresco
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),   # Duración del token de acceso (30 min)
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),     # Duración del token de refresco (14 días)
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -195,6 +187,35 @@ SIMPLE_JWT = {
 AUTHENTICATION_BACKENDS = [
     'apps.authentication.backends.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',
+]
+
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:1313',
+    'http://127.0.0.1:1313',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:1313',
+    'http://127.0.0.1:1313',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
+# Permitir la cabecera personalizada del Tenant en el Preflight CORS
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-empresa-id',  # 👈 AGREGAR ESTA LÍNEA
 ]
 
 # Tiempo de vida del token de recuperación en segundos (300 segundos = 5 minutos)

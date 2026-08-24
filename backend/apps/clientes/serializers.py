@@ -1,10 +1,52 @@
 from rest_framework import serializers
+from django.db import transaction
+import json
 from .models import Cliente
-from apps.vehiculos.serializers import VehiculoSerializer
+from apps.vehiculos.models import Vehiculo, VehiculoPropietario
+from apps.vehiculos.serializers import VehiculoSerializer, VehiculoNestedSerializer
+from apps.authentication.models import UsuarioEmpresa
+from apps.authentication.utils import get_empresa_id_desde_request
+from apps.cotizaciones.models import Cotizacion
+from apps.ordenes.models import OrdenTrabajo
+
+
+class VehiculoResumenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vehiculo
+        fields = ['id', 'placa', 'marca', 'modelo', 'color', 'imagen']
+
+
+class ClienteListSerializer(serializers.ModelSerializer):
+    vehiculos_count = serializers.IntegerField(read_only=True)
+    vehiculos = serializers.SerializerMethodField()
+
+    def get_vehiculos(self, obj):
+        relaciones = getattr(
+            obj,
+            'propietarios_actuales',
+            obj.vehiculos_asociados.filter(es_actual=True).select_related('vehiculo')
+        )
+        vehiculos = [relacion.vehiculo for relacion in relaciones]
+        return VehiculoResumenSerializer(vehiculos, many=True, context=self.context).data
+
+    class Meta:
+        model = Cliente
+        fields = [
+            'id',
+            'tipo_identificacion',
+            'identificacion',
+            'nombre',
+            'email',
+            'telefono',
+            'is_active',
+            'vehiculos_count',
+            'vehiculos',
+            'created_at',
+        ]
+
 
 class ClienteSerializer(serializers.ModelSerializer):
-    # 🚗 Trae la lista de vehículos del cliente usando el `related_name='vehiculos'` de la relación
-    vehiculos = VehiculoSerializer(many=True, read_only=True)
+    vehiculos = serializers.JSONField(required=False, write_only=True)
 
     class Meta:
         model = Cliente
@@ -22,14 +64,163 @@ class ClienteSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        # 💡 'empresa' debe ser de solo lectura para que el cliente HTTP no pueda falsearlo
         read_only_fields = ['id', 'empresa', 'created_at', 'updated_at']
 
-    def create(self, validated_data):
-        """
-        Asigna automáticamente la empresa del usuario en sesión al crear el cliente.
-        """
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        relaciones = getattr(
+            instance,
+            'propietarios_actuales',
+            instance.vehiculos_asociados.filter(es_actual=True).select_related('vehiculo')
+        )
+        vehiculos = [relacion.vehiculo for relacion in relaciones]
+        data['vehiculos'] = VehiculoNestedSerializer(vehiculos, many=True, context=self.context).data
+        return data
+
+    def _procesar_vehiculos(self, cliente, vehiculos_data):
         request = self.context.get('request')
-        if request and hasattr(request.user, 'profile'):
-            validated_data['empresa'] = request.user.profile.empresa
-        return super().create(validated_data)
+        empresa_id = get_empresa_id_desde_request(request)
+        vehiculos_actuales_ids = set()
+
+        print(f"[DEBUG] _procesar_vehiculos para cliente {cliente.id}: {len(vehiculos_data)} vehículos")
+        print(f"[DEBUG] request.FILES keys: {list(request.FILES.keys())}")
+
+        for index, vehiculo_data in enumerate(vehiculos_data):
+            imagen = request.FILES.get(f'vehiculo_{index}_imagen')
+            print(f"[DEBUG] Vehículo {index}: id={vehiculo_data.get('id')}, placa={vehiculo_data.get('placa')}, imagen={imagen}")
+            if imagen:
+                vehiculo_data['imagen'] = imagen
+
+            vehiculo_id = vehiculo_data.get('id')
+            placa = (vehiculo_data.get('placa') or '').strip().upper()
+
+            vehiculo = None
+            if vehiculo_id:
+                try:
+                    vehiculo = Vehiculo.objects.get(id=vehiculo_id)
+                except Vehiculo.DoesNotExist:
+                    pass
+
+            if not vehiculo and placa:
+                vehiculo = Vehiculo.objects.filter(placa=placa).first()
+
+            if vehiculo:
+                serializer = VehiculoNestedSerializer(
+                    vehiculo,
+                    data=vehiculo_data,
+                    partial=True,
+                    context=self.context
+                )
+                serializer.is_valid(raise_exception=True)
+                vehiculo = serializer.save()
+            else:
+                serializer = VehiculoNestedSerializer(data=vehiculo_data, context=self.context)
+                serializer.is_valid(raise_exception=True)
+                vehiculo = serializer.save()
+
+            if empresa_id:
+                vehiculo.empresas.add(empresa_id)
+
+            VehiculoPropietario.objects.update_or_create(
+                vehiculo=vehiculo,
+                cliente=cliente,
+                defaults={'es_actual': True}
+            )
+            vehiculos_actuales_ids.add(vehiculo.id)
+
+        relaciones_actuales = VehiculoPropietario.objects.filter(
+            cliente=cliente,
+            es_actual=True
+        )
+        
+        if not vehiculos_actuales_ids:
+            print(f"[DEBUG] No hay vehículos en el formulario, desactivando todas las relaciones")
+            vehiculos_desactivados_ids = list(relaciones_actuales.values_list('vehiculo_id', flat=True))
+            relaciones_actuales.update(es_actual=False)
+        else:
+            vehiculos_desactivados = relaciones_actuales.exclude(vehiculo_id__in=vehiculos_actuales_ids)
+            vehiculos_desactivados_ids = list(vehiculos_desactivados.values_list('vehiculo_id', flat=True))
+            print(f"[DEBUG] Vehículos desactivados: {vehiculos_desactivados_ids}")
+            vehiculos_desactivados.update(es_actual=False)
+        
+        for vehiculo_id in vehiculos_desactivados_ids:
+            try:
+                vehiculo = Vehiculo.objects.get(id=vehiculo_id)
+            except Vehiculo.DoesNotExist:
+                print(f"[DEBUG] Vehículo {vehiculo_id} no existe")
+                continue
+            
+            otras_asociaciones = VehiculoPropietario.objects.filter(
+                vehiculo=vehiculo
+            ).exclude(cliente=cliente).exists()
+            print(f"[DEBUG] Vehículo {vehiculo_id}: otras_asociaciones={otras_asociaciones}")
+            
+            if not otras_asociaciones:
+                tiene_cotizaciones = Cotizacion.objects.filter(vehiculo=vehiculo).exists()
+                tiene_ordenes = OrdenTrabajo.objects.filter(vehiculo=vehiculo).exists()
+                print(f"[DEBUG] Vehículo {vehiculo_id}: cotizaciones={tiene_cotizaciones}, ordenes={tiene_ordenes}")
+                
+                if not tiene_cotizaciones and not tiene_ordenes:
+                    print(f"[DEBUG] Eliminando vehículo {vehiculo_id}")
+                    vehiculo.delete()
+                else:
+                    print(f"[DEBUG] NO eliminando vehículo {vehiculo_id} por cotizaciones/ordenes")
+
+    def _parsear_vehiculos_data(self, validated_data, request):
+        vehiculos_data = validated_data.pop('vehiculos', [])
+        print(f"[DEBUG] _parsear_vehiculos_data: tipo={type(vehiculos_data)}, valor={vehiculos_data!r}")
+        if isinstance(vehiculos_data, str):
+            try:
+                vehiculos_data = json.loads(vehiculos_data)
+                print(f"[DEBUG] Parseado JSON: {vehiculos_data}")
+            except json.JSONDecodeError as e:
+                print(f"[DEBUG] Error parseando JSON: {e}")
+                vehiculos_data = []
+        if not isinstance(vehiculos_data, list):
+            vehiculos_data = []
+        print(f"[DEBUG] vehiculos_data final: {len(vehiculos_data)} items")
+        return vehiculos_data
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        vehiculos_data = self._parsear_vehiculos_data(validated_data, request)
+
+        if request and request.user.is_authenticated:
+            empresa_id = None
+
+            if hasattr(request, 'auth') and isinstance(request.auth, dict):
+                empresa_id = request.auth.get('empresa_id')
+
+            if not empresa_id:
+                relacion = UsuarioEmpresa.objects.filter(
+                    user=request.user,
+                    is_active=True
+                ).first()
+                if relacion:
+                    empresa_id = relacion.empresa_id
+
+            if empresa_id:
+                validated_data['empresa_id'] = empresa_id
+            else:
+                raise serializers.ValidationError({
+                    "empresa": "No se pudo determinar la empresa activa del usuario en sesión."
+                })
+
+        with transaction.atomic():
+            cliente = super().create(validated_data)
+            self._procesar_vehiculos(cliente, vehiculos_data)
+
+        return cliente
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        vehiculos_data = self._parsear_vehiculos_data(validated_data, request)
+        print(f"[DEBUG] update() cliente {instance.id}: vehiculos_data={vehiculos_data}")
+
+        with transaction.atomic():
+            instance = super().update(instance, validated_data)
+            if vehiculos_data is not None:
+                print(f"[DEBUG] Llamando _procesar_vehiculos para cliente {instance.id}")
+                self._procesar_vehiculos(instance, vehiculos_data)
+
+        return instance

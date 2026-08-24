@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .serializers import CustomTokenObtainPairSerializer
+from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -12,8 +12,16 @@ from django.core.mail import send_mail
 from django.conf import settings
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
-from .serializers import UserAdminSerializer
+from .serializers import UserAdminSerializer, UserProfileUpdateSerializer, ChangePasswordSerializer
+from .utils import get_empresa_id_desde_request
+from .models import UserProfile
 
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from rest_framework.permissions import AllowAny
+from .models import UsuarioEmpresa
+
+User = get_user_model()
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Endpoint de Login.
@@ -22,23 +30,158 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
 
+class SelectCompanyView(APIView):
+    """
+    Endpoint invocado desde el frontend tras el login si el usuario 
+    tiene acceso a múltiples empresas (RUCs distintos).
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        empresa_id = request.data.get('empresa_id')
+
+        if not user_id or not empresa_id:
+            return Response(
+                {"detail": "Se requieren 'user_id' y 'empresa_id'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Se busca la asignación activa del usuario a la empresa elegida
+            relacion = UsuarioEmpresa.objects.select_related('empresa', 'user').get(
+                user_id=user_id,
+                empresa_id=empresa_id,
+                is_active=True,
+                empresa__is_active=True
+            )
+        except UsuarioEmpresa.DoesNotExist:
+            return Response(
+                {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user = relacion.user
+        empresa = relacion.empresa
+
+        # Generar tokens inyectando la empresa y rol seleccionados
+        refresh = RefreshToken.for_user(user)
+        refresh['empresa_id'] = empresa.id
+        refresh['rol'] = relacion.rol
+
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "rol": relacion.rol,
+                "empresa_id": empresa.id,
+                "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', ''))
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class RegistrationView(APIView):
+    """Crea una cuenta de usuario sin requerir autenticación previa."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        return Response(
+            {
+                'detail': 'La cuenta fue creada correctamente.',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'username': user.username,
+                }
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
 class UserProfileView(APIView):
     """
-    Endpoint para obtener los datos del usuario logueado actualmente.
+    Endpoint para obtener y actualizar los datos del usuario logueado actualmente.
     Requiere header: Authorization: Bearer <access_token>
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         user = request.user
+        empresa_id = get_empresa_id_desde_request(request)
+        profile = getattr(user, 'profile', None)
+        telefono = getattr(profile, 'telefono', '') if profile else ''
+
         return Response({
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'first_name': user.first_name,
             'last_name': user.last_name,
+            'telefono': telefono,
             'is_staff': user.is_staff,
+            'empresa_id': empresa_id,
         }, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        user = request.user
+        serializer = UserProfileUpdateSerializer(
+            instance=user,
+            data=request.data,
+            partial=True,
+            context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        profile = getattr(user, 'profile', None)
+        telefono = getattr(profile, 'telefono', '') if profile else ''
+
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'telefono': telefono,
+            'is_staff': user.is_staff,
+        }
+
+        return Response({
+            'user': user_data,
+            'detail': 'Perfil actualizado correctamente.'
+        }, status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    """
+    Permite al usuario autenticado cambiar su propia contraseña.
+    Requiere la contraseña actual y la nueva.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {"detail": "Contraseña actualizada correctamente."},
+            status=status.HTTP_200_OK
+        )
+
 
 class PasswordResetRequestView(APIView):
     """
@@ -113,4 +256,3 @@ class UserManagementViewSet(viewsets.ModelViewSet):
             # Retorna únicamente los usuarios que pertenecen a la misma Empresa
             return User.objects.filter(profile__empresa=user.profile.empresa)
         return User.objects.none()
-
