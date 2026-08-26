@@ -10,12 +10,14 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
+import django_countries
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 # Quick-start development settings - unsuitable for production
@@ -27,7 +29,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', cast=bool, default=False)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='', cast=lambda v: [s.strip() for s in v.split(',') if s.strip()])
 
 
 # Application definition
@@ -52,6 +54,10 @@ INSTALLED_APPS = [
     'apps.vehiculos',
     'apps.cotizaciones',
     'apps.ordenes',
+]
+
+LOCALE_PATHS = [
+    os.path.join(os.path.dirname(django_countries.__file__), 'locale'),
 ]
 
 MIDDLEWARE = [
@@ -120,7 +126,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
-    # 🔒 Validador personalizado de Mayúscula y Carácter Especial Limitado
     {
         'NAME': 'apps.authentication.validators.ComplexPasswordValidator',
     },
@@ -148,6 +153,9 @@ STATICFILES_DIRS = [
     BASE_DIR / 'static',
 ]
 
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
@@ -169,7 +177,7 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',  # Protege todos los endpoints por defecto
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
@@ -177,8 +185,8 @@ REST_FRAMEWORK = {
 
 # Configuración de JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),   # Duración del token de acceso (30 min)
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),     # Duración del token de refresco (14 días)
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -215,15 +223,12 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
-    'x-empresa-id',  # 👈 AGREGAR ESTA LÍNEA
+    'x-empresa-id',
 ]
 
 # Tiempo de vida del token de recuperación en segundos (300 segundos = 5 minutos)
 PASSWORD_RESET_TIMEOUT = 300  # 5 minutos
 
 
-# Durante desarrollo, imprime los emails en la consola de la terminal
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
 # URL base del frontend para construir el enlace del email
-FRONTEND_URL = 'http://localhost:5173'  # O la URL de tu app en Vue
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')

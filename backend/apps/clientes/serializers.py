@@ -24,9 +24,12 @@ class ClienteListSerializer(serializers.ModelSerializer):
         relaciones = getattr(
             obj,
             'propietarios_actuales',
-            obj.vehiculos_asociados.filter(es_actual=True).select_related('vehiculo')
+            obj.vehiculos_asociados.filter(es_actual=True)
+            .select_related('vehiculo')
+            .order_by('vehiculo__id')
         )
         vehiculos = [relacion.vehiculo for relacion in relaciones]
+        vehiculos.sort(key=lambda v: v.id)
         return VehiculoResumenSerializer(vehiculos, many=True, context=self.context).data
 
     class Meta:
@@ -91,6 +94,8 @@ class ClienteSerializer(serializers.ModelSerializer):
             if imagen:
                 vehiculo_data['imagen'] = imagen
 
+            eliminar_imagen = vehiculo_data.pop('eliminar_imagen', False)
+
             vehiculo_id = vehiculo_data.get('id')
             placa = (vehiculo_data.get('placa') or '').strip().upper()
 
@@ -105,6 +110,10 @@ class ClienteSerializer(serializers.ModelSerializer):
                 vehiculo = Vehiculo.objects.filter(placa=placa).first()
 
             if vehiculo:
+                if eliminar_imagen and not imagen and vehiculo.imagen:
+                    vehiculo.imagen.delete(save=False)
+                    vehiculo.imagen = None
+                    vehiculo.save()
                 serializer = VehiculoNestedSerializer(
                     vehiculo,
                     data=vehiculo_data,

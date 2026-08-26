@@ -8,6 +8,8 @@ source venv/bin/activate
 cd /Users/astrophoenix/Desktop/gonmotor/gonmotor-api/backend
 ./venv/bin/python manage.py runserver 0.0.0.0:8000
 
+cd Desktop/gonmotor/gonmotor-api/backend/venv/bin/python manage.py runserver
+
 # 3. Levantar el servidor de desarrollo de Django
 python manage.py runserver
 

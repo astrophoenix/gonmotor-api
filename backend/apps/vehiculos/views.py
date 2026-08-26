@@ -7,6 +7,7 @@ from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils import translation
 
 
 class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
@@ -72,10 +73,11 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             {'value': choice[0], 'label': choice[1]}
             for choice in Vehiculo.TipoVehiculo.choices
         ]
-        paises = [
-            {'code': country[0], 'name': country[1]}
-            for country in countries
-        ]
+        with translation.override('es'):
+            paises = [
+                {'code': country[0], 'name': str(country[1])}
+                for country in countries
+            ]
         return Response({
             'tipo': tipo_choices,
             'paises': paises,

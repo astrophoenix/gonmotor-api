@@ -1,0 +1,34 @@
+# Django / Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+db.sqlite3
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+.env
+
+# Archivos subidos por usuarios
+media/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Django migrations generadas automáticamente (si aplica)
+*/migrations/*.py
+!*/migrations/__init__.py

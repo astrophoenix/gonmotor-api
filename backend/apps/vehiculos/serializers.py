@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Vehiculo
+from apps.core.utils.images import validate_image_extension
 
 
 class VehiculoNestedSerializer(serializers.ModelSerializer):
@@ -27,6 +28,21 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
             'empresas',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_imagen(self, value):
+        if not value:
+            return value
+
+        validate_image_extension(value)
+
+        if value.size > 2 * 1024 * 1024:
+            raise serializers.ValidationError(
+                'La imagen no debe superar los 2MB.'
+            )
+
+        # Optimización desactivada para preservar la imagen original.
+        # return optimize_image(value)
+        return value
 
     def create(self, validated_data):
         empresas = validated_data.pop('empresas', [])
@@ -65,6 +81,21 @@ class VehiculoSerializer(serializers.ModelSerializer):
     def get_cliente_id(self, obj):
         propietario = self._propietario_actual(obj)
         return propietario.cliente_id if propietario else None
+
+    def validate_imagen(self, value):
+        if not value:
+            return value
+
+        validate_image_extension(value)
+
+        if value.size > 2 * 1024 * 1024:
+            raise serializers.ValidationError(
+                'La imagen no debe superar los 2MB.'
+            )
+
+        # Optimización desactivada para preservar la imagen original.
+        # return optimize_image(value)
+        return value
 
     class Meta:
         model = Vehiculo

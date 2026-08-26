@@ -1,7 +1,8 @@
 from django.db import models
 from apps.core.models import BaseModel
 from django_countries.fields import CountryField
-
+from django.core.validators import MinValueValidator, MaxValueValidator
+import datetime
 
 class Vehiculo(BaseModel):
 
@@ -17,6 +18,7 @@ class Vehiculo(BaseModel):
         DIESEL = 'DIE', 'Diésel'
         HIBRIDO = 'HIB', 'Híbrido'
         ELECTRICO = 'ELE', 'Eléctrico'
+        GNV = 'GNV', 'Gas Natural Vehicular (GNV)' # Opción futura fácil de integrar
 
     class TipoVehiculo(models.TextChoices):
         # Particular y Pasajeros
@@ -55,7 +57,7 @@ class Vehiculo(BaseModel):
     )
     vin = models.CharField(
         verbose_name="Número de Chasis / VIN",
-        max_length=17,
+        max_length=30,
         blank=True,
         default=""
     )
@@ -76,7 +78,11 @@ class Vehiculo(BaseModel):
     anio = models.PositiveIntegerField(
         verbose_name="Año de Fabricación",
         blank=True,
-        null=True
+        null=True,
+        validators=[
+            MinValueValidator(1900),
+            MaxValueValidator(datetime.date.today().year + 1)
+        ]
     )
     color = models.CharField(
         verbose_name="Color",
@@ -90,7 +96,7 @@ class Vehiculo(BaseModel):
         default=TipoTransmision.MANUAL
     )
     combustible = models.CharField(
-        max_length=3,
+        max_length=10,
         choices=TipoCombustible.choices,
         default=TipoCombustible.GASOLINA
     )
@@ -104,7 +110,7 @@ class Vehiculo(BaseModel):
         default=""
     )
     tipo = models.CharField(
-        max_length=4,
+        max_length=10,
         choices=TipoVehiculo.choices,
         default=TipoVehiculo.AUTOMOVIL,
     )
@@ -117,7 +123,7 @@ class Vehiculo(BaseModel):
         upload_to='vehiculos/%Y/%m/%d',
         blank=True,
         null=True,
-        help_text="JPG, PNG o WebP. Máximo 2MB."
+        help_text="JPG, PNG o WebP. Máximo 2MB. Se optimiza automáticamente."
     )
     empresas = models.ManyToManyField(
         'empresas.Empresa',
