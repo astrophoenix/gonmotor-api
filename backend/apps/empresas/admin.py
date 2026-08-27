@@ -19,12 +19,13 @@ class EmpresaAdmin(admin.ModelAdmin):
         'ruc',
         'email_contacto',
         'telefono',
+        'logo_thumb',
         'is_active',
         'created_at'
     )
     list_filter = ('is_active', 'created_at')
     search_fields = ('nombre_comercial', 'razon_social', 'ruc', 'email_contacto')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'logo_preview')
     inlines = [TallerInline]
     
     fieldsets = (
@@ -34,10 +35,25 @@ class EmpresaAdmin(admin.ModelAdmin):
         ('Contacto', {
             'fields': ('email_contacto', 'telefono')
         }),
+        ('Logo', {
+            'fields': ('logo', 'logo_preview')
+        }),
         ('Estado', {
             'fields': ('is_active', 'created_at', 'updated_at')
         }),
     )
+
+    @admin.display(description='Logo')
+    def logo_thumb(self, obj):
+        if obj.logo:
+            return f'<img src="{obj.logo.url}" style="height:40px;width:auto;" />'
+        return '—'
+
+    @admin.display(description='Vista previa')
+    def logo_preview(self, obj):
+        if obj.logo:
+            return f'<img src="{obj.logo.url}" style="max-height:200px;width:auto;" />'
+        return 'Sin logo cargado.'
 
 
 @admin.register(Taller)

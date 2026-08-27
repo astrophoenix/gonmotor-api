@@ -1,13 +1,18 @@
 from rest_framework import viewsets, permissions, filters, status
 from django.db.models import Count, Q, Prefetch
 from django_countries import countries
+from django.utils import timezone
+from rest_framework.renderers import JSONRenderer
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.empresas.models import Empresa, Taller
+from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoPropietario
 from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.utils import translation
 
 
 class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
@@ -100,3 +105,70 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
                 vehiculo.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class VehiculoPdfExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403
+            )
+
+        try:
+            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa')
+
+            def subtitle_builder(qs):
+                if not qs.exists():
+                    return None
+                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+
+            def row_builder(vehiculo, cell_style):
+                return [
+                    Paragraph(vehiculo.placa or '', cell_style),
+                    Paragraph(vehiculo.marca or '', cell_style),
+                    Paragraph(vehiculo.modelo or '', cell_style),
+                    Paragraph(vehiculo.color or '', cell_style),
+                ]
+
+            empresa = None
+            taller = None
+            if queryset.exists():
+                primera_empresa = queryset.first().empresas.first()
+                if primera_empresa:
+                    empresa = primera_empresa
+                    taller = primera_empresa.talleres.first()
+
+            usuario_nombre = ''
+            if request.user and request.user.is_authenticated:
+                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+
+            config = PdfExportConfig(
+                title='Listado de Vehículos',
+                filename='listado_vehiculos.pdf',
+                headers=[
+                    ('Placa', 1.6),
+                    ('Marca', 1.8),
+                    ('Modelo', 1.8),
+                    ('Color', 1.8),
+                ],
+                empresa=empresa,
+                taller=taller,
+                usuario=usuario_nombre,
+                subtitle_builder=subtitle_builder,
+                row_builder=row_builder,
+            )
+
+            service = PdfExportService(config, queryset)
+            return service.generate_response()
+
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500
+            )
