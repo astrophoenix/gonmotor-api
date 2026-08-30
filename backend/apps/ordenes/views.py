@@ -8,8 +8,8 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
-from .models import OrdenTrabajo, RecepcionVehiculo
-from .serializers import OrdenTrabajoSerializer, RecepcionVehiculoSerializer
+from .models import InspeccionVehiculo, OrdenTrabajo, RecepcionVehiculo
+from .serializers import InspeccionVehiculoSerializer, OrdenTrabajoSerializer, RecepcionVehiculoSerializer
 
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -40,6 +40,21 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         if not empresa_id:
             return RecepcionVehiculo.objects.none()
         return RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
+
+
+class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
+    serializer_class = InspeccionVehiculoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['recepcion__vehiculo__placa', 'recepcion__cliente__nombre']
+    ordering_fields = ['created_at', 'id']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return InspeccionVehiculo.objects.none()
+        return InspeccionVehiculo.objects.filter(empresa_id=empresa_id)
 
 
 class RecepcionPdfExportView(APIView):

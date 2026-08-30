@@ -176,6 +176,20 @@ class RecepcionVehiculo(BaseModel):
         help_text='Orden de trabajo asociada (si ya fue generada)',
     )
 
+    # --- TIPO Y MOTIVO DE INGRESO ---
+    tipo_recepcion = models.CharField(
+        max_length=20,
+        choices=OrdenTrabajo.TipoTrabajo.choices,
+        default=OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,
+        verbose_name='Tipo de Recepción',
+    )
+    motivo_ingreso = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Motivo de Ingreso',
+        help_text='Razón por la cual el cliente trae el vehículo',
+    )
+
     # --- FECHAS Y DATOS OPERATIVOS ---
     fecha_ingreso = models.DateTimeField(
         default=timezone.now, verbose_name='Fecha de Ingreso al Taller'
@@ -210,73 +224,39 @@ class RecepcionVehiculo(BaseModel):
         verbose_name='Datos de la grúa / Chófer',
     )
 
+    # --- TESTIGOS DEL TABLERO AL INGRESO ---
+    testigo_check_engine = models.BooleanField(default=False, verbose_name='Check Engine')
+    testigo_abs = models.BooleanField(default=False, verbose_name='ABS')
+    testigo_airbag = models.BooleanField(default=False, verbose_name='Airbag')
+    testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
+    testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
+    otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
+
     # --- INVENTARIO / CHECKLIST (Columna 1 Hoja Física) ---
-    tiene_espejo_izquierdo = models.BooleanField(
-        default=True, verbose_name='Espejo Izquierdo'
-    )
-    tiene_espejo_derecho = models.BooleanField(
-        default=True, verbose_name='Espejo Derecho'
-    )
-    tiene_vidrios = models.BooleanField(
-        default=True, verbose_name='Vidrios / Cristales'
-    )
-    tiene_radio = models.BooleanField(
-        default=True, verbose_name='Radio / Mascarilla'
-    )
-    tiene_pantalla = models.BooleanField(
-        default=False, verbose_name='Pantalla / Multimedia'
-    )
-    tiene_encendedor = models.BooleanField(
-        default=False, verbose_name='Encendedor'
-    )
+    tiene_espejo_izquierdo = models.BooleanField(default=True, verbose_name='Espejo Izquierdo')
+    tiene_espejo_derecho = models.BooleanField(default=True, verbose_name='Espejo Derecho')
+    tiene_vidrios = models.BooleanField(default=True, verbose_name='Vidrios / Cristales')
+    tiene_radio = models.BooleanField(default=True, verbose_name='Radio / Mascarilla')
+    tiene_pantalla = models.BooleanField(default=False, verbose_name='Pantalla / Multimedia')
+    tiene_encendedor = models.BooleanField(default=False, verbose_name='Encendedor')
     tiene_antena = models.BooleanField(default=True, verbose_name='Antena')
-    tiene_control_puertas = models.BooleanField(
-        default=False, verbose_name='Control de Puertas'
-    )
-    tiene_cargador_celular = models.BooleanField(
-        default=False, verbose_name='Cargador de Celular'
-    )
-    tiene_triangulos = models.BooleanField(
-        default=False, verbose_name='Triángulos de Seguridad'
-    )
+    tiene_control_puertas = models.BooleanField(default=False, verbose_name='Control de Puertas')
+    tiene_cargador_celular = models.BooleanField(default=False, verbose_name='Cargador de Celular')
+    tiene_triangulos = models.BooleanField(default=False, verbose_name='Triángulos de Seguridad')
 
     # --- INVENTARIO / CHECKLIST (Columna 2 Hoja Física) ---
-    tiene_cubresol = models.BooleanField(
-        default=False, verbose_name='Cubresol'
-    )
-    tiene_herramientas = models.BooleanField(
-        default=False, verbose_name='Juego de Herramientas'
-    )
-    tiene_gata_palanca = models.BooleanField(
-        default=True, verbose_name='Gato y Palanca'
-    )
-    tiene_llanta_repuesto = models.BooleanField(
-        default=True, verbose_name='Llanta de Refacción / Repuesto'
-    )
-    tiene_faros_lunas = models.BooleanField(
-        default=True, verbose_name='Faros / Lunas'
-    )
-    tiene_tapa_gasolina = models.BooleanField(
-        default=True, verbose_name='Tapa de Gasolina'
-    )
-    tiene_placas = models.BooleanField(
-        default=True, verbose_name='Placas de Circulación'
-    )
-    tiene_tapetes = models.BooleanField(
-        default=True, verbose_name='Tapetes / Alfombras'
-    )
-    tiene_extintor = models.BooleanField(
-        default=False, verbose_name='Extintor'
-    )
-    tiene_botiquin = models.BooleanField(
-        default=False, verbose_name='Botiquín'
-    )
-    tiene_copas_ruedas = models.BooleanField(
-        default=True, verbose_name='Copas / Tapacubos'
-    )
-    tiene_llave_tuercas = models.BooleanField(
-        default=False, verbose_name='Llave de Tuercas / Llave de Cruz'
-    )
+    tiene_cubresol = models.BooleanField(default=False, verbose_name='Cubresol')
+    tiene_herramientas = models.BooleanField(default=False, verbose_name='Juego de Herramientas')
+    tiene_gata_palanca = models.BooleanField(default=True, verbose_name='Gato y Palanca')
+    tiene_llanta_repuesto = models.BooleanField(default=True, verbose_name='Llanta de Refacción / Repuesto')
+    tiene_faros_lunas = models.BooleanField(default=True, verbose_name='Faros / Lunas')
+    tiene_tapa_gasolina = models.BooleanField(default=True, verbose_name='Tapa de Gasolina')
+    tiene_placas = models.BooleanField(default=True, verbose_name='Placas de Circulación')
+    tiene_tapetes = models.BooleanField(default=True, verbose_name='Tapetes / Alfombras')
+    tiene_extintor = models.BooleanField(default=False, verbose_name='Extintor')
+    tiene_botiquin = models.BooleanField(default=False, verbose_name='Botiquín')
+    tiene_copas_ruedas = models.BooleanField(default=True, verbose_name='Copas / Tapacubos')
+    tiene_llave_tuercas = models.BooleanField(default=False, verbose_name='Llave de Tuercas / Llave de Cruz')
 
     # --- ESTADO FÍSICO Y OBSERVACIONES ---
     # Guarda puntos x,y/daños marcados en la silueta interactiva del frontend
@@ -306,6 +286,19 @@ class InspeccionVehiculo(BaseModel):
     """Registro técnico del diagnóstico y estado mecánico del vehículo.
     Puede existir independientemente de una Orden de Trabajo."""
 
+    # Opciones de selección
+    TIPO_CHOICES = [
+        ('PREVENTIVO', 'Mantenimiento Preventivo'),
+        ('CORRECTIVO', 'Diagnóstico / Correctivo'),
+        ('GARANTIA', 'Revisión por Garantía'),
+    ]
+    
+    ESTADO_CHOICES = [
+        ('PENDIENTE', 'Pendiente de Revisión'),
+        ('EN_PROCESO', 'Diagnóstico en Proceso'),
+        ('FINALIZADA', 'Inspección Finalizada'),
+    ]
+
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='inspecciones', null=True, blank=True)
     orden_trabajo = models.OneToOneField(
         'ordenes.OrdenTrabajo',
@@ -324,16 +317,25 @@ class InspeccionVehiculo(BaseModel):
         help_text='Recepción del vehículo de la cual se derivó esta inspección'
     )
 
-    falla_reportada = models.TextField(verbose_name='Síntomas o Falla Reportada por el Cliente')
-    diagnostico_tecnico = models.TextField(blank=True, null=True, verbose_name='Diagnóstico Realizado por el Mecánico')
+    # Clasificación y Estado
+    tipo_inspeccion = models.CharField(max_length=20, choices=TIPO_CHOICES, default='CORRECTIVO')
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
 
+    # Contexto del Cliente (Adaptado para incluir mantenimientos sin fallas)
+    motivo_ingreso = models.TextField(verbose_name='Motivo de Ingreso o Falla Reportada', help_text='Ej: Ruido en el motor, o Mantenimiento 10k')
+    
+    # Diagnóstico Técnico
+    codigos_dtc = models.CharField(max_length=255, blank=True, null=True, verbose_name='Códigos de Falla (DTC OBD2)')
+    diagnostico_tecnico = models.TextField(blank=True, null=True, verbose_name='Hallazgos y Diagnóstico del Mecánico')
+    recomendaciones = models.TextField(blank=True, null=True, verbose_name='Recomendaciones y Plan de Acción')
+
+    # Testigos del Tablero
     testigo_check_engine = models.BooleanField(default=False, verbose_name='Check Engine')
     testigo_abs = models.BooleanField(default=False, verbose_name='ABS')
     testigo_airbag = models.BooleanField(default=False, verbose_name='Airbag')
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
-
     class Meta:
         verbose_name = 'Inspección de Vehículo'
         verbose_name_plural = 'Inspecciones de Vehículos'
