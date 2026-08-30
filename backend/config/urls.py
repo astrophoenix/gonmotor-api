@@ -45,6 +45,9 @@ urlpatterns = [
 
     # 6. Endpoints del Módulo de Órdenes de Trabajo
     path('api/ordenes/', include('apps.ordenes.urls')),
+
+    # 6.1 Endpoints del Módulo de Recepciones
+    path('api/recepciones/', include('apps.ordenes.recepciones_urls')),
 ]
 
 # Servir archivos multimedia (fotos, documentos) durante el desarrollo

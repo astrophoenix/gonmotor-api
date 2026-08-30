@@ -251,8 +251,11 @@ class UserManagementViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        if hasattr(user, 'profile') and user.profile.empresa:
-            # Retorna únicamente los usuarios que pertenecen a la misma Empresa
-            return User.objects.filter(profile__empresa=user.profile.empresa)
-        return User.objects.none()
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return User.objects.none()
+        usuario_ids = UsuarioEmpresa.objects.filter(
+            empresa_id=empresa_id,
+            is_active=True
+        ).values_list('user_id', flat=True)
+        return User.objects.filter(id__in=usuario_ids)

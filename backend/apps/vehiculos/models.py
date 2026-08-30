@@ -4,6 +4,32 @@ from django_countries.fields import CountryField
 from django.core.validators import MinValueValidator, MaxValueValidator
 import datetime
 
+# Mapeo de categorías a grupos de blueprints
+GRUPO_BLUEPRINT_MAP = {
+    # Livianos
+    'AUTO': 'liviano',
+    'JEEP': 'liviano',
+    # Camionetas / Furgones
+    'CAMN': 'camioneta',
+    'FURG': 'camioneta',
+    # Motos y similares
+    'MOTO': 'motos',
+    'MTNA': 'motos',
+    'TRIC': 'motos',
+    'CUAT': 'motos',
+    # Buses
+    'BUS': 'bus',
+    'BUSE': 'bus',
+    'MICR': 'bus',
+    # Pesados
+    'CAMI': 'pesado',
+    'TRAC': 'pesado',
+    'VOLQ': 'pesado',
+    # Especiales
+    'REMO': 'especial',
+    'MAGR': 'especial',
+    'MCAM': 'especial',
+}
 class Vehiculo(BaseModel):
 
     #🚗 Opciones del tipo de transmisión con TextChoices
@@ -140,6 +166,11 @@ class Vehiculo(BaseModel):
     def __str__(self):
         return f"{self.placa} - {self.marca} {self.modelo}"
 
+    @property
+    def grupo_blueprint(self) -> str:
+        """Devuelve la clave del blueprint/diagrama SVG que le corresponde."""
+        return GRUPO_BLUEPRINT_MAP.get(self.tipo, 'liviano')
+    
     def save(self, *args, **kwargs):
         if self.placa:
             self.placa = self.placa.strip().upper()

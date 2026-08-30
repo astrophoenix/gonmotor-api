@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from .models import Vehiculo
 from apps.core.utils.images import validate_image_extension
+from apps.authentication.utils import get_empresa_id_desde_request
+from apps.empresas.models import Empresa
 
 
 class VehiculoNestedSerializer(serializers.ModelSerializer):
@@ -40,13 +42,22 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
                 'La imagen no debe superar los 2MB.'
             )
 
-        # Optimización desactivada para preservar la imagen original.
-        # return optimize_image(value)
         return value
 
     def create(self, validated_data):
         empresas = validated_data.pop('empresas', [])
         imagen = validated_data.pop('imagen', None)
+        request = self.context.get('request')
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            if empresa_id:
+                try:
+                    user_empresa = Empresa.objects.get(id=empresa_id)
+                    if user_empresa not in empresas:
+                        empresas.append(user_empresa)
+                except Empresa.DoesNotExist:
+                    pass
+
         instance = super().create(validated_data)
         if imagen:
             instance.imagen = imagen
@@ -93,8 +104,6 @@ class VehiculoSerializer(serializers.ModelSerializer):
                 'La imagen no debe superar los 2MB.'
             )
 
-        # Optimización desactivada para preservar la imagen original.
-        # return optimize_image(value)
         return value
 
     class Meta:
@@ -105,10 +114,15 @@ class VehiculoSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         empresas = validated_data.pop('empresas', [])
         request = self.context.get('request')
-        if request and hasattr(request.user, 'profile'):
-            user_empresa = request.user.profile.empresa
-            if user_empresa and user_empresa not in empresas:
-                empresas.append(user_empresa)
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            if empresa_id:
+                try:
+                    user_empresa = Empresa.objects.get(id=empresa_id)
+                    if user_empresa not in empresas:
+                        empresas.append(user_empresa)
+                except Empresa.DoesNotExist:
+                    pass
 
         instance = super().create(validated_data)
         if empresas:

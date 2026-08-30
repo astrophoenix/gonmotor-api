@@ -1,6 +1,8 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import BaseModel
 
@@ -28,6 +30,24 @@ class Cotizacion(BaseModel):
 
     observaciones = models.TextField(blank=True, null=True)
 
+    recepcion_origen = models.ForeignKey(
+        'ordenes.RecepcionVehiculo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cotizaciones_generadas',
+        help_text='Recepción del vehículo de la cual se derivó esta cotización'
+    )
+
+    inspeccion_origen = models.ForeignKey(
+        'ordenes.InspeccionVehiculo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cotizaciones_generadas',
+        help_text='Inspección técnica de la cual se derivó esta cotización'
+    )
+
     orden_trabajo_origen = models.ForeignKey(
         'ordenes.OrdenTrabajo',
         on_delete=models.SET_NULL,
@@ -36,13 +56,70 @@ class Cotizacion(BaseModel):
         related_name='cotizaciones_generadas',
         help_text="Orden de trabajo de la cual surgió este presupuesto tras un diagnóstico"
     )
-    
+
+    fecha_aceptacion = models.DateTimeField(null=True, blank=True, verbose_name='Fecha de aceptación')
+    aceptada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cotizaciones_aceptadas',
+        verbose_name='Aceptada por'
+    )
+    metodo_aceptacion = models.CharField(
+        max_length=20,
+        choices=[
+            ('PRESENCIAL', 'Presencial en taller'),
+            ('EMAIL', 'Correo electrónico'),
+            ('WHATSAPP', 'WhatsApp'),
+            ('TELEFONO', 'Teléfono'),
+        ],
+        null=True,
+        blank=True,
+        verbose_name='Método de aceptación'
+    )
+
     class Meta:
         verbose_name = 'Cotización'
         verbose_name_plural = 'Cotizaciones'
 
     def __str__(self):
         return f'{self.numero_cotizacion} - {self.cliente}'
+
+    def convertir_a_orden(self, usuario=None):
+        """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
+        if self.estado != self.EstadoCotizacion.ACEPTADA:
+            raise ValueError("La cotización debe estar aceptada para convertirla a orden.")
+
+        from apps.ordenes.models import OrdenTrabajo, RecepcionVehiculo, InspeccionVehiculo
+
+        inspeccion = self.inspeccion_origen
+        recepcion = self.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
+
+        ot = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            cotizacion_origen=self,
+            kilometraje_ingreso=recepcion.kilometraje_ingreso if recepcion else 0,
+            nivel_combustible=recepcion.nivel_combustible if recepcion else '1/4',
+            falla_reportada=inspeccion.falla_reportada if inspeccion else '',
+            diagnostico_tecnico=inspeccion.diagnostico_tecnico if inspeccion else None,
+        )
+
+        if recepcion:
+            recepcion.orden_trabajo = ot
+            recepcion.save()
+        if inspeccion:
+            inspeccion.orden_trabajo = ot
+            inspeccion.save()
+
+        self.estado = self.EstadoCotizacion.CONVERTIDA
+        self.fecha_aceptacion = timezone.now()
+        self.aceptada_por = usuario
+        self.save()
+
+        return ot
 
 
 class DetalleServicioCotizacion(models.Model):

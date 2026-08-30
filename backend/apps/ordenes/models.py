@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import BaseModel
 
@@ -62,21 +63,6 @@ class OrdenTrabajo(BaseModel):
     prioridad = models.CharField(max_length=10, choices=Prioridad.choices, default=Prioridad.MEDIA)
     tipo_trabajo = models.CharField(max_length=20, choices=TipoTrabajo.choices, default=TipoTrabajo.PREVENTIVO)
 
-    kilometraje_ingreso = models.PositiveIntegerField(verbose_name='Kilometraje de Ingreso')
-    nivel_combustible = models.CharField(
-        max_length=10,
-        choices=[
-            ('RESERVA', 'Reserva'),
-            ('1/4', '1/4'),
-            ('1/2', '1/2'),
-            ('3/4', '3/4'),
-            ('LLENO', 'Lleno'),
-        ],
-        default='1/4'
-    )
-
-    falla_reportada = models.TextField(verbose_name='Síntomas o Falla Reportada por el Cliente')
-    diagnostico_tecnico = models.TextField(blank=True, null=True, verbose_name='Diagnóstico Realizado por el Mecánico')
     observaciones_internas = models.TextField(blank=True, null=True, help_text='Notas no visibles para el cliente')
 
     fecha_ingreso = models.DateTimeField(auto_now_add=True)
@@ -157,27 +143,189 @@ class DetalleRepuestoOrdenTrabajo(models.Model):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'
 
 
-class RecepcionVehiculo(models.Model):
-    """Registro detallado del estado del vehículo al ingresar al taller."""
+class RecepcionVehiculo(BaseModel):
+    """Registro del estado físico y administrativo del vehículo al ingresar al taller.
 
-    orden_trabajo = models.OneToOneField(
-        'ordenes.OrdenTrabajo',
+    Puede existir independientemente de una Orden de Trabajo.
+    """
+
+    # --- RELACIONES ---
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
         on_delete=models.CASCADE,
-        related_name='recepcion',
-        primary_key=True
+        related_name='recepciones',
+        null=True,
+        blank=True,
+    )
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        on_delete=models.PROTECT,
+        related_name='recepciones',
+    )
+    vehiculo = models.ForeignKey(
+        'vehiculos.Vehiculo',
+        on_delete=models.PROTECT,
+        related_name='recepciones',
+    )
+    orden_trabajo = models.ForeignKey(
+        'ordenes.OrdenTrabajo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recepciones',
+        help_text='Orden de trabajo asociada (si ya fue generada)',
     )
 
-    ingreso_en_grua = models.BooleanField(default=False, verbose_name='¿Ingresó en grúa?')
-    datos_grua = models.CharField(max_length=150, blank=True, null=True, verbose_name='Datos de la grúa / Chófer')
+    # --- FECHAS Y DATOS OPERATIVOS ---
+    fecha_ingreso = models.DateTimeField(
+        default=timezone.now, verbose_name='Fecha de Ingreso al Taller'
+    )
+    fecha_salida = models.DateTimeField(
+        null=True, blank=True, verbose_name='Fecha de Salida del Taller'
+    )
 
-    tiene_radio = models.BooleanField(default=True, verbose_name='Radio / Mascarilla')
-    tiene_llanta_repuesto = models.BooleanField(default=True, verbose_name='Llanta de Repuesto')
-    tiene_gata_palanca = models.BooleanField(default=True, verbose_name='Gata y Palanca')
-    tiene_extintor = models.BooleanField(default=False, verbose_name='Extintor')
-    tiene_botiquin = models.BooleanField(default=False, verbose_name='Botiquín')
+    kilometraje_ingreso = models.PositiveIntegerField(
+        verbose_name='Kilometraje de Ingreso'
+    )
+    nivel_combustible = models.CharField(
+        max_length=10,
+        choices=[
+            ('VACIO', 'Vacíio'),
+            ('RESERVA', 'Reserva'),
+            ('1/4', '1/4'),
+            ('1/2', '1/2'),
+            ('3/4', '3/4'),
+            ('LLENO', 'Lleno'),
+        ],
+        default='1/4',
+    )
+
+    ingreso_en_grua = models.BooleanField(
+        default=False, verbose_name='¿Ingresó en grúa?'
+    )
+    datos_grua = models.CharField(
+        max_length=150,
+        blank=True,
+        null=True,
+        verbose_name='Datos de la grúa / Chófer',
+    )
+
+    # --- INVENTARIO / CHECKLIST (Columna 1 Hoja Física) ---
+    tiene_espejo_izquierdo = models.BooleanField(
+        default=True, verbose_name='Espejo Izquierdo'
+    )
+    tiene_espejo_derecho = models.BooleanField(
+        default=True, verbose_name='Espejo Derecho'
+    )
+    tiene_vidrios = models.BooleanField(
+        default=True, verbose_name='Vidrios / Cristales'
+    )
+    tiene_radio = models.BooleanField(
+        default=True, verbose_name='Radio / Mascarilla'
+    )
+    tiene_pantalla = models.BooleanField(
+        default=False, verbose_name='Pantalla / Multimedia'
+    )
+    tiene_encendedor = models.BooleanField(
+        default=False, verbose_name='Encendedor'
+    )
     tiene_antena = models.BooleanField(default=True, verbose_name='Antena')
-    tiene_copas_ruedas = models.BooleanField(default=True, verbose_name='Copas / Tapacubos')
-    tiene_herramientas = models.BooleanField(default=False, verbose_name='Juego de Herramientas')
+    tiene_control_puertas = models.BooleanField(
+        default=False, verbose_name='Control de Puertas'
+    )
+    tiene_cargador_celular = models.BooleanField(
+        default=False, verbose_name='Cargador de Celular'
+    )
+    tiene_triangulos = models.BooleanField(
+        default=False, verbose_name='Triángulos de Seguridad'
+    )
+
+    # --- INVENTARIO / CHECKLIST (Columna 2 Hoja Física) ---
+    tiene_cubresol = models.BooleanField(
+        default=False, verbose_name='Cubresol'
+    )
+    tiene_herramientas = models.BooleanField(
+        default=False, verbose_name='Juego de Herramientas'
+    )
+    tiene_gata_palanca = models.BooleanField(
+        default=True, verbose_name='Gato y Palanca'
+    )
+    tiene_llanta_repuesto = models.BooleanField(
+        default=True, verbose_name='Llanta de Refacción / Repuesto'
+    )
+    tiene_faros_lunas = models.BooleanField(
+        default=True, verbose_name='Faros / Lunas'
+    )
+    tiene_tapa_gasolina = models.BooleanField(
+        default=True, verbose_name='Tapa de Gasolina'
+    )
+    tiene_placas = models.BooleanField(
+        default=True, verbose_name='Placas de Circulación'
+    )
+    tiene_tapetes = models.BooleanField(
+        default=True, verbose_name='Tapetes / Alfombras'
+    )
+    tiene_extintor = models.BooleanField(
+        default=False, verbose_name='Extintor'
+    )
+    tiene_botiquin = models.BooleanField(
+        default=False, verbose_name='Botiquín'
+    )
+    tiene_copas_ruedas = models.BooleanField(
+        default=True, verbose_name='Copas / Tapacubos'
+    )
+    tiene_llave_tuercas = models.BooleanField(
+        default=False, verbose_name='Llave de Tuercas / Llave de Cruz'
+    )
+
+    # --- ESTADO FÍSICO Y OBSERVACIONES ---
+    # Guarda puntos x,y/daños marcados en la silueta interactiva del frontend
+    datos_danos_carroceria = models.JSONField(
+        blank=True,
+        null=True,
+        help_text='Puntos de daños marcados sobre el gráfico del vehículo',
+    )
+    detalles_carroceria = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Observaciones / Descripción de Golpes, Rayones o Estado de Pintura',
+    )
+
+    class Meta:
+        verbose_name = 'Recepción de Vehículo'
+        verbose_name_plural = 'Recepciones de Vehículos'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        if self.orden_trabajo_id:
+            return f'Recepción OT {self.orden_trabajo.numero_orden}'
+        return f'Recepción #{self.pk} - Sin OT vinculada'
+
+
+class InspeccionVehiculo(BaseModel):
+    """Registro técnico del diagnóstico y estado mecánico del vehículo.
+    Puede existir independientemente de una Orden de Trabajo."""
+
+    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='inspecciones', null=True, blank=True)
+    orden_trabajo = models.OneToOneField(
+        'ordenes.OrdenTrabajo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspeccion',
+        help_text='Orden de trabajo asociada (si ya fue generada)'
+    )
+    recepcion = models.ForeignKey(
+        'ordenes.RecepcionVehiculo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspecciones',
+        help_text='Recepción del vehículo de la cual se derivó esta inspección'
+    )
+
+    falla_reportada = models.TextField(verbose_name='Síntomas o Falla Reportada por el Cliente')
+    diagnostico_tecnico = models.TextField(blank=True, null=True, verbose_name='Diagnóstico Realizado por el Mecánico')
 
     testigo_check_engine = models.BooleanField(default=False, verbose_name='Check Engine')
     testigo_abs = models.BooleanField(default=False, verbose_name='ABS')
@@ -185,10 +333,18 @@ class RecepcionVehiculo(models.Model):
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
-    detalles_carroceria = models.TextField(blank=True, null=True, verbose_name='Descripción de Golpes, Rayones o Estado de Pintura')
+
+    class Meta:
+        verbose_name = 'Inspección de Vehículo'
+        verbose_name_plural = 'Inspecciones de Vehículos'
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f'Recepción de OT - {self.orden_trabajo.numero_orden}'
+        if self.orden_trabajo_id:
+            return f'Inspección OT {self.orden_trabajo.numero_orden}'
+        if self.recepcion_id:
+            return f'Inspección #{self.pk} - Recepción {self.recepcion_id}'
+        return f'Inspección #{self.pk} - Sin vínculo'
 
 
 class FotoRecepcion(models.Model):
@@ -200,4 +356,6 @@ class FotoRecepcion(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f'{self.recepcion.orden_trabajo.numero_orden} - {self.descripcion or "Foto"}'
+        if self.recepcion.orden_trabajo_id:
+            return f'{self.recepcion.orden_trabajo.numero_orden} - {self.descripcion or "Foto"}'
+        return f'Recepción #{self.recepcion_id} - {self.descripcion or "Foto"}'

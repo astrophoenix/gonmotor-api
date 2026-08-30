@@ -1,5 +1,7 @@
 from rest_framework import filters, permissions, viewsets
 
+from apps.authentication.utils import get_empresa_id_desde_request
+
 from .models import Cotizacion
 from .serializers import CotizacionSerializer
 
@@ -13,9 +15,7 @@ class CotizacionViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_superuser:
-            return Cotizacion.objects.all()
-        if hasattr(user, 'profile') and user.profile.empresa:
-            return Cotizacion.objects.filter(empresa=user.profile.empresa)
-        return Cotizacion.objects.none()
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return Cotizacion.objects.none()
+        return Cotizacion.objects.filter(empresa_id=empresa_id)

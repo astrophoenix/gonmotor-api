@@ -34,7 +34,7 @@ Env: Local AdminUser:
     email: mantify3216@gmail.com
     pass: Kimera2489
 
-    user:palvarez
+    user: palvarez
     user: palvarez@gmail.com
     pass: Pegazo13@
     palvarez -> empresa motor line (id 2)
@@ -73,3 +73,141 @@ GonMotor Reports → reportes
 
 
 consultar placas: https://servicios.axiscloud.ec/CRV/?ps_empresa=02
+
+
+
+Uncaught (in promise) Error: Given token not valid for any token type
+    at downloadFile (EntityActionButtons.vue?./node_modules/vue-loader/dist/index.js??ruleSet%5B1%5D.rules%5B5%5D.use%5B0%5D:74:11)
+
+
+
+
+GonMotor (Sidebar)
+├── 📊 Dashboard
+│   ├── Inicio
+│   └── Métricas
+│
+├── 🛠️ Operación
+│   ├── Recepción
+│   ├── Órdenes (OT)
+│   ├── Agenda / Citas
+│   └── Tablero Kanban
+│
+├── 🚗 Vehículos
+│   ├── Directorio
+│   └── Historial
+│
+├── 👥 Clientes
+│   ├── Directorio
+│   └── Historial OT
+│
+├── 📦 Inventario
+│   ├── Repuestos
+│   ├── Servicios
+│   └── Stock Mínimo
+│
+├── 🛒 Compras
+│   ├── Proveedores
+│   └── Órdenes Compra
+│
+├── 💳 Ventas
+│   ├── Cotizaciones
+│   ├── Facturación
+│   └── Por Cobrar
+│
+└── ⚙️ Ajustes
+    ├── Mi Taller
+    ├── Equipo
+    └── Contífico (Sync)
+
+
+.
+
+📋 Recepción
+Lista: Muestra todas las recepciones del día/semana. Columnas: vehículo, cliente, fecha ingreso, grúa (sí/no), vinculación (cotización/orden).
+
+Acciones:
+
+Nueva recepción: Registra accesorios, grúa, carrocería, fotos, kilometraje y combustible.
+Ver detalle: Muestra toda la información de la recepción.
+Desde el detalle:
+
+Botón "Crear Diagnóstico" → redirige a Diagnóstico con la recepción preseleccionada.
+Botón "Ver Cotización" (si ya existe).
+Botón "Ver Orden" (si ya fue generada).
+Vinculación: Una recepción puede existir sin orden ni cotización. Se vincula posteriormente.
+
+🔄 Diagnóstico / Inspección
+Lista: Muestra todas las inspecciones. Columnas: vehículo, cliente, fecha, estado (pendiente/completada), vinculación (cotización/orden).
+
+Acciones:
+
+Nueva inspección: Registra falla reportada, testigos del tablero y diagnóstico técnico.
+Ver detalle: Muestra la inspección y permite generar la cotización.
+Desde el detalle:
+
+Botón "Generar Cotización" → redirige a Cotizaciones con la inspección preseleccionada.
+Botón "Ver Cotización" (si ya existe).
+Botón "Ver Orden" (si ya fue convertida).
+Vinculación: Una inspección puede existir sin recepción, orden o cotización.
+
+🏭 Órdenes (OT)
+Lista: Muestra todas las órdenes. Columnas: número OT, vehículo, cliente, estado (ingresado/en proceso/completado/entregado/cancelado), prioridad, total.
+
+Acciones:
+
+Nueva orden: Puede crearse manualmente o desde una cotización aceptada.
+Ver detalle: Muestra la orden, servicios, repuestos, recepción/inspección de origen (si existe) y cotización de origen.
+Desde el detalle:
+
+Botón "Editar estado" → cambiar entre EN_PROCESO, COMPLETADO, ENTREGADO, CANCELADO.
+Botón "Ver Cotización" (si fue generada desde una).
+Botón "Ver Recepción" (si está vinculada).
+Botón "Ver Diagnóstico" (si está vinculado).
+Vinculación: Una orden puede tener muchas recepciones (re-ingresos) y una inspección.
+
+Resumen visual
+Recepción → Diagnóstico → Cotización → Orden
+   ↑           ↑            ↑          ↑
+   └───────────┴────────────┴──────────┘
+             Vinculación opcional entre pasos
+Cada pantalla funciona de forma independiente, pero se conecta mediante botones de acción cuando el flujo es secuencial (emergencia/promoción).
+
+Crea la pantalla para registrar o crear una Recepción los campos del formulario son:
+
+kilometraje_ingreso, nivel_combustible, ingreso_en_grua, datos_grua,
+tiene_radio,
+tiene_llanta_repuesto,
+tiene_gata_palanca,
+tiene_extintor,
+tiene_botiquin,
+tiene_antena,
+tiene_copas_ruedas,
+tiene_herramientas,
+detalles_carroceria
+
+
+Crea la pantalla para registrar o crear una Recepción las secciones y los campos del formulario son:
+
+Sección: "Datos Responsable"
+Crea un input txt responsable:
+Sección: Datos del vehiculo
+Campo Vehiculo
+
+Campo nivel_combustible, 
+
+Sección Datos de Ingreso:
+Campo kilometraje_ingreso, ingreso_en_grua, datos_grua,
+
+Sección: Inventario 
+tiene_radio,
+tiene_llanta_repuesto,
+tiene_gata_palanca,
+tiene_extintor,
+tiene_botiquin,
+tiene_antena,
+tiene_copas_ruedas,
+tiene_herramientas,
+detalles_carroceria
+
+Agrega un botón de guardar y cancelar( @gonmotor-ui/src/shared/components/FormSaveActions.vue ) y nuevo(parte supeior). Toma como base la organización del código de la pantalla @gonmotor-ui/src/modules/clientes/components/ClientEdit.vue 

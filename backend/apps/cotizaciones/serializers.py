@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.authentication.utils import get_empresa_id_desde_request
+
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
 
 
@@ -35,6 +37,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'total_iva',
             'total',
             'observaciones',
+            'recepcion_origen',
+            'inspeccion_origen',
+            'orden_trabajo_origen',
+            'fecha_aceptacion',
+            'aceptada_por',
+            'metodo_aceptacion',
             'servicios',
             'repuestos',
             'is_active',
@@ -45,6 +53,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context.get('request')
-        if request and hasattr(request.user, 'profile'):
-            validated_data['empresa'] = request.user.profile.empresa
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            if empresa_id:
+                validated_data['empresa_id'] = empresa_id
         return super().create(validated_data)

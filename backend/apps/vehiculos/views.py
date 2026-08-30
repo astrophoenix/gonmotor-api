@@ -1,11 +1,11 @@
 from rest_framework import viewsets, permissions, filters, status
 from django.db.models import Count, Q, Prefetch
 from django_countries import countries
-from django.utils import timezone
+from django.utils import timezone, translation
 from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoPropietario
@@ -170,5 +170,80 @@ class VehiculoPdfExportView(APIView):
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500
+            )
+
+
+class VehiculoExcelExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403
+            )
+
+        try:
+            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa').prefetch_related(
+                Prefetch(
+                    'propietarios',
+                    queryset=VehiculoPropietario.objects.filter(
+                        es_actual=True
+                    ).select_related('cliente'),
+                    to_attr='propietarios_actuales',
+                ),
+            )
+
+            empresa = None
+            taller = None
+            if queryset.exists():
+                primera_empresa = queryset.first().empresas.first()
+                if primera_empresa:
+                    empresa = primera_empresa
+                    taller = primera_empresa.talleres.first()
+
+            usuario_nombre = ''
+            if request.user and request.user.is_authenticated:
+                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+
+            def row_builder(vehiculo):
+                propietario = getattr(vehiculo, 'propietarios_actuales', [])
+                cliente_nombre = propietario[0].cliente.nombre if propietario else ''
+                return [
+                    vehiculo.placa or '',
+                    vehiculo.marca or '',
+                    vehiculo.modelo or '',
+                    str(vehiculo.anio) if vehiculo.anio else '',
+                    cliente_nombre or 'Sin dueño',
+                    vehiculo.color or '',
+                ]
+
+            config = ExcelExportConfig(
+                title='Listado de Vehículos',
+                filename='listado_vehiculos.xlsx',
+                headers=[
+                    ('Placa', 1.6),
+                    ('Marca', 1.8),
+                    ('Modelo', 1.8),
+                    ('Año', 1.2),
+                    ('Dueño', 2.0),
+                    ('Color', 1.8),
+                ],
+                empresa=empresa,
+                taller=taller,
+                usuario=usuario_nombre,
+                row_builder=row_builder,
+            )
+
+            service = ExcelExportService(config, queryset)
+            return service.generate_response()
+
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
                 status=500
             )

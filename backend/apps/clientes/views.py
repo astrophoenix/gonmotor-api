@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from django.db.models import Count, Q
 from django.db.models import Prefetch
 from django.utils import timezone
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.empresas.models import Empresa, Taller
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
@@ -172,5 +172,96 @@ class ClientePdfExportView(APIView):
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500
+            )
+
+
+class ClienteExcelExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403
+            )
+
+        try:
+            queryset = Cliente.objects.filter(empresa_id=empresa_id, is_active=True).select_related(
+                'empresa'
+            ).prefetch_related(
+                Prefetch(
+                    'vehiculos_asociados',
+                    queryset=VehiculoPropietario.objects.filter(
+                        es_actual=True
+                    ).select_related('vehiculo'),
+                    to_attr='propietarios_actuales',
+                )
+            ).order_by('nombre')
+
+            empresa = None
+            taller = None
+            if queryset.exists():
+                primera_empresa = queryset.first().empresa
+                if primera_empresa:
+                    empresa = primera_empresa
+                    taller = primera_empresa.talleres.first()
+
+            usuario_nombre = ''
+            if request.user and request.user.is_authenticated:
+                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+
+            def row_builder(cliente):
+                telefono = cliente.telefono or ''
+                email = cliente.email or ''
+                if telefono and email:
+                    contacto = f'{telefono} / {email}'
+                elif telefono:
+                    contacto = telefono
+                elif email:
+                    contacto = email
+                else:
+                    contacto = 'Sin contacto'
+
+                relaciones = getattr(cliente, 'propietarios_actuales', [])
+                vehiculos = [relacion.vehiculo for relacion in relaciones]
+                vehiculos.sort(key=lambda v: v.id)
+                if vehiculos:
+                    placas = [v.placa for v in vehiculos if v.placa]
+                    vehiculos_texto = ', '.join(placas) if placas else 'Sin vehículos'
+                else:
+                    vehiculos_texto = 'Sin vehículos'
+
+                return [
+                    cliente.identificacion or '',
+                    cliente.nombre or '',
+                    contacto,
+                    vehiculos_texto,
+                ]
+
+            config = ExcelExportConfig(
+                title='Listado de Clientes',
+                filename='listado_clientes.xlsx',
+                headers=[
+                    ('Identificación', 1.4),
+                    ('Nombre / Razón Social', 2.2),
+                    ('Contacto', 2.0),
+                    ('Vehículos', 2.0),
+                ],
+                empresa=empresa,
+                taller=taller,
+                usuario=usuario_nombre,
+                row_builder=row_builder,
+            )
+        
+            service = ExcelExportService(config, queryset)
+            return service.generate_response()
+
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
                 status=500
             )
