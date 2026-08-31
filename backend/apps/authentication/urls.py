@@ -9,6 +9,7 @@ from .views import (
     RegistrationView,
     UserProfileView, 
     UserManagementViewSet,
+    EmpleadoViewSet,
     PasswordResetRequestView,
     PasswordResetConfirmView,
     ChangePasswordView
@@ -16,6 +17,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r'usuarios', UserManagementViewSet, basename='usuarios-gestion')
+router.register(r'empleados', EmpleadoViewSet, basename='empleados')
 
 urlpatterns = [
     # Endpoint de Login (Obtener Token o lista de empresas)

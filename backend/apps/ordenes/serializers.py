@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.utils import get_empresa_id_desde_request
 
 from .models import (
@@ -38,7 +39,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecepcionVehiculo
         fields = '__all__'
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'fecha_firma_receptor', 'fecha_firma_cliente', 'aceptacion_condiciones']
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -60,6 +61,19 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
                 'telefono': instance.cliente.telefono,
                 'email': instance.cliente.email,
             }
+        if instance.recibido_por_id:
+            rep['recibido_por_nombre'] = instance.recibido_por.get_full_name() or instance.recibido_por.username
+            usuario_empresa = UsuarioEmpresa.objects.filter(user=instance.recibido_por, empresa=instance.empresa).first()
+            if usuario_empresa:
+                rep['recibido_por_rol'] = usuario_empresa.rol
+                rep['recibido_por_rol_display'] = usuario_empresa.get_rol_display()
+            else:
+                rep['recibido_por_rol'] = None
+                rep['recibido_por_rol_display'] = None
+        else:
+            rep['recibido_por_nombre'] = None
+            rep['recibido_por_rol'] = None
+            rep['recibido_por_rol_display'] = None
         return rep
 
     def create(self, validated_data):
@@ -68,7 +82,15 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             empresa_id = get_empresa_id_desde_request(request)
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
+            if not validated_data.get('recibido_por') and request.user.is_authenticated:
+                validated_data['recibido_por'] = request.user
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('fecha_firma_receptor', None)
+        validated_data.pop('fecha_firma_cliente', None)
+        validated_data.pop('aceptacion_condiciones', None)
+        return super().update(instance, validated_data)
 
 
 class OrdenTrabajoSerializer(serializers.ModelSerializer):

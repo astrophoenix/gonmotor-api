@@ -315,3 +315,75 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
+
+
+class EmpleadoWriteSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    telefono = serializers.CharField(required=False, allow_blank=True, default='')
+    rol = serializers.ChoiceField(choices=UsuarioEmpresa.ROLES)
+    talleres = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+    )
+    is_active = serializers.BooleanField(default=True, required=False)
+
+    def to_representation(self, instance):
+        user = instance.user
+        profile = getattr(user, 'profile', None)
+        return {
+            'id': instance.id,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'is_active': user.is_active,
+                'telefono': getattr(profile, 'telefono', '') if profile else '',
+            },
+            'empresa': {
+                'id': instance.empresa_id,
+                'nombre': getattr(instance.empresa, 'nombre_comercial', getattr(instance.empresa, 'nombre', '')) if instance.empresa_id else None,
+            } if instance.empresa_id else None,
+            'rol': instance.rol,
+            'rol_display': instance.get_rol_display(),
+            'talleres': [
+                {'id': t.id, 'nombre': t.nombre}
+                for t in instance.talleres.all()
+            ],
+            'is_active': instance.is_active,
+        }
+
+
+class EmpleadoReadSerializer(serializers.ModelSerializer):
+    user = serializers.SerializerMethodField()
+    talleres = serializers.SerializerMethodField()
+    rol_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UsuarioEmpresa
+        fields = ['id', 'user', 'empresa', 'rol', 'rol_display', 'talleres', 'is_active']
+
+    def get_user(self, obj):
+        profile = getattr(obj.user, 'profile', None)
+        return {
+            'id': obj.user.id,
+            'username': obj.user.username,
+            'email': obj.user.email,
+            'first_name': obj.user.first_name,
+            'last_name': obj.user.last_name,
+            'is_active': obj.user.is_active,
+            'telefono': getattr(profile, 'telefono', '') if profile else '',
+        }
+
+    def get_rol_display(self, obj):
+        return obj.get_rol_display()
+
+    def get_talleres(self, obj):
+        return [
+            {'id': t.id, 'nombre': t.nombre}
+            for t in obj.talleres.all()
+        ]

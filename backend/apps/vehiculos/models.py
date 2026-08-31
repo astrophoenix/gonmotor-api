@@ -8,10 +8,12 @@ import datetime
 GRUPO_BLUEPRINT_MAP = {
     # Livianos
     'AUTO': 'liviano',
-    'JEEP': 'liviano',
-    # Camionetas / Furgones
+    # SUV / Crossovers
+    'JEEP': 'suv',
+    # Camionetas
     'CAMN': 'camioneta',
-    'FURG': 'camioneta',
+    # Furgones
+    'FURG': 'furgoneta',
     # Motos y similares
     'MOTO': 'motos',
     'MTNA': 'motos',

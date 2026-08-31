@@ -170,44 +170,23 @@ Resumen visual
 Recepción → Diagnóstico → Cotización → Orden
    ↑           ↑            ↑          ↑
    └───────────┴────────────┴──────────┘
-             Vinculación opcional entre pasos
-Cada pantalla funciona de forma independiente, pero se conecta mediante botones de acción cuando el flujo es secuencial (emergencia/promoción).
 
-Crea la pantalla para registrar o crear una Recepción los campos del formulario son:
+1. Recepción
+Cuándo es editable: Mientras se está registrando el ingreso (datos del cliente, estado físico, nivel de combustible, observaciones iniciales).
+Punto de bloqueo: En el momento en que el cliente firma/acepta la hoja de ingreso o cuando el estado pasa a "En Diagnóstico".
+Razón: Es el documento que certifica cómo se recibió el activo. Modificarlo a posteriori elimina tu protección legal en caso de un reclamo por daños previos.
 
-kilometraje_ingreso, nivel_combustible, ingreso_en_grua, datos_grua,
-tiene_radio,
-tiene_llanta_repuesto,
-tiene_gata_palanca,
-tiene_extintor,
-tiene_botiquin,
-tiene_antena,
-tiene_copas_ruedas,
-tiene_herramientas,
-detalles_carroceria
+2. Diagnóstico
+Cuándo es editable: Mientras el técnico está evaluando el problema, documentando hallazgos y subiendo fotografías o notas.
+Punto de bloqueo: Cuando el técnico marca la revisión como "Finalizada" y el documento pasa a manos del asesor para armar los costos.
+Razón: Separa el criterio técnico del criterio comercial. Evita que se alteren los hallazgos técnicos originales para justificar o inflar cobros posteriormente.
 
+3. Cotización
+Cuándo es editable: Durante su elaboración (agregando repuestos, horas de mano de obra, calculando impuestos).
+Punto de bloqueo: Exactamente en el instante en que cambia a estado "Enviada al Cliente" o "Pendiente de Aprobación".
+Razón: El cliente debe ver exactamente lo mismo que está en el sistema. Una vez aprobada o rechazada, la cotización debe quedar 100% inmutable.
 
-Crea la pantalla para registrar o crear una Recepción las secciones y los campos del formulario son:
-
-Sección: "Datos Responsable"
-Crea un input txt responsable:
-Sección: Datos del vehiculo
-Campo Vehiculo
-
-Campo nivel_combustible, 
-
-Sección Datos de Ingreso:
-Campo kilometraje_ingreso, ingreso_en_grua, datos_grua,
-
-Sección: Inventario 
-tiene_radio,
-tiene_llanta_repuesto,
-tiene_gata_palanca,
-tiene_extintor,
-tiene_botiquin,
-tiene_antena,
-tiene_copas_ruedas,
-tiene_herramientas,
-detalles_carroceria
-
-Agrega un botón de guardar y cancelar( @gonmotor-ui/src/shared/components/FormSaveActions.vue ) y nuevo(parte supeior). Toma como base la organización del código de la pantalla @gonmotor-ui/src/modules/clientes/components/ClientEdit.vue 
+4. Orden de Trabajo (OT)
+Cuándo es editable: La OT nace de una cotización aprobada, por lo que su alcance, costos y repuestos originales nunca deben ser editables.
+Qué sí se puede modificar: Únicamente los estados de ejecución (En progreso, En pausa, Finalizado) y la adición de notas de progreso internas del técnico.
+Razón: La OT es el contrato de ejecución. Si durante el trabajo se encuentra un daño oculto, la mejor práctica del software no es alterar la OT original, sino generar un documento anexo (una "Cotización Suplementaria").

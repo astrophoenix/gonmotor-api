@@ -175,6 +175,15 @@ class RecepcionVehiculo(BaseModel):
         related_name='recepciones',
         help_text='Orden de trabajo asociada (si ya fue generada)',
     )
+    recibido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recepciones_recibidas',
+        verbose_name='Recibido por',
+        help_text='Empleado que realizó la recepción del vehículo',
+    )
 
     # --- TIPO Y MOTIVO DE INGRESO ---
     tipo_recepcion = models.CharField(
@@ -230,6 +239,7 @@ class RecepcionVehiculo(BaseModel):
     testigo_airbag = models.BooleanField(default=False, verbose_name='Airbag')
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
+    testigo_temperatura = models.BooleanField(default=False, verbose_name='Temperatura / Refrigerante')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
 
     # --- INVENTARIO / CHECKLIST (Columna 1 Hoja Física) ---
@@ -269,6 +279,33 @@ class RecepcionVehiculo(BaseModel):
         blank=True,
         null=True,
         verbose_name='Observaciones / Descripción de Golpes, Rayones o Estado de Pintura',
+    )
+    firma_receptor = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Firma del receptor',
+        help_text='Firma digital del empleado que recibió el vehículo (base64)',
+    )
+    firma_cliente = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Firma del cliente',
+        help_text='Firma digital del cliente aceptando la recepción (base64)',
+    )
+    fecha_firma_receptor = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Fecha y hora de firma del receptor',
+    )
+    fecha_firma_cliente = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Fecha y hora de firma del cliente',
+    )
+    aceptacion_condiciones = models.BooleanField(
+        default=False,
+        verbose_name='Aceptación de condiciones',
+        help_text='Indica si el cliente aceptó las condiciones de recepción y estado del vehículo',
     )
 
     class Meta:
@@ -335,6 +372,7 @@ class InspeccionVehiculo(BaseModel):
     testigo_airbag = models.BooleanField(default=False, verbose_name='Airbag')
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
+    testigo_temperatura = models.BooleanField(default=False, verbose_name='Temperatura / Refrigerante')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
     class Meta:
         verbose_name = 'Inspección de Vehículo'

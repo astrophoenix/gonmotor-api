@@ -1,6 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions
+from rest_framework.exceptions import ValidationError
+from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
 
@@ -13,13 +15,14 @@ from django.conf import settings
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 from .serializers import UserAdminSerializer, UserProfileUpdateSerializer, ChangePasswordSerializer
+from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
 from .utils import get_empresa_id_desde_request
-from .models import UserProfile
+from .models import UserProfile, UsuarioEmpresa
+from apps.empresas.models import Empresa, Taller
 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from rest_framework.permissions import AllowAny
-from .models import UsuarioEmpresa
 
 User = get_user_model()
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -259,3 +262,166 @@ class UserManagementViewSet(viewsets.ModelViewSet):
             is_active=True
         ).values_list('user_id', flat=True)
         return User.objects.filter(id__in=usuario_ids)
+
+
+class EmpleadoViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para CRUD de empleados de la empresa actual.
+    Trabaja sobre UsuarioEmpresa y expone datos anidados del User.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        query_empresa_id = self.request.query_params.get('empresa')
+
+        if query_empresa_id:
+            try:
+                query_empresa_id = int(query_empresa_id)
+            except (TypeError, ValueError):
+                query_empresa_id = None
+
+        final_empresa_id = query_empresa_id or empresa_id
+
+        print(f"[EMPLEADO LIST] usuario={self.request.user.id}, empresa_id_header={empresa_id}, query_empresa={query_empresa_id}, final={final_empresa_id}")
+
+        if not final_empresa_id:
+            return UsuarioEmpresa.objects.none()
+
+        include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
+        queryset = UsuarioEmpresa.objects.filter(empresa_id=final_empresa_id)
+        print(f"[EMPLEADO LIST] queryset_count={queryset.count()}")
+        if not include_inactive:
+            queryset = queryset.filter(is_active=True)
+        print(f"[EMPLEADO LIST] final_count={queryset.count()}")
+
+        return queryset.select_related('user', 'empresa').prefetch_related('talleres', 'user__profile')
+
+    def get_serializer_class(self):
+        if self.action in ['list', 'retrieve']:
+            return EmpleadoReadSerializer
+        return EmpleadoWriteSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        empresa_id = get_empresa_id_desde_request(request)
+        print(f"[EMPLEADO CREATE] usuario={request.user.id}, empresa_id={empresa_id}, empresa={empresa.id if empresa else None}")
+        if not empresa_id:
+            raise ValidationError({'empresa': 'No se pudo determinar la empresa activa.'})
+        
+        empresa = Empresa.objects.filter(id=empresa_id, is_active=True).first()
+        print(f"[EMPLEADO CREATE] empresa encontrada={empresa.id if empresa else None}")
+        if not empresa:
+            raise ValidationError({'empresa': 'La empresa seleccionada no está activa.'})
+        
+        validated_data = serializer.validated_data
+        email = validated_data['email'].lower().strip()
+        username = email
+        
+        existing_user = User.objects.filter(username__iexact=username).first()
+        if not existing_user:
+            existing_user = User.objects.filter(email__iexact=email).first()
+        
+        if existing_user:
+            es_empleado_empresa = UsuarioEmpresa.objects.filter(
+                user=existing_user,
+                empresa_id=empresa.id,
+                is_active=True,
+            ).exists()
+            
+            if es_empleado_empresa:
+                raise ValidationError({
+                    'email': 'Ya existe otro empleado registrado con este correo en el sistema.'
+                })
+            
+            raise ValidationError({
+                'email': 'Ya existe un usuario con este correo en el sistema.'
+            })
+        
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            first_name=validated_data['first_name'],
+            last_name=validated_data['last_name'],
+            password=None,
+        )
+        user.is_active = True
+        user.save()
+        
+        UserProfile.objects.create(user=user, telefono=validated_data.get('telefono', ''))
+        
+        usuario_empresa = UsuarioEmpresa.objects.create(
+            user=user,
+            empresa=empresa,
+            rol=validated_data['rol'],
+            is_active=validated_data.get('is_active', True),
+        )
+        usuario_empresa.talleres.set(validated_data.get('talleres', []))
+        
+        token_generator = PasswordResetTokenGenerator()
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = token_generator.make_token(user)
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+        
+        subject = "Establece tu contraseña - Gestor de Taller"
+        message = (
+            f"Hola {validated_data['first_name']},\n\n"
+            f"Has sido registrado en el sistema de gestión de taller. "
+            f"Para establecer tu contraseña, haz clic en el siguiente enlace:\n\n"
+            f"{reset_url}\n\n"
+            f"Este enlace expirará en 5 minutos por seguridad.\n\n"
+            f"Si no solicitaste este registro, puedes ignorar este mensaje."
+        )
+        
+        send_mail(
+            subject,
+            message,
+            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@taller.com'),
+            [user.email],
+            fail_silently=False,
+        )
+        
+        read_serializer = EmpleadoReadSerializer(usuario_empresa, context={'request': request})
+        headers = self.get_success_headers(read_serializer.data)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_update(self, serializer):
+        validated_data = serializer.validated_data
+        usuario_empresa = serializer.instance
+
+        user = usuario_empresa.user
+        user.first_name = validated_data.get('first_name', user.first_name)
+        user.last_name = validated_data.get('last_name', user.last_name)
+        user.email = validated_data.get('email', user.email).lower().strip()
+        user.save()
+
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.telefono = validated_data.get('telefono', profile.telefono)
+        profile.save()
+
+        usuario_empresa.rol = validated_data.get('rol', usuario_empresa.rol)
+        usuario_empresa.is_active = validated_data.get('is_active', usuario_empresa.is_active)
+        usuario_empresa.save()
+        if 'talleres' in validated_data:
+            usuario_empresa.talleres.set(validated_data.get('talleres', []))
+
+    @action(detail=False, methods=['get'], url_path='talleres')
+    def talleres(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=400)
+
+        talleres_qs = Taller.objects.filter(empresa_id=empresa_id, is_active=True).order_by('nombre')
+        data = [
+            {'id': t.id, 'nombre': t.nombre, 'codigo_sucursal': t.codigo_sucursal}
+            for t in talleres_qs
+        ]
+        return Response(data)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response({'detail': 'Empleado dado de baja correctamente.'}, status=200)

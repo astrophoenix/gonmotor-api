@@ -41,6 +41,24 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             return RecepcionVehiculo.objects.none()
         return RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
 
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        if instance.firma_receptor and not instance.fecha_firma_receptor:
+            instance.fecha_firma_receptor = timezone.now()
+            instance.save(update_fields=['fecha_firma_receptor'])
+        if instance.firma_cliente and not instance.fecha_firma_cliente:
+            instance.fecha_firma_cliente = timezone.now()
+            instance.save(update_fields=['fecha_firma_cliente'])
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if instance.firma_receptor and not instance.fecha_firma_receptor:
+            instance.fecha_firma_receptor = timezone.now()
+            instance.save(update_fields=['fecha_firma_receptor'])
+        if instance.firma_cliente and not instance.fecha_firma_cliente:
+            instance.fecha_firma_cliente = timezone.now()
+            instance.save(update_fields=['fecha_firma_cliente'])
+
 
 class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
