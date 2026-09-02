@@ -326,7 +326,9 @@ class InspeccionVehiculo(BaseModel):
     # Opciones de selección
     TIPO_CHOICES = [
         ('PREVENTIVO', 'Mantenimiento Preventivo'),
-        ('CORRECTIVO', 'Diagnóstico / Correctivo'),
+        ('CORRECTIVO', 'Reparación Correctiva'),
+        ('DIAGNOSTICO', 'Solo Diagnóstico / Escaneo'),
+        ('ESTETICA', 'Enderezada, Pintura o Detailing'),
         ('GARANTIA', 'Revisión por Garantía'),
     ]
     
@@ -355,7 +357,7 @@ class InspeccionVehiculo(BaseModel):
     )
 
     # Clasificación y Estado
-    tipo_inspeccion = models.CharField(max_length=20, choices=TIPO_CHOICES, default='CORRECTIVO')
+    tipo_inspeccion = models.CharField(max_length=20, choices=OrdenTrabajo.TipoTrabajo.choices, default=OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
 
     # Contexto del Cliente (Adaptado para incluir mantenimientos sin fallas)
@@ -378,6 +380,13 @@ class InspeccionVehiculo(BaseModel):
         verbose_name = 'Inspección de Vehículo'
         verbose_name_plural = 'Inspecciones de Vehículos'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['recepcion'],
+                condition=models.Q(recepcion__isnull=False),
+                name='una_inspeccion_por_recepcion'
+            )
+        ]
 
     def __str__(self):
         if self.orden_trabajo_id:
