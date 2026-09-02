@@ -28,7 +28,7 @@ python manage.py createsuperuser
 
 Env: Local AdminUser:
     user: gromero
-    pass: pegazo13
+    pass: Pegazo13_
 
     user: mantify
     email: mantify3216@gmail.com

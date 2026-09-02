@@ -48,6 +48,9 @@ urlpatterns = [
 
     # 6.1 Endpoints del Módulo de Recepciones
     path('api/recepciones/', include('apps.ordenes.recepciones_urls')),
+
+    # 7. Endpoints del Módulo de Configuración (Empresa, Sucursales, Usuarios, Roles)
+    path('api/configuracion/', include('apps.configuracion.urls')),
 ]
 
 # Servir archivos multimedia (fotos, documentos) durante el desarrollo

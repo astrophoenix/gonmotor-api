@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
 
+from apps.empresas.models import Empresa
 from .models import UserProfile
 from .models import UsuarioEmpresa
 
@@ -34,6 +35,47 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             })
 
         self.user = user
+
+        # Superusuarios: ven TODAS las empresas activas del sistema.
+        if user.is_superuser:
+            empresas_qs = Empresa.objects.filter(is_active=True).order_by('nombre_comercial')
+            if not empresas_qs.exists():
+                raise serializers.ValidationError({
+                    "detail": "No hay empresas activas registradas en el sistema."
+                })
+            empresas_list = [
+                {
+                    "id": emp.id,
+                    "nombre_comercial": emp.nombre_comercial,
+                    "ruc": emp.ruc,
+                    "rol": 'ADMIN_SISTEMA'
+                }
+                for emp in empresas_qs
+            ]
+            # Si solo hay una empresa, el superusuario entra directo a ella.
+            if len(empresas_list) == 1:
+                emp = empresas_qs.first()
+                refresh = self.get_token_with_empresa(user, emp.id, 'ADMIN_SISTEMA')
+                return {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'requires_company_selection': False,
+                    'user': {
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "rol": 'ADMIN_SISTEMA',
+                        "empresa_id": emp.id,
+                        "empresa_nombre": emp.nombre_comercial
+                    }
+                }
+            return {
+                "requires_company_selection": True,
+                "user_id": user.id,
+                "empresas": empresas_list
+            }
 
         relaciones = UsuarioEmpresa.objects.filter(
             user=user,

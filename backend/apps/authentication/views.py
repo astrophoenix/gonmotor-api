@@ -58,19 +58,37 @@ class SelectCompanyView(APIView):
                 is_active=True,
                 empresa__is_active=True
             )
+            user = relacion.user
+            empresa = relacion.empresa
+            rol = relacion.rol
         except UsuarioEmpresa.DoesNotExist:
-            return Response(
-                {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        user = relacion.user
-        empresa = relacion.empresa
+            # Los superusuarios pueden entrar a cualquier empresa activa aunque
+            # no tengan una asignación explícita en UsuarioEmpresa.
+            try:
+                user = User.objects.get(pk=user_id)
+            except User.DoesNotExist:
+                return Response(
+                    {"detail": "El usuario no existe."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            if not user.is_superuser:
+                return Response(
+                    {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            try:
+                empresa = Empresa.objects.get(pk=empresa_id, is_active=True)
+            except Empresa.DoesNotExist:
+                return Response(
+                    {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            rol = 'ADMIN_SISTEMA'
 
         # Generar tokens inyectando la empresa y rol seleccionados
         refresh = RefreshToken.for_user(user)
         refresh['empresa_id'] = empresa.id
-        refresh['rol'] = relacion.rol
+        refresh['rol'] = rol
 
         return Response({
             "access": str(refresh.access_token),
@@ -81,7 +99,7 @@ class SelectCompanyView(APIView):
                 "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-                "rol": relacion.rol,
+                "rol": rol,
                 "empresa_id": empresa.id,
                 "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', ''))
             }

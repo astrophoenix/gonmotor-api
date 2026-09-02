@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'apps.vehiculos',
     'apps.cotizaciones',
     'apps.ordenes',
+    'apps.configuracion',
 ]
 
 LOCALE_PATHS = [
