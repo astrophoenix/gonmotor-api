@@ -41,8 +41,16 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             return RecepcionVehiculo.objects.none()
         return RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
 
+    def _sincronizar_kilometraje_vehiculo(self, instance):
+        if not instance.vehiculo_id or not instance.kilometraje_ingreso:
+            return
+        if instance.vehiculo.kilometraje_actual != instance.kilometraje_ingreso:
+            instance.vehiculo.kilometraje_actual = instance.kilometraje_ingreso
+            instance.vehiculo.save(update_fields=['kilometraje_actual', 'updated_at'])
+
     def perform_create(self, serializer):
         instance = serializer.save()
+        self._sincronizar_kilometraje_vehiculo(instance)
         if instance.firma_receptor and not instance.fecha_firma_receptor:
             instance.fecha_firma_receptor = timezone.now()
             instance.save(update_fields=['fecha_firma_receptor'])
@@ -52,6 +60,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = serializer.save()
+        self._sincronizar_kilometraje_vehiculo(instance)
         if instance.firma_receptor and not instance.fecha_firma_receptor:
             instance.fecha_firma_receptor = timezone.now()
             instance.save(update_fields=['fecha_firma_receptor'])

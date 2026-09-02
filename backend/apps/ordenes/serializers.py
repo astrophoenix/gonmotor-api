@@ -32,6 +32,59 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id']
 
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            if empresa_id:
+                validated_data['empresa_id'] = empresa_id
+        return super().create(validated_data)
+
+    def validate(self, attrs):
+        recepcion = attrs.get('recepcion')
+        if recepcion is not None:
+            inspecciones = recepcion.inspecciones.all()
+            if self.instance:
+                inspecciones = inspecciones.exclude(pk=self.instance.pk)
+            if inspecciones.exists():
+                raise serializers.ValidationError(
+                    {'recepcion': 'Esta recepción ya tiene una inspección registrada.'}
+                )
+        return attrs
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep['tipo_inspeccion_display'] = instance.get_tipo_inspeccion_display()
+        rep['estado_display'] = instance.get_estado_display()
+        if instance.recepcion_id:
+            rec = instance.recepcion
+            rv = rec.vehiculo if rec.vehiculo_id else None
+            rc = rec.cliente if rec.cliente_id else None
+            rep['recepcion'] = {
+                'id': rec.id,
+                'vehiculo': {
+                    'id': rv.id,
+                    'placa': rv.placa,
+                    'marca': rv.marca,
+                    'modelo': rv.modelo,
+                    'color': rv.color,
+                } if rv else None,
+                'cliente': {
+                    'id': rc.id,
+                    'nombre': rc.nombre,
+                    'identificacion': rc.identificacion,
+                    'telefono': rc.telefono,
+                    'email': rc.email,
+                } if rc else None,
+                'placa': rv.placa if rv else None,
+                'marca': rv.marca if rv else None,
+                'modelo': rv.modelo if rv else None,
+                'cliente_nombre': rc.nombre if rc else None,
+                'motivo_ingreso': rec.motivo_ingreso,
+                'created_at': rec.created_at.isoformat() if rec.created_at else None,
+            }
+        return rep
+
 
 class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
@@ -52,6 +105,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
                 'color': instance.vehiculo.color,
                 'tipo': instance.vehiculo.tipo,
                 'grupo_blueprint': instance.vehiculo.grupo_blueprint,
+                'kilometraje_actual': instance.vehiculo.kilometraje_actual,
             }
         if instance.cliente_id:
             rep['cliente'] = {
