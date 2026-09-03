@@ -65,6 +65,12 @@ class Taller(BaseModel):
         default="001",
         verbose_name="Código de Sucursal (SRI / Contífico)"
     )
+    ciudad = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="Ciudad"
+    )
     direccion = models.TextField(
         verbose_name="Dirección Físicas"
     )
@@ -78,6 +84,13 @@ class Taller(BaseModel):
     class Meta:
         verbose_name = "Taller / Sucursal"
         verbose_name_plural = "Talleres / Sucursales"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'codigo_sucursal'],
+                condition=models.Q(is_active=True),
+                name='una_sucursal_activa_por_empresa_codigo'
+            )
+        ]
 
     def __str__(self):
         return f"{self.empresa.nombre_comercial} - {self.nombre}"
