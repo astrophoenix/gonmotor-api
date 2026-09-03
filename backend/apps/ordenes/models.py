@@ -31,6 +31,15 @@ class OrdenTrabajo(BaseModel):
         URGENTE = 'URGENTE', 'Urgente / Emergencia'
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='ordenes_trabajo')
+    sucursal = models.ForeignKey(
+        'empresas.Taller',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ordenes_trabajo',
+        verbose_name='Sucursal / Taller',
+        help_text='Sucursal donde se atiende la orden (opcional)'
+    )
     cliente = models.ForeignKey('clientes.Cliente', on_delete=models.PROTECT, related_name='ordenes_trabajo')
     vehiculo = models.ForeignKey('vehiculos.Vehiculo', on_delete=models.PROTECT, related_name='ordenes_trabajo')
     asesor = models.ForeignKey(
@@ -156,6 +165,15 @@ class RecepcionVehiculo(BaseModel):
         related_name='recepciones',
         null=True,
         blank=True,
+    )
+    sucursal = models.ForeignKey(
+        'empresas.Taller',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recepciones',
+        verbose_name='Sucursal / Taller',
+        help_text='Sucursal donde ingresó el vehículo (opcional)',
     )
     cliente = models.ForeignKey(
         'clientes.Cliente',
@@ -339,6 +357,15 @@ class InspeccionVehiculo(BaseModel):
     ]
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='inspecciones', null=True, blank=True)
+    sucursal = models.ForeignKey(
+        'empresas.Taller',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspecciones',
+        verbose_name='Sucursal / Taller',
+        help_text='Sucursal donde se realizó la inspección (opcional)'
+    )
     orden_trabajo = models.OneToOneField(
         'ordenes.OrdenTrabajo',
         on_delete=models.SET_NULL,
@@ -399,12 +426,35 @@ class InspeccionVehiculo(BaseModel):
 class FotoRecepcion(models.Model):
     """Adjunta múltiples fotos de la recepción del vehículo."""
 
+    class TipoVista(models.TextChoices):
+        FRONTAL = 'FRONTAL', 'Frontal'
+        LATERAL_IZQ = 'LATERAL_IZQ', 'Lateral Izquierda'
+        LATERAL_DER = 'LATERAL_DER', 'Lateral Derecha'
+        POSTERIOR = 'POSTERIOR', 'Posterior'
+        TABLERO = 'TABLERO', 'Tablero / Kilometraje'
+
+    VISTAS_OBLIGATORIAS = [
+        TipoVista.FRONTAL,
+        TipoVista.LATERAL_IZQ,
+        TipoVista.LATERAL_DER,
+        TipoVista.POSTERIOR,
+        TipoVista.TABLERO,
+    ]
+
     recepcion = models.ForeignKey(RecepcionVehiculo, on_delete=models.CASCADE, related_name='fotos')
+    tipo_vista = models.CharField(
+        max_length=30,
+        choices=TipoVista.choices,
+        verbose_name='Vista fotográfica'
+    )
     imagen = models.ImageField(upload_to='ordenes/recepcion_fotos/')
     descripcion = models.CharField(max_length=100, blank=True, null=True, verbose_name='Ej: Rayón puerta izquierda')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        verbose_name = 'Foto de la Recepción'
+        verbose_name_plural = 'Fotos de las Recepciones'
+        ordering = ['tipo_vista', 'created_at']
+
     def __str__(self):
-        if self.recepcion.orden_trabajo_id:
-            return f'{self.recepcion.orden_trabajo.numero_orden} - {self.descripcion or "Foto"}'
-        return f'Recepción #{self.recepcion_id} - {self.descripcion or "Foto"}'
+        return f'{self.recepcion_id} - {self.get_tipo_vista_display()}'

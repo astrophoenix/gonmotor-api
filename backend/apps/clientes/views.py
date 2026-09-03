@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, status
 from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.db.models import Count, Q
 from django.db.models import Prefetch
 from django.utils import timezone
+from django.http import HttpResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.empresas.models import Empresa, Taller
 from reportlab.lib.styles import ParagraphStyle
@@ -15,6 +16,12 @@ from apps.vehiculos.models import VehiculoPropietario
 from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import ClienteListSerializer, ClienteSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
+from .excel_import import (
+    CLIENT_COLUMNS,
+    importar_clientes_desde_xlsx,
+    generar_reporte_errores_xlsx,
+    generar_plantilla_xlsx,
+)
 
 
 class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
@@ -265,3 +272,82 @@ class ClienteExcelExportView(APIView):
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
                 status=500
             )
+
+
+class ClienteImportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    renderer_classes = [JSONRenderer]
+
+    def post(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403
+            )
+
+        archivo = request.FILES.get('archivo')
+        if not archivo:
+            return Response(
+                {'detail': 'No se envió ningún archivo. Debes adjuntar un archivo .xlsx.'},
+                status=400
+            )
+
+        nombre = (archivo.name or '').lower()
+        if not nombre.endswith('.xlsx'):
+            return Response(
+                {'detail': 'El archivo debe tener extensión .xlsx.'},
+                status=400
+            )
+
+        try:
+            resultado = importar_clientes_desde_xlsx(archivo, empresa_id)
+            if resultado['errores'] and not resultado['exitosos']:
+                estado = 400
+            else:
+                estado = 200
+            return Response(resultado, status=estado)
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo procesar el archivo. Verifica el formato de las columnas. ({str(e)})'},
+                status=400
+            )
+
+
+class ClienteImportErroresView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def post(self, request):
+        errores = request.data.get('errores')
+        if not isinstance(errores, list):
+            return Response(
+                {'detail': 'El campo "errores" debe ser una lista.'},
+                status=400
+            )
+
+        buffer = generar_reporte_errores_xlsx(errores)
+
+        response = HttpResponse(
+            buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="errores_importacion_clientes.xlsx"'
+        return response
+
+
+class ClienteImportTemplateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        buffer = generar_plantilla_xlsx()
+
+        response = HttpResponse(
+            buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="plantilla_importacion_clientes.xlsx"'
+        return response

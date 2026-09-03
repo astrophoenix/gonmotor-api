@@ -6,6 +6,7 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from .models import (
     DetalleRepuestoOrdenTrabajo,
     DetalleServicioOrdenTrabajo,
+    FotoRecepcion,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
@@ -86,8 +87,18 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         return rep
 
 
+class FotoRecepcionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FotoRecepcion
+        fields = ['id', 'tipo_vista', 'tipo_vista_display', 'imagen', 'descripcion', 'created_at']
+        read_only_fields = ['id', 'tipo_vista_display', 'created_at']
+
+    tipo_vista_display = serializers.CharField(source='get_tipo_vista_display', read_only=True)
+
+
 class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
+    fotos = FotoRecepcionSerializer(many=True, read_only=True)
 
     class Meta:
         model = RecepcionVehiculo
@@ -130,21 +141,79 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             rep['recibido_por_rol_display'] = None
         return rep
 
+    def _recolectar_fotos(self, request):
+        """Lee el bloque de hasta 5 fotos enviado por FormData.
+
+        Cada archivo viaja en un campo con nombre igual al tipo de vista, p.ej.
+        `foto_FRONTAL`, `foto_LATERAL_IZQ`, ... Solo se consideran las vistas
+        obligatorias definidas en FotoRecepcion.VISTAS_OBLIGATORIAS.
+        """
+        archivos = request.FILES or {}
+        fotos = {}
+        for tipo in FotoRecepcion.VISTAS_OBLIGATORIAS:
+            campo = f'foto_{tipo}'
+            archivo = archivos.get(campo)
+            if archivo:
+                fotos[tipo] = archivo
+        return fotos
+
+    def _validar_bloque_fotos(self, fotos):
+        """Valida que estén presentes exactamente las 5 vistas obligatorias."""
+        faltantes = [
+            tipo for tipo in FotoRecepcion.VISTAS_OBLIGATORIAS
+            if tipo not in fotos
+        ]
+        if faltantes:
+            nombres = ', '.join(
+                dict(FotoRecepcion.TipoVista.choices)[t] for t in faltantes
+            )
+            raise serializers.ValidationError({
+                'fotos': (
+                    'Debes subir las 5 fotos obligatorias de la recepción. '
+                    f'Faltan: {nombres}.'
+                )
+            })
+
+    def _guardar_fotos(self, instance, fotos):
+        """Crea el bloque de fotos de la recepción (reemplaza cada vista existente)."""
+        for tipo, archivo in fotos.items():
+            valor = tipo.value if isinstance(tipo, FotoRecepcion.TipoVista) else tipo
+            instance.fotos.filter(tipo_vista=valor).delete()
+            FotoRecepcion.objects.create(
+                recepcion=instance,
+                tipo_vista=valor,
+                imagen=archivo,
+            )
+
     def create(self, validated_data):
         request = self.context.get('request')
+        fotos = {}
         if request:
             empresa_id = get_empresa_id_desde_request(request)
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
             if not validated_data.get('recibido_por') and request.user.is_authenticated:
                 validated_data['recibido_por'] = request.user
-        return super().create(validated_data)
+            fotos = self._recolectar_fotos(request)
+        self._validar_bloque_fotos(fotos)
+        instance = super().create(validated_data)
+        self._guardar_fotos(instance, fotos)
+        return instance
 
     def update(self, instance, validated_data):
         validated_data.pop('fecha_firma_receptor', None)
         validated_data.pop('fecha_firma_cliente', None)
         validated_data.pop('aceptacion_condiciones', None)
-        return super().update(instance, validated_data)
+
+        request = self.context.get('request')
+        fotos = {}
+        if request:
+            fotos = self._recolectar_fotos(request)
+        self._validar_bloque_fotos(fotos)
+
+        instance = super().update(instance, validated_data)
+        self._guardar_fotos(instance, fotos)
+        return instance
 
 
 class OrdenTrabajoSerializer(serializers.ModelSerializer):
@@ -158,6 +227,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'empresa',
+            'sucursal',
             'cliente',
             'vehiculo',
             'asesor',

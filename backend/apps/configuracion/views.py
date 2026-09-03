@@ -1,9 +1,55 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.response import Response
-from apps.empresas.models import Empresa
+from django.db import IntegrityError
+from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
-from .serializers import EmpresaConfigSerializer
+from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
 from .permissions import IsEmpresaAdminOrReadOnly
+
+DUPLICATE_CODE_MESSAGE_TALLER = 'El código de sucursal ya está en uso por una sucursal activa.'
+
+
+class TallerConfigViewSet(viewsets.ModelViewSet):
+    """
+    CRUD de sucursales / talleres de la empresa en sesión.
+
+    GET/POST /api/configuracion/sucursales/        -> Listar / crear
+    GET/PUT/PATCH/DELETE /api/configuracion/sucursales/{id}/
+    """
+    serializer_class = TallerConfigSerializer
+    permission_classes = [IsEmpresaAdminOrReadOnly]
+
+    def get_empresa_id(self, request):
+        return get_empresa_id_desde_request(request)
+
+    def get_queryset(self):
+        empresa_id = self.get_empresa_id(self.request)
+        if not empresa_id:
+            return Taller.objects.none()
+        return Taller.objects.filter(empresa_id=empresa_id)
+
+    def perform_create(self, serializer):
+        empresa_id = self.get_empresa_id(self.request)
+        if not empresa_id:
+            raise PermissionError('No se pudo determinar la empresa en sesión.')
+        try:
+            serializer.save(empresa_id=empresa_id)
+        except IntegrityError as exc:
+            if 'una_sucursal_activa_por_empresa_codigo' in str(exc):
+                raise serializers.ValidationError({
+                    'codigo_sucursal': DUPLICATE_CODE_MESSAGE_TALLER
+                })
+            raise exc
+
+    def perform_update(self, serializer):
+        try:
+            serializer.save()
+        except IntegrityError as exc:
+            if 'una_sucursal_activa_por_empresa_codigo' in str(exc):
+                raise serializers.ValidationError({
+                    'codigo_sucursal': DUPLICATE_CODE_MESSAGE_TALLER
+                })
+            raise exc
 
 
 class EmpresaConfigViewSet(viewsets.ModelViewSet):
