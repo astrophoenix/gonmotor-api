@@ -104,8 +104,13 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD'),
         'HOST': config('DB_HOST'),
         'PORT': config('DB_PORT'),
+        'OPTIONS': {},
     }
 }
+
+DB_SSLMODE = config('DB_SSLMODE', default='')
+if DB_SSLMODE:
+    DATABASES['default']['OPTIONS']['sslmode'] = DB_SSLMODE
 
 
 # Password validation

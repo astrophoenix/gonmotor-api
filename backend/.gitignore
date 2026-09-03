@@ -10,6 +10,7 @@ venv/
 .venv/
 env/
 .env
+.env.production
 
 # Archivos subidos por usuarios
 media/
