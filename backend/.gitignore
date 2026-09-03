@@ -30,5 +30,6 @@ Thumbs.db
 *.swo
 
 # Django migrations generadas automáticamente (si aplica)
-*/migrations/*.py
-!*/migrations/__init__.py
+# NOTA: Las migraciones DEBEN subirse al repo para que el deploy funcione
+# */migrations/*.py
+# !*/migrations/__init__.py

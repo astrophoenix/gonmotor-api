@@ -1,0 +1,38 @@
+services:
+  - type: web
+    plan: free
+    name: gonmotor-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi --bind 0.0.0.0:$PORT
+    preDeployCommand: python manage.py migrate --noinput
+    healthCheckPath: /api/core/health/
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        syncFromBlueprint: false
+        value: gonmotor-api.onrender.com
+      - key: DB_NAME
+        syncFromBlueprint: false
+        value: ""
+      - key: DB_USER
+        syncFromBlueprint: false
+        value: ""
+      - key: DB_PASSWORD
+        syncFromBlueprint: false
+        value: ""
+      - key: DB_HOST
+        syncFromBlueprint: false
+        value: ""
+      - key: DB_PORT
+        syncFromBlueprint: false
+        value: "5432"
+      - key: FRONTEND_URL
+        syncFromBlueprint: false
+        value: ""
