@@ -16,23 +16,6 @@ services:
       - key: DEBUG
         value: "false"
       - key: ALLOWED_HOSTS
-        syncFromBlueprint: false
         value: gonmotor-api.onrender.com
-      - key: DB_NAME
-        syncFromBlueprint: false
-        value: ""
-      - key: DB_USER
-        syncFromBlueprint: false
-        value: ""
-      - key: DB_PASSWORD
-        syncFromBlueprint: false
-        value: ""
-      - key: DB_HOST
-        syncFromBlueprint: false
-        value: ""
-      - key: DB_PORT
-        syncFromBlueprint: false
-        value: "5432"
       - key: FRONTEND_URL
-        syncFromBlueprint: false
         value: ""
