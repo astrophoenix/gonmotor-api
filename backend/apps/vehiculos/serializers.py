@@ -46,6 +46,12 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
             'cliente_id',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            # La unicidad de placa se valida manualmente en create() para poder
+            # distinguir entre una placa activa (error normal) y una desactivada
+            # (recurso de reactivación/inactive_duplicate).
+            'placa': {'validators': []},
+        }
 
     def validate_imagen(self, value):
         if not value:
@@ -96,6 +102,38 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
                 except Empresa.DoesNotExist:
                     pass
 
+        # Normaliza la placa y valida unicidad manualmente (mismo criterio que
+        # VehiculoSerializer): activa → error normal; desactivada → inactive_duplicate.
+        placa = (validated_data.get('placa') or '').strip().upper()
+        validated_data['placa'] = placa
+
+        existe_activo = Vehiculo.objects.filter(
+            placa=placa,
+            is_active=True,
+        ).first()
+        if existe_activo:
+            raise serializers.ValidationError({
+                'placa': ['Ya existe Vehículo con este Placa.']
+            })
+
+        existe_inactivo = Vehiculo.objects.filter(
+            placa=placa,
+            is_active=False,
+        ).first()
+        if existe_inactivo:
+            raise serializers.ValidationError({
+                'inactive_duplicate': {
+                    'id': existe_inactivo.id,
+                    'placa': placa,
+                    'marca': existe_inactivo.marca,
+                    'modelo': existe_inactivo.modelo,
+                    'message': (
+                        f"Ya existe un vehículo desactivado con la placa {placa}. "
+                        f"Puedes activarlo."
+                    ),
+                }
+            })
+
         instance = super().create(validated_data)
         if imagen:
             instance.imagen = imagen
@@ -111,6 +149,20 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
         empresas = validated_data.pop('empresas', None)
         imagen = validated_data.pop('imagen', None)
         has_cliente = 'cliente_id' in self.get_initial()
+
+        placa = validated_data.get('placa')
+        if placa:
+            placa = placa.strip().upper()
+            validated_data['placa'] = placa
+            existe_activo = Vehiculo.objects.filter(
+                placa=placa,
+                is_active=True,
+            ).exclude(pk=instance.pk).first()
+            if existe_activo:
+                raise serializers.ValidationError({
+                    'placa': ['Ya existe Vehículo con este Placa.']
+                })
+
         instance = super().update(instance, validated_data)
         if imagen is not None:
             instance.imagen = imagen
@@ -154,6 +206,12 @@ class VehiculoSerializer(serializers.ModelSerializer):
         model = Vehiculo
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at', 'cliente_nombre', 'cliente_id']
+        extra_kwargs = {
+            # La unicidad de placa se valida manualmente en create() para poder
+            # distinguir entre una placa activa (error normal) y una desactivada
+            # (recurso de reactivación/inactive_duplicate).
+            'placa': {'validators': []},
+        }
 
     def create(self, validated_data):
         empresas = validated_data.pop('empresas', [])
@@ -167,6 +225,41 @@ class VehiculoSerializer(serializers.ModelSerializer):
                         empresas.append(user_empresa)
                 except Empresa.DoesNotExist:
                     pass
+
+        # Normaliza la placa (sin guiones ni espacios, en mayúsculas).
+        placa = (validated_data.get('placa') or '').strip().upper()
+        validated_data['placa'] = placa
+
+        # Propuesta 1:
+        # - Si la placa pertenece a un vehículo ACTIVO, se rechaza para no duplicar.
+        # - Si la placa pertenece a un vehículo DESACTIVADO (soft delete), se informa
+        #   con el id para que el usuario decida activarlo en vez de duplicar.
+        existe_activo = Vehiculo.objects.filter(
+            placa=placa,
+            is_active=True,
+        ).first()
+        if existe_activo:
+            raise serializers.ValidationError({
+                'placa': ['Ya existe Vehículo con este Placa.']
+            })
+
+        existe_inactivo = Vehiculo.objects.filter(
+            placa=placa,
+            is_active=False,
+        ).first()
+        if existe_inactivo:
+            raise serializers.ValidationError({
+                'inactive_duplicate': {
+                    'id': existe_inactivo.id,
+                    'placa': placa,
+                    'marca': existe_inactivo.marca,
+                    'modelo': existe_inactivo.modelo,
+                    'message': (
+                        f"Ya existe un vehículo desactivado con la placa {placa}. "
+                        f"Puedes activarlo."
+                    ),
+                }
+            })
 
         instance = super().create(validated_data)
         if empresas:

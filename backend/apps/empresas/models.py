@@ -47,7 +47,7 @@ class Empresa(BaseModel):
 
 class Taller(BaseModel):
     """
-    Representa una Sucursal o Taller físico de la Empresa.
+    Representa un Taller físico de la Empresa.
     """
     empresa = models.ForeignKey(
         Empresa, 
@@ -57,13 +57,13 @@ class Taller(BaseModel):
     )
     nombre = models.CharField(
         max_length=150, 
-        verbose_name="Nombre del Taller / Sucursal"
+        verbose_name="Nombre del Taller"
     )
     codigo_sucursal = models.CharField(
         max_length=10, 
         blank=True, 
         default="001",
-        verbose_name="Código de Sucursal (SRI / Contífico)"
+        verbose_name="Código de Taller (SRI / Contífico)"
     )
     ciudad = models.CharField(
         max_length=100,
@@ -82,8 +82,8 @@ class Taller(BaseModel):
     )
 
     class Meta:
-        verbose_name = "Taller / Sucursal"
-        verbose_name_plural = "Talleres / Sucursales"
+        verbose_name = "Taller"
+        verbose_name_plural = "Talleres"
         constraints = [
             models.UniqueConstraint(
                 fields=['empresa', 'codigo_sucursal'],

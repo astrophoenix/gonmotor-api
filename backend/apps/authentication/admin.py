@@ -71,7 +71,7 @@ class UsuarioEmpresaAdmin(admin.ModelAdmin):
         ('Asignación Principal', {
             'fields': ('user', 'empresa', 'rol')
         }),
-        ('Talleres/Sucursales Permitidas', {
+        ('Talleres Permitidos', {
             'fields': ('talleres',)
         }),
         ('Estado y Auditoría', {

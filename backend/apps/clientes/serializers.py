@@ -4,7 +4,6 @@ import json
 from .models import Cliente
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario
 from apps.vehiculos.serializers import VehiculoSerializer, VehiculoNestedSerializer
-from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.cotizaciones.models import Cotizacion
 from apps.ordenes.models import OrdenTrabajo
@@ -50,6 +49,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
 
 class ClienteSerializer(serializers.ModelSerializer):
     vehiculos = serializers.JSONField(required=False, write_only=True)
+    is_active = serializers.BooleanField(required=False, default=True)
 
     class Meta:
         model = Cliente
@@ -110,6 +110,10 @@ class ClienteSerializer(serializers.ModelSerializer):
                 vehiculo = Vehiculo.objects.filter(placa=placa).first()
 
             if vehiculo:
+                # Reactiva el vehículo si fue desactivado (soft delete).
+                if not vehiculo.is_active:
+                    vehiculo.is_active = True
+                    vehiculo.save(update_fields=['is_active'])
                 if eliminar_imagen and not imagen and vehiculo.imagen:
                     vehiculo.imagen.delete(save=False)
                     vehiculo.imagen = None
@@ -195,21 +199,50 @@ class ClienteSerializer(serializers.ModelSerializer):
         vehiculos_data = self._parsear_vehiculos_data(validated_data, request)
 
         if request and request.user.is_authenticated:
-            empresa_id = None
-
-            if hasattr(request, 'auth') and isinstance(request.auth, dict):
-                empresa_id = request.auth.get('empresa_id')
-
-            if not empresa_id:
-                relacion = UsuarioEmpresa.objects.filter(
-                    user=request.user,
-                    is_active=True
-                ).first()
-                if relacion:
-                    empresa_id = relacion.empresa_id
+            empresa_id = get_empresa_id_desde_request(request)
 
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
+
+                # Normaliza la identificación para búsquedas y almacenamiento.
+                identificacion = (validated_data.get('identificacion') or '').strip().upper()
+                validated_data['identificacion'] = identificacion
+
+                # Un cliente ACTIVO con la misma identificación en esta empresa
+                # impide crear un duplicado (se replica el error que antes daba
+                # el UniqueValidator de DRF).
+                existe_activo = Cliente.objects.filter(
+                    empresa_id=empresa_id,
+                    identificacion=identificacion,
+                    is_active=True,
+                ).first()
+                if existe_activo:
+                    raise serializers.ValidationError({
+                        "identificacion": [
+                            "Ya existe un cliente activo con esta identificación."
+                        ]
+                    })
+
+                # Propuesta 1: si existe un cliente desactivado con la misma
+                # identificación en ESTA empresa, se informa al usuario con el id
+                # para que decida activarlo (el frontend hace PATCH con is_active=True).
+                existe_inactivo = Cliente.objects.filter(
+                    empresa_id=empresa_id,
+                    identificacion=identificacion,
+                    is_active=False,
+                ).first()
+                if existe_inactivo:
+                    raise serializers.ValidationError({
+                        'inactive_duplicate': {
+                            'id': existe_inactivo.id,
+                            'identificacion': identificacion,
+                            'nombre': existe_inactivo.nombre,
+                            'message': (
+                                f"Ya existe un cliente desactivado con la identificación "
+                                f"{identificacion}. Puedes activarlo."
+                            ),
+                        }
+                    })
             else:
                 raise serializers.ValidationError({
                     "empresa": "No se pudo determinar la empresa activa del usuario en sesión."

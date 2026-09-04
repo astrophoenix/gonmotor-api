@@ -6,7 +6,7 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
 from .permissions import IsEmpresaAdminOrReadOnly
 
-DUPLICATE_CODE_MESSAGE_TALLER = 'El código de sucursal ya está en uso por una sucursal activa.'
+DUPLICATE_CODE_MESSAGE_TALLER = 'El código del taller ya está en uso por un taller activo.'
 
 
 class TallerConfigViewSet(viewsets.ModelViewSet):
@@ -28,10 +28,28 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
             return Taller.objects.none()
         return Taller.objects.filter(empresa_id=empresa_id)
 
+    def _validar_nombre_duplicado(self, nombre, taller_id=None):
+        empresa_id = self.get_empresa_id(self.request)
+        nombre = (nombre or '').strip()
+        if not empresa_id or not nombre:
+            return
+        qs = Taller.objects.filter(
+            empresa_id=empresa_id,
+            nombre__iexact=nombre,
+            is_active=True,
+        )
+        if taller_id:
+            qs = qs.exclude(pk=taller_id)
+        if qs.exists():
+            raise serializers.ValidationError({
+                'nombre': 'Ya existe un taller activo con este nombre en la empresa.'
+            })
+
     def perform_create(self, serializer):
         empresa_id = self.get_empresa_id(self.request)
         if not empresa_id:
             raise PermissionError('No se pudo determinar la empresa en sesión.')
+        self._validar_nombre_duplicado(serializer.validated_data.get('nombre'))
         try:
             serializer.save(empresa_id=empresa_id)
         except IntegrityError as exc:
@@ -42,6 +60,10 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
             raise exc
 
     def perform_update(self, serializer):
+        self._validar_nombre_duplicado(
+            serializer.validated_data.get('nombre'),
+            taller_id=self.get_object().pk,
+        )
         try:
             serializer.save()
         except IntegrityError as exc:

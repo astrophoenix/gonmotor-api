@@ -24,7 +24,6 @@ class Cliente(BaseModel):
     identificacion = models.CharField(
         verbose_name="Identificación (Cédula/RUC/Pasaporte)",
         max_length=20,
-        unique=True
     )
     nombre = models.CharField(
         verbose_name="Nombre o Razón Social",

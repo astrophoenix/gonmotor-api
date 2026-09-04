@@ -37,8 +37,8 @@ class OrdenTrabajo(BaseModel):
         null=True,
         blank=True,
         related_name='ordenes_trabajo',
-        verbose_name='Sucursal / Taller',
-        help_text='Sucursal donde se atiende la orden (opcional)'
+        verbose_name='Taller',
+        help_text='Taller donde se atiende la orden (opcional)'
     )
     cliente = models.ForeignKey('clientes.Cliente', on_delete=models.PROTECT, related_name='ordenes_trabajo')
     vehiculo = models.ForeignKey('vehiculos.Vehiculo', on_delete=models.PROTECT, related_name='ordenes_trabajo')
@@ -172,8 +172,8 @@ class RecepcionVehiculo(BaseModel):
         null=True,
         blank=True,
         related_name='recepciones',
-        verbose_name='Sucursal / Taller',
-        help_text='Sucursal donde ingresó el vehículo (opcional)',
+        verbose_name='Taller',
+        help_text='Taller donde ingresó el vehículo (opcional)',
     )
     cliente = models.ForeignKey(
         'clientes.Cliente',
@@ -363,8 +363,8 @@ class InspeccionVehiculo(BaseModel):
         null=True,
         blank=True,
         related_name='inspecciones',
-        verbose_name='Sucursal / Taller',
-        help_text='Sucursal donde se realizó la inspección (opcional)'
+        verbose_name='Taller',
+        help_text='Taller donde se realizó la inspección (opcional)'
     )
     orden_trabajo = models.OneToOneField(
         'ordenes.OrdenTrabajo',

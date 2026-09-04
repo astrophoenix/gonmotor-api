@@ -24,7 +24,7 @@ class TallerConfigSerializer(serializers.ModelSerializer):
     def validate_nombre(self, value):
         value = (value or '').strip()
         if not value:
-            raise serializers.ValidationError('El nombre de la sucursal es obligatorio.')
+            raise serializers.ValidationError('El nombre del taller es obligatorio.')
         return value
 
     def validate_direccion(self, value):
@@ -36,7 +36,7 @@ class TallerConfigSerializer(serializers.ModelSerializer):
     def validate_codigo_sucursal(self, value):
         value = (value or '').strip()
         if not value:
-            raise serializers.ValidationError('El código de sucursal es obligatorio.')
+            raise serializers.ValidationError('El código del taller es obligatorio.')
         return value[:10]
 
     def validate_ciudad(self, value):
@@ -60,7 +60,7 @@ class TallerConfigSerializer(serializers.ModelSerializer):
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
                 raise serializers.ValidationError({
-                    'codigo_sucursal': 'El código de sucursal ya está en uso por una sucursal activa.'
+                    'codigo_sucursal': 'El código del taller ya está en uso por un taller activo.'
                 })
         return attrs
 

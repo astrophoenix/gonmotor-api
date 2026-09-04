@@ -433,7 +433,14 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         talleres_qs = Taller.objects.filter(empresa_id=empresa_id, is_active=True).order_by('nombre')
         data = [
-            {'id': t.id, 'nombre': t.nombre, 'codigo_sucursal': t.codigo_sucursal}
+            {
+                'id': t.id,
+                'nombre': t.nombre,
+                'codigo_sucursal': t.codigo_sucursal,
+                'ciudad': t.ciudad,
+                'direccion': t.direccion,
+                'telefono': t.telefono,
+            }
             for t in talleres_qs
         ]
         return Response(data)

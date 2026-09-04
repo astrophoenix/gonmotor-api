@@ -52,7 +52,10 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         queryset = Cliente.objects.filter(empresa_id=empresa_id)
 
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
-        if not include_inactive:
+
+        # Las acciones de mutación (editar/reactivar/eliminar) deben acceder
+        # también a registros desactivados; solo list/retrieve ocultan inactivos.
+        if self.action in ['list', 'retrieve'] and not include_inactive:
             queryset = queryset.filter(is_active=True)
 
         if self.action in ['list', 'retrieve']:

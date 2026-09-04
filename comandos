@@ -193,7 +193,7 @@ Razón: La OT es el contrato de ejecución. Si durante el trabajo se encuentra u
 
 
 
-Site: https://gonmotor-dimmioy9v-gonmotor.vercel.app/authentication/sign-in/
+Site: https://gonmotor-ui.vercel.app
 Admin Django: https://gonmotor-api.onrender.com/admin/login/?next=/admin/
 user: gromero
 pass: Pegazo13_
@@ -202,3 +202,95 @@ Plataformas:
 BD: https://console.neon.tech/
 Frontend: https://vercel.com/login
 Backend: https://dashboard.render.com/login
+
+
+
+Entidad	Crear	Editar	Justificación
+Clientes	✅ Modal	✅ Modal	Campos ligeros; ya existe el modal.
+Vehículos	✅ Modal (ancho completo)	✅ Modal (ancho completo)	Muchos campos pero en cuadrícula; manageable en modal wide.
+Empleados	✅ Modal	✅ Modal	Formulario medio; se adapta.
+Recepciones	⚠️ Modal wide	⚠️ Modal wide	Grandísimo; requiere modal a ancho completo + buen scroll.
+Inspecciones	⚠️ Modal wide	⚠️ Modal wide	Ídem, con fotos/diagrama.
+Sucursales/Talleres	✅ Modal	✅ Modal	Corto; trivial.
+
+Contrato definitivo que propongo
+crear y editar se abren en modal (ancho completo para formularios pesados).
+Fallo → modal abierto + Alert error dentro + errores de campo mapeados + datos intactos.
+Éxito → modal se cierra + Alert success en listado + recarga de datos preservando contexto (búsqueda/página/filtros).
+Cerrar con cambios sin guardar → confirmación para no perder datos.
+Clic fuera → no cierra (consistente con la decisión previa de crear-cliente).
+Refresco post-éxito mantiene la página; foco/scroll y resaltado opcional de la fila tocada
+
+Excelente pregunta — es exactamente la definición de contrato que necesitamos antes de tocar código. Es **totalmente posible** y, si se implementa bien, **mejora notablemente** el flujo. Déjame analizarlo con precisión.
+
+## Sí, es posible — y ya está casi probado en tu código
+
+El patrón que describes **ya existe en producción** dentro de `ClientCreateModal.vue` usado desde recepción:
+
+```js
+// submit() en ClientCreateModal.vue
+successMessage.value = 'Cliente creado correctamente.';
+emit('created', response);   // ← el padre recibe el cliente creado
+```
+
+- ❌ **Fallo**: `catch` → muestra `Alert` de error **dentro del modal** (`errorMessage.value = ...`), el modal **permanece abierto** y conserva los datos. (Además guarda en `clientErrors`/`vehiculoErrors` para marcar campos.)
+- ✅ **Éxito**: muestra alerta, emite `created`, el modal **se cierra** (`onClientCreated` en `RecepcionEdit.vue` hace `showClientCreateModal.value = false`), y el cliente queda seleccionado.
+
+O sea: el contrato que pides **ya es funcional** en este mismo proyecto. Lo que falta es **replicarlo y estandarizarlo** para crear/editar desde el listado.
+
+## Flujo objetivo (lo que definiremos como estándar)
+
+```
+Usuario pulsa "Agregar" / "Editar"
+   └─ modal abre (con datos si es edición)
+        ├─ guarda → fallo? → Alert error DENTRO del modal + modal abierto + datos intactos
+        │            └─ (mensaje de error del backend, ej. "código ya en uso")
+        └─ guarda → éxito? → cierra modal
+                   → Alert success FUERA (en el listado)
+                   → recarga el listado (re-llamada API)
+                   → mantiene búsqueda/página/filtros activos
+```
+
+## Puntos críticos que hay que resolver para que sea fluido de verdad
+
+Estos son los detalles que distinguen un modal "que funciona" de un modal "fluido":
+
+**1. Seguridad ante pérdida de datos (el más importante)**
+- Si el usuario tiene datos sin guardar y cierra el modal (X o cancelar), debería **confirmarse** o simplemente **no cerrarse**. Ya lo pediste para crear-cliente. Hay que generalizarlo: botón X/Cancelar cuando hay cambios → confirmación ("¿Descartar cambios?").
+- Idealmente el CTA del modal es "Guardar"; cerrar con clic fuera **nunca** (para no perder todo un formulario de edición).
+
+**2. Persistencia en el estado de error**
+- En **crear**: si falla, se queda abierto con todo lo escrito.
+- En **editar**: si falla, se queda abierto con los datos tal cual + los errores de campo marcados.
+- Los errores de backend (`errors.codigo_sucursal`, etc.) deben **mapearse a los campos** del modal, no solo mostrarse como mensaje genérico.
+
+**3. Preservar contexto del listado al recargar**
+- Al refrescar tras éxito, re-llamar al API manteniendo **página, término de búsqueda y filtros** que el usuario tenía. Hoy los listados ya lo manejan; hay que no resetearlos al cerrar el modal.
+
+**4. Feedback explícito, no silencioso**
+- Éxito: `Alert success` visible en el listado (ya lo haces). Adicional, opcional y muy bueno: **destacar la fila recién creada/editada** (un scroll + resaltado temporal). Eso cierra el ciclo "creé el ítem y lo veo".
+- Para edición, mantener el foco: saber qué fila era.
+
+**5. Refresco que no rompa la interacción**
+- Si recargas y el usuario está en página 3 con búsqueda "María", debe volver a página 3 filtrado, no soltarlo a página 1.
+
+## Veredicto sobre la experiencia
+
+**Mejora el flujo de forma tangible**, porque:
+- Cero recargas de página (el mayor cuello de botella actual con Hugo+webpack).
+- Feedback inmediato y contextual (error queda donde el usuario ve su propio dato).
+- Consistencia visual crear/editar.
+- Reduce fricción para tareas frecuentes (clientes, vehículos, proveedores).
+
+**El único costo real**: hay que diseñar bien los modales de **edición** (que son formularios más grandes) y el manejo de **cierre con datos sin guardar**. Eso es trabajo de implementación, no un impedimento de diseño.
+
+## Contrato definitivo que propongo
+
+1. `crear` y `editar` se abren en **modal** (ancho completo para formularios pesados).
+2. **Fallo** → modal abierto + `Alert` error dentro + errores de campo mapeados + datos intactos.
+3. **Éxito** → modal se cierra + `Alert` success en listado + recarga de datos **preservando contexto** (búsqueda/página/filtros).
+4. **Cerrar con cambios sin guardar** → confirmación para no perder datos.
+5. **Clic fuera** → no cierra (consistente con la decisión previa de crear-cliente).
+6. Refresco post-éxito mantiene la página; foco/scroll y resaltado opcional de la fila tocada.
+
+Si estás de acuerdo con este contrato, lo **documento como el estándar** en un archivo de diseño (o directamente en `AGENTS.md` para tenerlo presente en cada tarea) y con eso arrancamos la implementación por entidad. ¿Confirmas el contrato tal cual, o ajustamos algún punto (por ejemplo, si el resaltado de fila lo quieres o prefieres algo más simple)?
