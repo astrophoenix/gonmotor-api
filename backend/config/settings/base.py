@@ -203,7 +203,7 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
 ]
 
-CORS_ALLOWED_ORIGINS = [
+_default_cors_origins = [
     'http://localhost:1313',
     'http://127.0.0.1:1313',
     'http://localhost:5173',
@@ -211,14 +211,14 @@ CORS_ALLOWED_ORIGINS = [
     'https://gonmotor-dimmioy9v-gonmotor.vercel.app',
 ]
 
+# Orígenes permitidos para CORS/CSRF, configurables por variable de entorno
+# (lista separada por comas). Incluye por defecto los de desarrollo.
+_cors_env = config('CORS_ALLOWED_ORIGINS', default='', cast=lambda v: [s.strip() for s in v.split(',') if s.strip()])
+
+CORS_ALLOWED_ORIGINS = _default_cors_origins + _cors_env
+
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:1313',
-    'http://127.0.0.1:1313',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'https://gonmotor-dimmioy9v-gonmotor.vercel.app',
-]
+CSRF_TRUSTED_ORIGINS = _default_cors_origins + _cors_env
 
 # Permitir la cabecera personalizada del Tenant en el Preflight CORS
 CORS_ALLOW_HEADERS = [
