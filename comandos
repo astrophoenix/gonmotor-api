@@ -190,3 +190,15 @@ Razón: El cliente debe ver exactamente lo mismo que está en el sistema. Una ve
 Cuándo es editable: La OT nace de una cotización aprobada, por lo que su alcance, costos y repuestos originales nunca deben ser editables.
 Qué sí se puede modificar: Únicamente los estados de ejecución (En progreso, En pausa, Finalizado) y la adición de notas de progreso internas del técnico.
 Razón: La OT es el contrato de ejecución. Si durante el trabajo se encuentra un daño oculto, la mejor práctica del software no es alterar la OT original, sino generar un documento anexo (una "Cotización Suplementaria").
+
+
+
+Site: https://gonmotor-dimmioy9v-gonmotor.vercel.app/authentication/sign-in/
+Admin Django: https://gonmotor-api.onrender.com/admin/login/?next=/admin/
+user: gromero
+pass: Pegazo13_
+
+Plataformas:
+BD: https://console.neon.tech/
+Frontend: https://vercel.com/login
+Backend: https://dashboard.render.com/login

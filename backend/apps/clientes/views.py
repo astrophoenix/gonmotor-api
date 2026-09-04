@@ -8,7 +8,8 @@ from django.db.models import Prefetch
 from django.utils import timezone
 from django.http import HttpResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.empresas.models import Empresa, Taller
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+# from apps.empresas.models import Empresa, Taller
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 from .models import Cliente

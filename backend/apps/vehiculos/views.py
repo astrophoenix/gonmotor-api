@@ -6,6 +6,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoPropietario
