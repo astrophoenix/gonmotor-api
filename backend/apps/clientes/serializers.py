@@ -85,12 +85,8 @@ class ClienteSerializer(serializers.ModelSerializer):
         empresa_id = get_empresa_id_desde_request(request)
         vehiculos_actuales_ids = set()
 
-        print(f"[DEBUG] _procesar_vehiculos para cliente {cliente.id}: {len(vehiculos_data)} vehículos")
-        print(f"[DEBUG] request.FILES keys: {list(request.FILES.keys())}")
-
         for index, vehiculo_data in enumerate(vehiculos_data):
             imagen = request.FILES.get(f'vehiculo_{index}_imagen')
-            print(f"[DEBUG] Vehículo {index}: id={vehiculo_data.get('id')}, placa={vehiculo_data.get('placa')}, imagen={imagen}")
             if imagen:
                 vehiculo_data['imagen'] = imagen
 
@@ -147,51 +143,39 @@ class ClienteSerializer(serializers.ModelSerializer):
         )
         
         if not vehiculos_actuales_ids:
-            print(f"[DEBUG] No hay vehículos en el formulario, desactivando todas las relaciones")
             vehiculos_desactivados_ids = list(relaciones_actuales.values_list('vehiculo_id', flat=True))
             relaciones_actuales.update(es_actual=False)
         else:
             vehiculos_desactivados = relaciones_actuales.exclude(vehiculo_id__in=vehiculos_actuales_ids)
             vehiculos_desactivados_ids = list(vehiculos_desactivados.values_list('vehiculo_id', flat=True))
-            print(f"[DEBUG] Vehículos desactivados: {vehiculos_desactivados_ids}")
             vehiculos_desactivados.update(es_actual=False)
         
         for vehiculo_id in vehiculos_desactivados_ids:
             try:
                 vehiculo = Vehiculo.objects.get(id=vehiculo_id)
             except Vehiculo.DoesNotExist:
-                print(f"[DEBUG] Vehículo {vehiculo_id} no existe")
                 continue
             
             otras_asociaciones = VehiculoPropietario.objects.filter(
                 vehiculo=vehiculo
             ).exclude(cliente=cliente).exists()
-            print(f"[DEBUG] Vehículo {vehiculo_id}: otras_asociaciones={otras_asociaciones}")
             
             if not otras_asociaciones:
                 tiene_cotizaciones = Cotizacion.objects.filter(vehiculo=vehiculo).exists()
                 tiene_ordenes = OrdenTrabajo.objects.filter(vehiculo=vehiculo).exists()
-                print(f"[DEBUG] Vehículo {vehiculo_id}: cotizaciones={tiene_cotizaciones}, ordenes={tiene_ordenes}")
                 
                 if not tiene_cotizaciones and not tiene_ordenes:
-                    print(f"[DEBUG] Eliminando vehículo {vehiculo_id}")
                     vehiculo.delete()
-                else:
-                    print(f"[DEBUG] NO eliminando vehículo {vehiculo_id} por cotizaciones/ordenes")
 
     def _parsear_vehiculos_data(self, validated_data, request):
         vehiculos_data = validated_data.pop('vehiculos', [])
-        print(f"[DEBUG] _parsear_vehiculos_data: tipo={type(vehiculos_data)}, valor={vehiculos_data!r}")
         if isinstance(vehiculos_data, str):
             try:
                 vehiculos_data = json.loads(vehiculos_data)
-                print(f"[DEBUG] Parseado JSON: {vehiculos_data}")
             except json.JSONDecodeError as e:
-                print(f"[DEBUG] Error parseando JSON: {e}")
                 vehiculos_data = []
         if not isinstance(vehiculos_data, list):
             vehiculos_data = []
-        print(f"[DEBUG] vehiculos_data final: {len(vehiculos_data)} items")
         return vehiculos_data
 
     def create(self, validated_data):
@@ -257,12 +241,10 @@ class ClienteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         request = self.context.get('request')
         vehiculos_data = self._parsear_vehiculos_data(validated_data, request)
-        print(f"[DEBUG] update() cliente {instance.id}: vehiculos_data={vehiculos_data}")
 
         with transaction.atomic():
             instance = super().update(instance, validated_data)
             if vehiculos_data is not None:
-                print(f"[DEBUG] Llamando _procesar_vehiculos para cliente {instance.id}")
                 self._procesar_vehiculos(instance, vehiculos_data)
 
         return instance

@@ -20,7 +20,6 @@ def get_empresa_id_desde_request(request):
     # 2. Leer desde la cabecera HTTP personalizada X-Empresa-ID
     if not empresa_id:
         empresa_id = request.headers.get('X-Empresa-ID')
-        print(f"Empresa ID desde cabecera: {empresa_id}")
 
     # 3. Validación para usuarios normales
     if empresa_id and not user.is_superuser:

@@ -107,6 +107,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep['estado_display'] = instance.get_estado_display()
         if instance.vehiculo_id:
             rep['vehiculo'] = {
                 'id': instance.vehiculo_id,
@@ -185,6 +186,21 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
                 imagen=archivo,
             )
 
+    def validate(self, attrs):
+        if getattr(self.instance, 'estado', None) or attrs.get('estado'):
+            estado = attrs.get('estado') or (self.instance.estado if self.instance else 'PENDIENTE')
+        else:
+            estado = 'PENDIENTE'
+        if estado == 'NO_ACEPTADA':
+            motivo = attrs.get('motivo_no_recepcion')
+            if motivo is None and self.instance:
+                motivo = self.instance.motivo_no_recepcion
+            if not (motivo or '').strip():
+                raise serializers.ValidationError({
+                    'motivo_no_recepcion': 'El motivo de la no aceptación es obligatorio.'
+                })
+        return attrs
+
     def create(self, validated_data):
         request = self.context.get('request')
         fotos = {}
@@ -195,12 +211,17 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             if not validated_data.get('recibido_por') and request.user.is_authenticated:
                 validated_data['recibido_por'] = request.user
             fotos = self._recolectar_fotos(request)
-        self._validar_bloque_fotos(fotos)
+        if validated_data.get('estado') != 'NO_ACEPTADA':
+            self._validar_bloque_fotos(fotos)
         instance = super().create(validated_data)
         self._guardar_fotos(instance, fotos)
         return instance
 
     def update(self, instance, validated_data):
+        if instance.aceptacion_condiciones and instance.fecha_firma_cliente:
+            raise serializers.ValidationError({
+                'detail': 'No se puede editar una recepción cuyo cliente ya aceptó y firmó las condiciones de recepción.'
+            })
         validated_data.pop('fecha_firma_receptor', None)
         validated_data.pop('fecha_firma_cliente', None)
         validated_data.pop('aceptacion_condiciones', None)
@@ -209,7 +230,8 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
         fotos = {}
         if request:
             fotos = self._recolectar_fotos(request)
-        self._validar_bloque_fotos(fotos)
+        if validated_data.get('estado') != 'NO_ACEPTADA':
+            self._validar_bloque_fotos(fotos)
 
         instance = super().update(instance, validated_data)
         self._guardar_fotos(instance, fotos)

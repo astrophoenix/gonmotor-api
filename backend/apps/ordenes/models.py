@@ -226,7 +226,10 @@ class RecepcionVehiculo(BaseModel):
     )
 
     kilometraje_ingreso = models.PositiveIntegerField(
-        verbose_name='Kilometraje de Ingreso'
+        null=True,
+        blank=True,
+        verbose_name='Kilometraje de Ingreso',
+        help_text='Opcional cuando el cliente no deja el vehículo',
     )
     nivel_combustible = models.CharField(
         max_length=10,
@@ -324,6 +327,26 @@ class RecepcionVehiculo(BaseModel):
         default=False,
         verbose_name='Aceptación de condiciones',
         help_text='Indica si el cliente aceptó las condiciones de recepción y estado del vehículo',
+    )
+
+    # --- ESTADO Y ACEPTACIÓN DE LA RECEPCIÓN ---
+    ESTADO_CHOICES = [
+        ('PENDIENTE', 'Pendiente de Firma'),
+        ('ACEPTADA', 'Aceptada y Firmada'),
+        ('NO_ACEPTADA', 'No Aceptada / Sin Firma'),
+    ]
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADO_CHOICES,
+        default='PENDIENTE',
+        verbose_name='Estado de la recepción',
+        help_text='Estado de la recepción respecto a la firma y aceptación del cliente',
+    )
+    motivo_no_recepcion = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Motivo de no recepción',
+        help_text='Observaciones cuando el cliente no aceptó las condiciones, no firmó o decidió no dejar el vehículo',
     )
 
     class Meta:

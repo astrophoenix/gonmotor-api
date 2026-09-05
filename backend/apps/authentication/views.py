@@ -301,17 +301,13 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         final_empresa_id = query_empresa_id or empresa_id
 
-        print(f"[EMPLEADO LIST] usuario={self.request.user.id}, empresa_id_header={empresa_id}, query_empresa={query_empresa_id}, final={final_empresa_id}")
-
         if not final_empresa_id:
             return UsuarioEmpresa.objects.none()
 
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         queryset = UsuarioEmpresa.objects.filter(empresa_id=final_empresa_id)
-        print(f"[EMPLEADO LIST] queryset_count={queryset.count()}")
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
-        print(f"[EMPLEADO LIST] final_count={queryset.count()}")
 
         return queryset.select_related('user', 'empresa').prefetch_related('talleres', 'user__profile')
 
@@ -325,12 +321,10 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         empresa_id = get_empresa_id_desde_request(request)
-        print(f"[EMPLEADO CREATE] usuario={request.user.id}, empresa_id={empresa_id}, empresa={empresa.id if empresa else None}")
         if not empresa_id:
             raise ValidationError({'empresa': 'No se pudo determinar la empresa activa.'})
         
         empresa = Empresa.objects.filter(id=empresa_id, is_active=True).first()
-        print(f"[EMPLEADO CREATE] empresa encontrada={empresa.id if empresa else None}")
         if not empresa:
             raise ValidationError({'empresa': 'La empresa seleccionada no está activa.'})
         
