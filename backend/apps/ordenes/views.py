@@ -56,7 +56,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         if instance.firma_receptor and not instance.fecha_firma_receptor:
             instance.fecha_firma_receptor = timezone.now()
             instance.save(update_fields=['fecha_firma_receptor'])
-        if instance.firma_cliente and not instance.fecha_firma_cliente:
+        if instance.firma_cliente and not instance.aceptacion_condiciones:
             instance.fecha_firma_cliente = timezone.now()
             instance.aceptacion_condiciones = True
             instance.estado = 'ACEPTADA'
@@ -68,10 +68,18 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         if instance.firma_receptor and not instance.fecha_firma_receptor:
             instance.fecha_firma_receptor = timezone.now()
             instance.save(update_fields=['fecha_firma_receptor'])
-        if instance.firma_cliente and not instance.fecha_firma_cliente:
+        elif not instance.firma_receptor and instance.fecha_firma_receptor:
+            instance.fecha_firma_receptor = None
+            instance.save(update_fields=['fecha_firma_receptor'])
+        if instance.firma_cliente and not instance.aceptacion_condiciones:
             instance.fecha_firma_cliente = timezone.now()
             instance.aceptacion_condiciones = True
             instance.estado = 'ACEPTADA'
+            instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
+        elif not instance.firma_cliente and instance.aceptacion_condiciones:
+            instance.fecha_firma_cliente = None
+            instance.aceptacion_condiciones = False
+            instance.estado = 'PENDIENTE'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
 
 

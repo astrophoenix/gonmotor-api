@@ -158,11 +158,23 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
                 fotos[tipo] = archivo
         return fotos
 
-    def _validar_bloque_fotos(self, fotos):
-        """Valida que estén presentes exactamente las 5 vistas obligatorias."""
+    def _validar_bloque_fotos(self, fotos, vistas_adicionales=None):
+        """Valida que estén presentes las vistas obligatorias.
+
+        `fotos` son las recién adjuntadas; `vistas_adicionales` trae las vistas
+        que la recepción ya tenía registradas (caso edición: no es necesario
+        reenviar un archivo para una vista que ya existe en la BD).
+        """
+        presentes = set(fotos.keys())
+        if vistas_adicionales:
+            presentes |= {
+                t.value if isinstance(t, FotoRecepcion.TipoVista) else t
+                for t in vistas_adicionales
+                if t
+            }
         faltantes = [
             tipo for tipo in FotoRecepcion.VISTAS_OBLIGATORIAS
-            if tipo not in fotos
+            if (tipo.value if isinstance(tipo, FotoRecepcion.TipoVista) else tipo) not in presentes
         ]
         if faltantes:
             nombres = ', '.join(
@@ -231,7 +243,10 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
         if request:
             fotos = self._recolectar_fotos(request)
         if validated_data.get('estado') != 'NO_ACEPTADA':
-            self._validar_bloque_fotos(fotos)
+            self._validar_bloque_fotos(
+                fotos,
+                vistas_adicionales=instance.fotos.values_list('tipo_vista', flat=True),
+            )
 
         instance = super().update(instance, validated_data)
         self._guardar_fotos(instance, fotos)
