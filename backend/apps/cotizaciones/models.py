@@ -86,33 +86,52 @@ class Cotizacion(BaseModel):
     def __str__(self):
         return f'{self.numero_cotizacion} - {self.cliente}'
 
+    def _generar_numero_orden(self):
+        """Genera un numero_orden secuencial único por empresa (prefijo + empresa + id)."""
+        from apps.ordenes.models import OrdenTrabajo
+
+        ultimo = OrdenTrabajo.objects.filter(empresa_id=self.empresa_id).order_by('-id').first()
+        siguiente = (ultimo.id + 1) if ultimo else 1
+        return f'OT-{self.empresa_id:04d}-{siguiente:04d}'
+
     def convertir_a_orden(self, usuario=None):
         """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
         if self.estado != self.EstadoCotizacion.ACEPTADA:
             raise ValueError("La cotización debe estar aceptada para convertirla a orden.")
 
-        from apps.ordenes.models import OrdenTrabajo, RecepcionVehiculo, InspeccionVehiculo
+        from apps.ordenes.models import OrdenTrabajo
 
         inspeccion = self.inspeccion_origen
+        if inspeccion is None and self.recepcion_origen:
+            inspeccion = self.recepcion_origen.inspecciones.first()
         recepcion = self.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
+
+        vehiculo = self.vehiculo or (recepcion.vehiculo if recepcion else None)
+        cliente = self.cliente
+        if not vehiculo or not cliente:
+            raise ValueError(
+                'No se puede convertir la cotización a orden: faltan cliente o vehículo. '
+                'Asócialos a la cotización o a su recepción de origen.'
+            )
 
         ot = OrdenTrabajo.objects.create(
             empresa=self.empresa,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
+            sucursal=self.empresa.talleres.first() if hasattr(self.empresa, 'talleres') else None,
+            cliente=cliente,
+            vehiculo=vehiculo,
+            asesor=usuario,
             cotizacion_origen=self,
-            kilometraje_ingreso=recepcion.kilometraje_ingreso if recepcion else 0,
-            nivel_combustible=recepcion.nivel_combustible if recepcion else '1/4',
-            falla_reportada=inspeccion.falla_reportada if inspeccion else '',
-            diagnostico_tecnico=inspeccion.diagnostico_tecnico if inspeccion else None,
+            numero_orden=self._generar_numero_orden(),
+            tipo_trabajo=inspeccion.tipo_inspeccion if inspeccion else OrdenTrabajo.TipoTrabajo.CORRECTIVO,
+            observaciones_internas=inspeccion.diagnostico_tecnico if inspeccion else None,
         )
 
         if recepcion:
             recepcion.orden_trabajo = ot
-            recepcion.save()
+            recepcion.save(update_fields=['orden_trabajo', 'updated_at'])
         if inspeccion:
             inspeccion.orden_trabajo = ot
-            inspeccion.save()
+            inspeccion.save(update_fields=['orden_trabajo', 'updated_at'])
 
         self.estado = self.EstadoCotizacion.CONVERTIDA
         self.fecha_aceptacion = timezone.now()

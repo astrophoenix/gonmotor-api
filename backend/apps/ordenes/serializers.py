@@ -4,7 +4,9 @@ from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.utils import get_empresa_id_desde_request
 
 from .models import (
+    DetalleRepuestoInspeccion,
     DetalleRepuestoOrdenTrabajo,
+    DetalleServicioInspeccion,
     DetalleServicioOrdenTrabajo,
     FotoRecepcion,
     InspeccionVehiculo,
@@ -27,11 +29,132 @@ class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'subtotal']
 
 
+class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
+    servicio_codigo = serializers.SerializerMethodField()
+    servicio_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DetalleServicioInspeccion
+        fields = [
+            'id',
+            'inspeccion',
+            'servicio',
+            'servicio_codigo',
+            'servicio_nombre',
+            'descripcion',
+            'horas_estimadas',
+            'precio_referencial',
+            'es_sugerido',
+            'prioridad',
+            'prioridad_display',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'servicio_codigo', 'servicio_nombre', 'prioridad_display', 'created_at', 'updated_at']
+
+    def get_servicio_codigo(self, obj):
+        return obj.servicio.codigo if obj.servicio_id else None
+
+    def get_servicio_nombre(self, obj):
+        return obj.servicio.nombre if obj.servicio_id else None
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            inspeccion = attrs.get('inspeccion') or (self.instance.inspeccion if self.instance else None)
+            servicio = attrs.get('servicio', self.instance.servicio if self.instance else None)
+            if inspeccion is not None and inspeccion.empresa_id != empresa_id:
+                raise serializers.ValidationError({'inspeccion': 'La inspección no pertenece a tu empresa.'})
+            if servicio is not None and servicio.empresa_id != empresa_id:
+                raise serializers.ValidationError({'servicio': 'El servicio no pertenece a tu empresa.'})
+        return attrs
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep['prioridad_display'] = instance.get_prioridad_display()
+        return rep
+
+
+class DetalleRepuestoInspeccionSerializer(serializers.ModelSerializer):
+    repuesto_codigo = serializers.SerializerMethodField()
+    repuesto_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DetalleRepuestoInspeccion
+        fields = [
+            'id',
+            'inspeccion',
+            'repuesto',
+            'repuesto_codigo',
+            'repuesto_nombre',
+            'descripcion',
+            'cantidad',
+            'precio_referencial',
+            'es_sugerido',
+            'prioridad',
+            'prioridad_display',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'repuesto_codigo', 'repuesto_nombre', 'prioridad_display', 'created_at', 'updated_at']
+
+    def get_repuesto_codigo(self, obj):
+        return obj.repuesto.codigo if obj.repuesto_id else None
+
+    def get_repuesto_nombre(self, obj):
+        return obj.repuesto.nombre if obj.repuesto_id else None
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request:
+            empresa_id = get_empresa_id_desde_request(request)
+            inspeccion = attrs.get('inspeccion') or (self.instance.inspeccion if self.instance else None)
+            repuesto = attrs.get('repuesto', self.instance.repuesto if self.instance else None)
+            if inspeccion is not None and inspeccion.empresa_id != empresa_id:
+                raise serializers.ValidationError({'inspeccion': 'La inspección no pertenece a tu empresa.'})
+            if repuesto is not None and repuesto.empresa_id != empresa_id:
+                raise serializers.ValidationError({'repuesto': 'El repuesto no pertenece a tu empresa.'})
+        return attrs
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep['prioridad_display'] = instance.get_prioridad_display()
+        return rep
+
+
 class InspeccionVehiculoSerializer(serializers.ModelSerializer):
+    servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
+    repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
+
     class Meta:
         model = InspeccionVehiculo
-        fields = '__all__'
-        read_only_fields = ['id']
+        fields = [
+            'id',
+            'empresa',
+            'sucursal',
+            'orden_trabajo',
+            'recepcion',
+            'tipo_inspeccion',
+            'estado',
+            'motivo_ingreso',
+            'codigos_dtc',
+            'diagnostico_tecnico',
+            'recomendaciones',
+            'testigo_check_engine',
+            'testigo_abs',
+            'testigo_airbag',
+            'testigo_bateria',
+            'testigo_aceite',
+            'testigo_temperatura',
+            'otros_testigos_observaciones',
+            'servicios_detectados',
+            'repuestos_sugeridos',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'is_active', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -88,12 +211,12 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
 
 
 class FotoRecepcionSerializer(serializers.ModelSerializer):
+    tipo_vista_display = serializers.CharField(source='get_tipo_vista_display', read_only=True)
+
     class Meta:
         model = FotoRecepcion
         fields = ['id', 'tipo_vista', 'tipo_vista_display', 'imagen', 'descripcion', 'created_at']
         read_only_fields = ['id', 'tipo_vista_display', 'created_at']
-
-    tipo_vista_display = serializers.CharField(source='get_tipo_vista_display', read_only=True)
 
 
 class RecepcionVehiculoSerializer(serializers.ModelSerializer):

@@ -21,3 +21,8 @@ services:
         value: "https://gonmotor-khhmdsaz0-gonmotor.vercel.app"
       - key: FRONTEND_URL
         value: "https://gonmotor-khhmdsaz0-gonmotor.vercel.app"
+      - key: AI_TEXT_API_KEY
+        sync: false
+      - key: AI_TEXT_BASE_URL
+        value: https://api.groq.com/openai/v1
+      # AI_TEXT_MODEL opcional: si no se define, el backend elige un modelo disponible.

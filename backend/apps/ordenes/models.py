@@ -446,6 +446,146 @@ class InspeccionVehiculo(BaseModel):
         return f'Inspección #{self.pk} - Sin vínculo'
 
 
+class DetalleServicioInspeccion(models.Model):
+    """Servicios detectados/recomendados durante la inspección técnica.
+
+    El mecánico selecciona ítems desde el catálogo maestro de Servicios sin
+    fijar precios comerciales ni generar compromiso de facturación. No maneja
+    stock (los servicios son mano de obra).
+    """
+
+    class Prioridad(models.TextChoices):
+        BAJA = 'BAJA', 'Baja'
+        MEDIA = 'MEDIA', 'Media'
+        ALTA = 'ALTA', 'Alta'
+
+    inspeccion = models.ForeignKey(
+        InspeccionVehiculo,
+        on_delete=models.CASCADE,
+        related_name='servicios_detectados',
+    )
+    servicio = models.ForeignKey(
+        'inventario.Servicio',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='detalles_inspeccion',
+        verbose_name='Servicio del catálogo',
+    )
+    descripcion = models.CharField(max_length=255, verbose_name='Servicio / Mano de obra detectado')
+    horas_estimadas = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('1.00'),
+        verbose_name='Horas estimadas',
+    )
+    precio_referencial = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Precio referencial',
+        help_text='Valor referencial del catálogo; no fija precio comercial.',
+    )
+    es_sugerido = models.BooleanField(
+        default=True,
+        verbose_name='Es sugerido',
+        help_text='Marcado como recomendación del diagnóstico inicial',
+    )
+    prioridad = models.CharField(
+        max_length=10,
+        choices=Prioridad.choices,
+        default=Prioridad.MEDIA,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Detalle de Servicio en Inspección'
+        verbose_name_plural = 'Detalles de Servicios en Inspecciones'
+        ordering = ['-prioridad', 'created_at']
+
+    def __str__(self):
+        return f'{self.descripcion} - Inspección #{self.inspeccion_id}'
+
+    def save(self, *args, **kwargs):
+        if self.servicio_id:
+            if not self.descripcion:
+                self.descripcion = self.servicio.nombre
+            if not self.precio_referencial:
+                self.precio_referencial = Decimal(self.servicio.precio_referencial or '0.00')
+        super().save(*args, **kwargs)
+
+
+class DetalleRepuestoInspeccion(models.Model):
+    """Repuestos sugeridos durante la inspección técnica.
+
+    El mecánico selecciona ítems desde el catálogo maestro de Repuestos sin
+    fijar precios comerciales y SIN descontar stock todavía (el consumo real
+    se descuenta al ejecutar la orden de trabajo).
+    """
+
+    class Prioridad(models.TextChoices):
+        BAJA = 'BAJA', 'Baja'
+        MEDIA = 'MEDIA', 'Media'
+        ALTA = 'ALTA', 'Alta'
+
+    inspeccion = models.ForeignKey(
+        InspeccionVehiculo,
+        on_delete=models.CASCADE,
+        related_name='repuestos_sugeridos',
+    )
+    repuesto = models.ForeignKey(
+        'inventario.Repuesto',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='detalles_inspeccion',
+        verbose_name='Repuesto del catálogo',
+    )
+    descripcion = models.CharField(max_length=255, verbose_name='Repuesto sugerido')
+    cantidad = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal('1.00'),
+        verbose_name='Cantidad estimada',
+    )
+    precio_referencial = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Precio referencial',
+        help_text='Valor referencial del catálogo; no fija precio comercial ni descuenta stock.',
+    )
+    es_sugerido = models.BooleanField(
+        default=True,
+        verbose_name='Es sugerido',
+        help_text='Marcado como recomendación del diagnóstico inicial',
+    )
+    prioridad = models.CharField(
+        max_length=10,
+        choices=Prioridad.choices,
+        default=Prioridad.MEDIA,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Detalle de Repuesto en Inspección'
+        verbose_name_plural = 'Detalles de Repuestos en Inspecciones'
+        ordering = ['-prioridad', 'created_at']
+
+    def __str__(self):
+        return f'{self.descripcion} - Inspección #{self.inspeccion_id}'
+
+    def save(self, *args, **kwargs):
+        if self.repuesto_id:
+            if not self.descripcion:
+                self.descripcion = self.repuesto.nombre
+            if not self.precio_referencial:
+                self.precio_referencial = Decimal(self.repuesto.precio_venta or '0.00')
+        super().save(*args, **kwargs)
+
+
 class FotoRecepcion(models.Model):
     """Adjunta múltiples fotos de la recepción del vehículo."""
 

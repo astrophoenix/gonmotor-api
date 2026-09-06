@@ -8,8 +8,20 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
-from .models import InspeccionVehiculo, OrdenTrabajo, RecepcionVehiculo
-from .serializers import InspeccionVehiculoSerializer, OrdenTrabajoSerializer, RecepcionVehiculoSerializer
+from .models import (
+    DetalleRepuestoInspeccion,
+    DetalleServicioInspeccion,
+    InspeccionVehiculo,
+    OrdenTrabajo,
+    RecepcionVehiculo,
+)
+from .serializers import (
+    DetalleRepuestoInspeccionSerializer,
+    DetalleServicioInspeccionSerializer,
+    InspeccionVehiculoSerializer,
+    OrdenTrabajoSerializer,
+    RecepcionVehiculoSerializer,
+)
 
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -31,7 +43,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['orden_trabajo__numero_orden', 'orden_trabajo__vehiculo__placa', 'orden_trabajo__cliente__nombre']
+    search_fields = ['vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
     ordering_fields = ['created_at', 'id']
     ordering = ['-created_at']
 
@@ -95,7 +107,49 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return InspeccionVehiculo.objects.none()
-        return InspeccionVehiculo.objects.filter(empresa_id=empresa_id)
+        return InspeccionVehiculo.objects.filter(empresa_id=empresa_id).prefetch_related(
+            'servicios_detectados', 'repuestos_sugeridos'
+        )
+
+
+class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
+    serializer_class = DetalleServicioInspeccionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['created_at', 'id']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return DetalleServicioInspeccion.objects.none()
+        queryset = DetalleServicioInspeccion.objects.filter(
+            inspeccion__empresa_id=empresa_id
+        ).select_related('inspeccion', 'servicio')
+        inspeccion_id = self.request.query_params.get('inspeccion')
+        if inspeccion_id:
+            queryset = queryset.filter(inspeccion_id=inspeccion_id)
+        return queryset
+
+
+class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
+    serializer_class = DetalleRepuestoInspeccionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['created_at', 'id']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return DetalleRepuestoInspeccion.objects.none()
+        queryset = DetalleRepuestoInspeccion.objects.filter(
+            inspeccion__empresa_id=empresa_id
+        ).select_related('inspeccion', 'repuesto')
+        inspeccion_id = self.request.query_params.get('inspeccion')
+        if inspeccion_id:
+            queryset = queryset.filter(inspeccion_id=inspeccion_id)
+        return queryset
 
 
 class RecepcionPdfExportView(APIView):

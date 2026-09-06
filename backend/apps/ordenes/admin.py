@@ -1,9 +1,12 @@
 from django.contrib import admin
 
 from .models import (
+    DetalleRepuestoInspeccion,
     DetalleRepuestoOrdenTrabajo,
+    DetalleServicioInspeccion,
     DetalleServicioOrdenTrabajo,
     FotoRecepcion,
+    InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
 )
@@ -28,6 +31,27 @@ class DetalleServicioOrdenTrabajoAdmin(admin.ModelAdmin):
 class DetalleRepuestoOrdenTrabajoAdmin(admin.ModelAdmin):
     list_display = ('orden_trabajo', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal', 'codigo_repuesto')
     search_fields = ('descripcion', 'codigo_repuesto', 'orden_trabajo__numero_orden')
+
+
+@admin.register(InspeccionVehiculo)
+class InspeccionVehiculoAdmin(admin.ModelAdmin):
+    list_display = ('id', 'orden_trabajo', 'recepcion', 'tipo_inspeccion', 'estado', 'created_at')
+    list_filter = ('tipo_inspeccion', 'estado')
+    search_fields = ('motivo_ingreso', 'codigos_dtc', 'orden_trabajo__numero_orden')
+
+
+@admin.register(DetalleServicioInspeccion)
+class DetalleServicioInspeccionAdmin(admin.ModelAdmin):
+    list_display = ('inspeccion', 'servicio', 'descripcion', 'horas_estimadas', 'precio_referencial', 'prioridad', 'es_sugerido')
+    list_filter = ('prioridad', 'es_sugerido')
+    search_fields = ('descripcion', 'inspeccion__orden_trabajo__numero_orden')
+
+
+@admin.register(DetalleRepuestoInspeccion)
+class DetalleRepuestoInspeccionAdmin(admin.ModelAdmin):
+    list_display = ('inspeccion', 'repuesto', 'descripcion', 'cantidad', 'precio_referencial', 'prioridad', 'es_sugerido')
+    list_filter = ('prioridad', 'es_sugerido')
+    search_fields = ('descripcion', 'inspeccion__orden_trabajo__numero_orden')
 
 
 @admin.register(RecepcionVehiculo)

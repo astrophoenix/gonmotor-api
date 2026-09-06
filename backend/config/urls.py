@@ -49,6 +49,9 @@ urlpatterns = [
     # 6.1 Endpoints del Módulo de Recepciones
     path('api/recepciones/', include('apps.ordenes.recepciones_urls')),
 
+    # 6.2 Endpoints del Módulo de Inventario y Catálogos (Repuestos + Servicios)
+    path('api/', include('apps.inventario.urls')),
+
     # 7. Endpoints del Módulo de Configuración (Empresa, Sucursales, Usuarios, Roles)
     path('api/configuracion/', include('apps.configuracion.urls')),
 ]
