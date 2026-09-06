@@ -41,6 +41,27 @@ class EmpresaAdmin(admin.ModelAdmin):
         ('Estado', {
             'fields': ('is_active', 'created_at', 'updated_at')
         }),
+        ('Secuencias de Documentos', {
+            'fields': (
+                (
+                    'prefijo_recepcion', 'siguiente_recepcion', 'digitos_recepcion',
+                ),
+                (
+                    'prefijo_inspeccion', 'siguiente_inspeccion', 'digitos_inspeccion',
+                ),
+                (
+                    'prefijo_cotizacion', 'siguiente_cotizacion', 'digitos_cotizacion',
+                ),
+                (
+                    'prefijo_ot', 'siguiente_ot', 'digitos_ot',
+                ),
+            ),
+            'description': (
+                'La numeración de Recepciones, Inspecciones, Cotizaciones y Órdenes '
+                'de Trabajo se genera automáticamente con el prefijo, contador y dígitos '
+                'configurados aquí.'
+            ),
+        }),
     )
 
     @admin.display(description='Logo')

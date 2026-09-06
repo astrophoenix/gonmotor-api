@@ -17,10 +17,19 @@ class Cotizacion(BaseModel):
         CONVERTIDA = 'CONVERTIDA', 'Convertida a Orden'
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='cotizaciones')
+    sucursal = models.ForeignKey(
+        'empresas.Taller',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cotizaciones',
+        verbose_name='Taller',
+        help_text='Taller que emite la cotización (secuencia de numeración)'
+    )
     cliente = models.ForeignKey('clientes.Cliente', on_delete=models.CASCADE, related_name='cotizaciones')
     vehiculo = models.ForeignKey('vehiculos.Vehiculo', on_delete=models.SET_NULL, null=True, blank=True)
 
-    numero_cotizacion = models.CharField(max_length=20, unique=True)
+    numero_cotizacion = models.CharField(max_length=20, verbose_name='Número de Cotización')
     estado = models.CharField(max_length=20, choices=EstadoCotizacion.choices, default=EstadoCotizacion.BORRADOR)
     validez_dias = models.PositiveIntegerField(default=15, verbose_name='Días de validez')
 
@@ -82,17 +91,39 @@ class Cotizacion(BaseModel):
     class Meta:
         verbose_name = 'Cotización'
         verbose_name_plural = 'Cotizaciones'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_cotizacion'],
+                name='cotizacion_empresa_numero_unico'
+            )
+        ]
 
     def __str__(self):
         return f'{self.numero_cotizacion} - {self.cliente}'
 
-    def _generar_numero_orden(self):
-        """Genera un numero_orden secuencial único por empresa (prefijo + empresa + id)."""
-        from apps.ordenes.models import OrdenTrabajo
+    def _resolver_taller(self):
+        """Resuelve el taller que emite los documentos derivados de esta cotización."""
+        from apps.empresas.services import resolver_taller
 
-        ultimo = OrdenTrabajo.objects.filter(empresa_id=self.empresa_id).order_by('-id').first()
-        siguiente = (ultimo.id + 1) if ultimo else 1
-        return f'OT-{self.empresa_id:04d}-{siguiente:04d}'
+        sucursal = self.sucursal
+        if sucursal is None and self.recepcion_origen_id and self.recepcion_origen.sucursal_id:
+            sucursal = self.recepcion_origen.sucursal
+        if sucursal is None and self.inspeccion_origen_id:
+            inspeccion_obj = self.inspeccion_origen
+            if inspeccion_obj.sucursal_id:
+                sucursal = inspeccion_obj.sucursal
+            elif inspeccion_obj.recepcion_id and inspeccion_obj.recepcion.sucursal_id:
+                sucursal = inspeccion_obj.recepcion.sucursal
+        if sucursal is None and self.orden_trabajo_origen_id and self.orden_trabajo_origen.sucursal_id:
+            sucursal = self.orden_trabajo_origen.sucursal
+        return resolver_taller(self.empresa_id, sucursal)
+
+    def _generar_numero_orden(self):
+        """Genera un numero_orden secuencial atómico configurable por taller."""
+        from apps.empresas.services import generar_codigo_secuencial
+
+        taller = self._resolver_taller()
+        return generar_codigo_secuencial(taller, 'ot')
 
     def convertir_a_orden(self, usuario=None):
         """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
@@ -114,14 +145,17 @@ class Cotizacion(BaseModel):
                 'Asócialos a la cotización o a su recepción de origen.'
             )
 
+        numero_orden = self._generar_numero_orden()
+        sucursal_ot = self.sucursal or self._resolver_taller()
+
         ot = OrdenTrabajo.objects.create(
             empresa=self.empresa,
-            sucursal=self.empresa.talleres.first() if hasattr(self.empresa, 'talleres') else None,
+            sucursal=sucursal_ot,
             cliente=cliente,
             vehiculo=vehiculo,
             asesor=usuario,
             cotizacion_origen=self,
-            numero_orden=self._generar_numero_orden(),
+            numero_orden=numero_orden,
             tipo_trabajo=inspeccion.tipo_inspeccion if inspeccion else OrdenTrabajo.TipoTrabajo.CORRECTIVO,
             observaciones_internas=inspeccion.diagnostico_tecnico if inspeccion else None,
         )

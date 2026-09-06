@@ -51,7 +51,11 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return RecepcionVehiculo.objects.none()
-        return RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
+        return (
+            RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
+            .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal')
+            .prefetch_related('inspecciones', 'cotizaciones_generadas')
+        )
 
     def _sincronizar_kilometraje_vehiculo(self, instance):
         if instance.estado == 'NO_ACEPTADA':

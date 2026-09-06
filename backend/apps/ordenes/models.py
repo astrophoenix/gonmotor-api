@@ -67,7 +67,7 @@ class OrdenTrabajo(BaseModel):
         help_text='Cotización previa de la cual se derivó esta orden (si aplica)'
     )
 
-    numero_orden = models.CharField(max_length=20, unique=True, verbose_name='Número de OT')
+    numero_orden = models.CharField(max_length=20, verbose_name='Número de OT')
     estado = models.CharField(max_length=20, choices=EstadoOrden.choices, default=EstadoOrden.INGRESADO)
     prioridad = models.CharField(max_length=10, choices=Prioridad.choices, default=Prioridad.MEDIA)
     tipo_trabajo = models.CharField(max_length=20, choices=TipoTrabajo.choices, default=TipoTrabajo.PREVENTIVO)
@@ -88,6 +88,12 @@ class OrdenTrabajo(BaseModel):
         verbose_name = 'Orden de Trabajo'
         verbose_name_plural = 'Órdenes de Trabajo'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_orden'],
+                name='ot_empresa_numero_unico'
+            )
+        ]
 
     def __str__(self):
         return f'OT {self.numero_orden} - {self.vehiculo.placa} ({self.get_estado_display()})'
@@ -201,6 +207,15 @@ class RecepcionVehiculo(BaseModel):
         related_name='recepciones_recibidas',
         verbose_name='Recibido por',
         help_text='Empleado que realizó la recepción del vehículo',
+    )
+
+    # --- NÚMERO DE RECEPCIÓN (secuencia configurable por taller) ---
+    numero_recepcion = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='Número de Recepción',
+        help_text='Código secuencial asignado automáticamente desde el taller',
     )
 
     # --- TIPO Y MOTIVO DE INGRESO ---
@@ -353,6 +368,12 @@ class RecepcionVehiculo(BaseModel):
         verbose_name = 'Recepción de Vehículo'
         verbose_name_plural = 'Recepciones de Vehículos'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_recepcion'],
+                name='recepcion_empresa_numero_unico'
+            )
+        ]
 
     def __str__(self):
         if self.orden_trabajo_id:
@@ -406,6 +427,15 @@ class InspeccionVehiculo(BaseModel):
         help_text='Recepción del vehículo de la cual se derivó esta inspección'
     )
 
+    # Número de inspección (secuencia configurable por taller)
+    numero_inspeccion = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='Número de Inspección',
+        help_text='Código secuencial asignado automáticamente desde el taller',
+    )
+
     # Clasificación y Estado
     tipo_inspeccion = models.CharField(max_length=20, choices=OrdenTrabajo.TipoTrabajo.choices, default=OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
@@ -435,6 +465,10 @@ class InspeccionVehiculo(BaseModel):
                 fields=['recepcion'],
                 condition=models.Q(recepcion__isnull=False),
                 name='una_inspeccion_por_recepcion'
+            ),
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_inspeccion'],
+                name='inspeccion_empresa_numero_unico'
             )
         ]
 

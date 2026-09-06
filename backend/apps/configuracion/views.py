@@ -1,8 +1,17 @@
 from rest_framework import viewsets, status, serializers
 from rest_framework.response import Response
+from rest_framework.renderers import JSONRenderer
+from rest_framework.views import APIView
 from django.db import IntegrityError
+from django.utils import timezone
+from reportlab.platypus import Paragraph
+
+from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
+from rest_framework import permissions
+
 from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
 from .permissions import IsEmpresaAdminOrReadOnly
 
@@ -72,6 +81,122 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
                     'codigo_sucursal': DUPLICATE_CODE_MESSAGE_TALLER
                 })
             raise exc
+
+
+class TallerPdfExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403,
+            )
+
+        try:
+            queryset = Taller.objects.filter(empresa_id=empresa_id).order_by('nombre')
+
+            empresa = queryset.first().empresa if queryset.exists() else None
+
+            usuario_nombre = ''
+            if request.user and request.user.is_authenticated:
+                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+
+            def subtitle_builder(qs):
+                if not qs.exists():
+                    return None
+                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+
+            def row_builder(taller, cell_style):
+                return [
+                    Paragraph(taller.nombre or '', cell_style),
+                    Paragraph(taller.codigo_sucursal or '', cell_style),
+                    Paragraph(taller.ciudad or '', cell_style),
+                    Paragraph(taller.direccion or '', cell_style),
+                    Paragraph(taller.telefono or '', cell_style),
+                    Paragraph('Sí' if taller.is_active else 'No', cell_style),
+                ]
+
+            config = PdfExportConfig(
+                title='Listado de Talleres',
+                filename='listado_talleres.pdf',
+                headers=[
+                    ('Nombre', 2.0),
+                    ('Código', 1.2),
+                    ('Ciudad', 1.3),
+                    ('Dirección', 2.2),
+                    ('Teléfono', 1.3),
+                    ('Activo', 0.7),
+                ],
+                empresa=empresa,
+                usuario=usuario_nombre,
+                subtitle_builder=subtitle_builder,
+                row_builder=row_builder,
+            )
+            service = PdfExportService(config, queryset)
+            return service.generate_response()
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
+
+
+class TallerExcelExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403,
+            )
+
+        try:
+            queryset = Taller.objects.filter(empresa_id=empresa_id).order_by('nombre')
+
+            empresa = queryset.first().empresa if queryset.exists() else None
+
+            usuario_nombre = ''
+            if request.user and request.user.is_authenticated:
+                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+
+            def row_builder(taller):
+                return [
+                    taller.nombre or '',
+                    taller.codigo_sucursal or '',
+                    taller.ciudad or '',
+                    taller.direccion or '',
+                    taller.telefono or '',
+                    'Sí' if taller.is_active else 'No',
+                ]
+
+            config = ExcelExportConfig(
+                title='Listado de Talleres',
+                filename='listado_talleres.xlsx',
+                headers=[
+                    ('Nombre', 2.0),
+                    ('Código', 1.2),
+                    ('Ciudad', 1.3),
+                    ('Dirección', 2.2),
+                    ('Teléfono', 1.3),
+                    ('Activo', 0.7),
+                ],
+                empresa=empresa,
+                usuario=usuario_nombre,
+                row_builder=row_builder,
+            )
+            service = ExcelExportService(config, queryset)
+            return service.generate_response()
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
+                status=500,
+            )
 
 
 class EmpresaConfigViewSet(viewsets.ModelViewSet):

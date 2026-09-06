@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from apps.core.models import BaseModel
 
@@ -79,6 +80,46 @@ class Taller(BaseModel):
         blank=True, 
         default="", 
         verbose_name="Teléfono Taller"
+    )
+
+    # --- SECUENCIAS / NUMERACIÓN DE DOCUMENTOS ---
+    # Cada taller mantiene prefijos, contadores y longitud de dígitos
+    # independientes para Recepciones, Inspecciones, Cotizaciones y OTs.
+    prefijo_recepcion = models.CharField(
+        max_length=10, blank=True, default='REC-', verbose_name='Prefijo Recepciones'
+    )
+    siguiente_recepcion = models.PositiveIntegerField(
+        default=1, validators=[MinValueValidator(1)], verbose_name='Siguiente número de Recepción'
+    )
+    digitos_recepcion = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(2), MaxValueValidator(10)], verbose_name='Dígitos de Recepción'
+    )
+    prefijo_inspeccion = models.CharField(
+        max_length=10, blank=True, default='INS-', verbose_name='Prefijo Inspecciones'
+    )
+    siguiente_inspeccion = models.PositiveIntegerField(
+        default=1, validators=[MinValueValidator(1)], verbose_name='Siguiente número de Inspección'
+    )
+    digitos_inspeccion = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(2), MaxValueValidator(10)], verbose_name='Dígitos de Inspección'
+    )
+    prefijo_cotizacion = models.CharField(
+        max_length=10, blank=True, default='COT-', verbose_name='Prefijo Cotizaciones'
+    )
+    siguiente_cotizacion = models.PositiveIntegerField(
+        default=1, validators=[MinValueValidator(1)], verbose_name='Siguiente número de Cotización'
+    )
+    digitos_cotizacion = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(2), MaxValueValidator(10)], verbose_name='Dígitos de Cotización'
+    )
+    prefijo_ot = models.CharField(
+        max_length=10, blank=True, default='OT-', verbose_name='Prefijo Órdenes de Trabajo'
+    )
+    siguiente_ot = models.PositiveIntegerField(
+        default=1, validators=[MinValueValidator(1)], verbose_name='Siguiente número de OT'
+    )
+    digitos_ot = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(2), MaxValueValidator(10)], verbose_name='Dígitos de OT'
     )
 
     class Meta:

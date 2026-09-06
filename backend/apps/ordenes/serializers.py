@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import (
     DetalleRepuestoInspeccion,
@@ -135,6 +136,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'sucursal',
             'orden_trabajo',
             'recepcion',
+            'numero_inspeccion',
             'tipo_inspeccion',
             'estado',
             'motivo_ingreso',
@@ -154,7 +156,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'numero_inspeccion', 'is_active', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -162,6 +164,14 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             empresa_id = get_empresa_id_desde_request(request)
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
+            sucursal = validated_data.get('sucursal')
+            recepcion = validated_data.get('recepcion')
+            if sucursal is None and recepcion is not None and recepcion.sucursal_id:
+                sucursal = recepcion.sucursal
+            taller = resolver_taller(empresa_id, sucursal)
+            if taller is not None:
+                validated_data.setdefault('sucursal', taller)
+                validated_data['numero_inspeccion'] = generar_codigo_secuencial(taller, 'inspeccion')
         return super().create(validated_data)
 
     def validate(self, attrs):
@@ -222,11 +232,30 @@ class FotoRecepcionSerializer(serializers.ModelSerializer):
 class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
     fotos = FotoRecepcionSerializer(many=True, read_only=True)
+    cotizaciones_generadas = serializers.SerializerMethodField()
+    orden_trabajo_numero = serializers.SerializerMethodField()
 
     class Meta:
         model = RecepcionVehiculo
         fields = '__all__'
-        read_only_fields = ['id', 'fecha_firma_receptor', 'fecha_firma_cliente', 'aceptacion_condiciones']
+        read_only_fields = [
+            'id',
+            'numero_recepcion',
+            'fecha_firma_receptor',
+            'fecha_firma_cliente',
+            'aceptacion_condiciones',
+        ]
+
+    def get_cotizaciones_generadas(self, instance):
+        return [
+            {'id': cotizacion.id, 'numero_cotizacion': cotizacion.numero_cotizacion}
+            for cotizacion in instance.cotizaciones_generadas.order_by('created_at')
+        ]
+
+    def get_orden_trabajo_numero(self, instance):
+        if instance.orden_trabajo_id:
+            return instance.orden_trabajo.numero_orden
+        return None
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -345,6 +374,11 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
                 validated_data['empresa_id'] = empresa_id
             if not validated_data.get('recibido_por') and request.user.is_authenticated:
                 validated_data['recibido_por'] = request.user
+            sucursal = validated_data.get('sucursal')
+            taller = resolver_taller(empresa_id, sucursal)
+            if taller is not None:
+                validated_data.setdefault('sucursal', taller)
+                validated_data['numero_recepcion'] = generar_codigo_secuencial(taller, 'recepcion')
             fotos = self._recolectar_fotos(request)
         if validated_data.get('estado') != 'NO_ACEPTADA':
             self._validar_bloque_fotos(fotos)
@@ -414,7 +448,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -422,4 +456,9 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             empresa_id = get_empresa_id_desde_request(request)
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
+            sucursal = validated_data.get('sucursal')
+            taller = resolver_taller(empresa_id, sucursal)
+            if taller is not None:
+                validated_data.setdefault('sucursal', taller)
+                validated_data['numero_orden'] = generar_codigo_secuencial(taller, 'ot')
         return super().create(validated_data)
