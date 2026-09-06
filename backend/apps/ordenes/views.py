@@ -11,6 +11,7 @@ from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 from .models import (
     DetalleRepuestoInspeccion,
     DetalleServicioInspeccion,
+    FotoInspeccion,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
@@ -18,6 +19,7 @@ from .models import (
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
     DetalleServicioInspeccionSerializer,
+    FotoInspeccionSerializer,
     InspeccionVehiculoSerializer,
     OrdenTrabajoSerializer,
     RecepcionVehiculoSerializer,
@@ -112,7 +114,7 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
         if not empresa_id:
             return InspeccionVehiculo.objects.none()
         return InspeccionVehiculo.objects.filter(empresa_id=empresa_id).prefetch_related(
-            'servicios_detectados', 'repuestos_sugeridos'
+            'servicios_detectados', 'repuestos_sugeridos', 'fotos'
         )
 
 
@@ -150,6 +152,25 @@ class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
         queryset = DetalleRepuestoInspeccion.objects.filter(
             inspeccion__empresa_id=empresa_id
         ).select_related('inspeccion', 'repuesto')
+        inspeccion_id = self.request.query_params.get('inspeccion')
+        if inspeccion_id:
+            queryset = queryset.filter(inspeccion_id=inspeccion_id)
+        return queryset
+
+
+class FotoInspeccionViewSet(viewsets.ModelViewSet):
+    serializer_class = FotoInspeccionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering = ['created_at', 'id']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return FotoInspeccion.objects.none()
+        queryset = FotoInspeccion.objects.filter(
+            inspeccion__empresa_id=empresa_id
+        ).select_related('inspeccion')
         inspeccion_id = self.request.query_params.get('inspeccion')
         if inspeccion_id:
             queryset = queryset.filter(inspeccion_id=inspeccion_id)

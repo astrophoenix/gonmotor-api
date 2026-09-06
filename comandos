@@ -208,3 +208,44 @@ Backend: https://dashboard.render.com/login
 Para usar ia en mejoras de textos:
 se creo cuenta en https://console.groq.com/ y se creo una KEY en https://console.groq.com/keys
 llamada AI_TEXT_API_KEY-GONMOTOR
+
+
+
+Testigos que faltan
+Testigo de desempañado del parabrisas - Color: Verde
+Testigo de limpiaparabrisas - Color: Verde
+Testigo de luces largas: Color: Verde
+
+Testigo de nivel bajo de combustible - Color: Ámbar
+Testigo de luces antinieblas traseras - Color: Ámbar
+ Testigo de control de estabilidad ESP - Color: Ámbar
+Testigo de bujías de precalentamiento - Color: Ámbar
+Testigo de Pedal de Freno - Color: Ámbar o verde (según fabricante).
+
+Color: Rojo
+Testigo de luces de emergencia
+Testigo de Puerta o maletero abierto
+Testigo de Cinturón desabrochado
+Testigo de freno de estacionamiento
+Testigo de fallo en el sistema de frenos
+
+=================
+
+Color: Verde
+Testigo de desempañado del parabrisas (Parabrisas con tres flechas verticales ascendentes.)
+Testigo de limpiaparabrisas (Parabrisas con un chorro de agua saliendo.)
+Testigo de luces largas (Haz de líneas horizontales a la izquierda junto a una semicircunferencia.)
+
+Color Amarillo
+Testigo de nivel bajo de combustible (Bomba de combustible.)
+Testigo de luces antinieblas traseras (Semicircunferencia con tres líneas horizontales onduladas hacia la derecha.)
+Testigo de control de estabilidad ESP (Coche con dos líneas onduladas debajo.)
+Testigo de bujías de precalentamiento (Resistencia incandescente en espiral.)
+Testigo de Pedal de Freno (Pie sobre un pedal dentro de un círculo.)
+
+Color: Rojo
+Testigo de luces de emergencia (Triángulo con otro triángulo en su interior.)
+Testigo de Puerta o maletero abierto (Representación del coche con una puerta o maletero abierto.)
+Testigo de Cinturón desabrochado (Figura de persona con cinturón desabrochado.)
+Testigo de freno de estacionamiento (Círculo con la letra “P” dentro.)
+Testigo de fallo en el sistema de frenos (Círculo con un signo de exclamación dentro y dos paréntesis a los lados.)

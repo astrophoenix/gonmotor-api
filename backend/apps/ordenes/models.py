@@ -276,6 +276,20 @@ class RecepcionVehiculo(BaseModel):
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
     testigo_temperatura = models.BooleanField(default=False, verbose_name='Temperatura / Refrigerante')
+    testigo_presion_llantas = models.BooleanField(default=False, verbose_name='Presión de Llantas')
+    testigo_desempanado = models.BooleanField(default=False, verbose_name='Desempañado del Parabrisas')
+    testigo_limpiaparabrisas = models.BooleanField(default=False, verbose_name='Limpiaparabrisas')
+    testigo_luces_largas = models.BooleanField(default=False, verbose_name='Luces Largas')
+    testigo_combustible_bajo = models.BooleanField(default=False, verbose_name='Nivel Bajo de Combustible')
+    testigo_antiniebla_traseras = models.BooleanField(default=False, verbose_name='Luces Antiniebla Traseras')
+    testigo_esp = models.BooleanField(default=False, verbose_name='Control de Estabilidad (ESP)')
+    testigo_bujias_precalentamiento = models.BooleanField(default=False, verbose_name='Bujías de Precalentamiento')
+    testigo_pedal_freno = models.BooleanField(default=False, verbose_name='Pedal de Freno')
+    testigo_luces_emergencia = models.BooleanField(default=False, verbose_name='Luces de Emergencia')
+    testigo_puerta_maletero = models.BooleanField(default=False, verbose_name='Puerta o Maletero Abierto')
+    testigo_cinturon = models.BooleanField(default=False, verbose_name='Cinturón Desabrochado')
+    testigo_freno_estacionamiento = models.BooleanField(default=False, verbose_name='Freno de Estacionamiento')
+    testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
 
     # --- INVENTARIO / CHECKLIST (Columna 1 Hoja Física) ---
@@ -455,6 +469,20 @@ class InspeccionVehiculo(BaseModel):
     testigo_bateria = models.BooleanField(default=False, verbose_name='Batería')
     testigo_aceite = models.BooleanField(default=False, verbose_name='Presión de Aceite')
     testigo_temperatura = models.BooleanField(default=False, verbose_name='Temperatura / Refrigerante')
+    testigo_presion_llantas = models.BooleanField(default=False, verbose_name='Presión de Llantas')
+    testigo_desempanado = models.BooleanField(default=False, verbose_name='Desempañado del Parabrisas')
+    testigo_limpiaparabrisas = models.BooleanField(default=False, verbose_name='Limpiaparabrisas')
+    testigo_luces_largas = models.BooleanField(default=False, verbose_name='Luces Largas')
+    testigo_combustible_bajo = models.BooleanField(default=False, verbose_name='Nivel Bajo de Combustible')
+    testigo_antiniebla_traseras = models.BooleanField(default=False, verbose_name='Luces Antiniebla Traseras')
+    testigo_esp = models.BooleanField(default=False, verbose_name='Control de Estabilidad (ESP)')
+    testigo_bujias_precalentamiento = models.BooleanField(default=False, verbose_name='Bujías de Precalentamiento')
+    testigo_pedal_freno = models.BooleanField(default=False, verbose_name='Pedal de Freno')
+    testigo_luces_emergencia = models.BooleanField(default=False, verbose_name='Luces de Emergencia')
+    testigo_puerta_maletero = models.BooleanField(default=False, verbose_name='Puerta o Maletero Abierto')
+    testigo_cinturon = models.BooleanField(default=False, verbose_name='Cinturón Desabrochado')
+    testigo_freno_estacionamiento = models.BooleanField(default=False, verbose_name='Freno de Estacionamiento')
+    testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
     class Meta:
         verbose_name = 'Inspección de Vehículo'
@@ -655,3 +683,27 @@ class FotoRecepcion(models.Model):
 
     def __str__(self):
         return f'{self.recepcion_id} - {self.get_tipo_vista_display()}'
+
+
+class FotoInspeccion(models.Model):
+    """Adjunta hasta 5 fotos de evidencia de los hallazgos de la inspección."""
+
+    MAX_FOTOS = 5
+
+    inspeccion = models.ForeignKey(
+        InspeccionVehiculo,
+        on_delete=models.CASCADE,
+        related_name='fotos',
+        verbose_name='Inspección',
+    )
+    imagen = models.ImageField(upload_to='ordenes/inspeccion_fotos/')
+    descripcion = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Foto de Inspección'
+        verbose_name_plural = 'Fotos de Inspecciones'
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return f'Inspección #{self.inspeccion_id} - foto {self.pk}'

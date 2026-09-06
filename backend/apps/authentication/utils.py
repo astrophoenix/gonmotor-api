@@ -2,6 +2,21 @@ from apps.authentication.models import UsuarioEmpresa
 from apps.empresas.models import Empresa  # O el modelo correspondiente a Empresa en tu app
 
 
+def _normalizar_empresa_id(valor):
+    """Garantiza que el empresa_id sea un entero (o None).
+
+    El valor puede llegar como string desde la cabecera X-Empresa-ID o como
+    entero desde las claims del JWT; normalizarlo evita fallos en
+    comparaciones directas (int vs str) en serializers.
+    """
+    if valor is None:
+        return None
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_empresa_id_desde_request(request):
     """
     Obtiene y valida el empresa_id activo para el usuario en sesión.
@@ -25,19 +40,19 @@ def get_empresa_id_desde_request(request):
     if empresa_id and not user.is_superuser:
         tiene_acceso = UsuarioEmpresa.objects.filter(
             user=user,
-            empresa_id=empresa_id,
+            empresa_id=_normalizar_empresa_id(empresa_id),
             is_active=True,
             empresa__is_active=True
         ).exists()
 
         if tiene_acceso:
-            return empresa_id
+            return _normalizar_empresa_id(empresa_id)
         return None  # No tiene acceso a esta empresa
 
     # 4. Si es Superusuario y envió un empresa_id válido, se le asigna dicho contexto
     if empresa_id and user.is_superuser:
-        if Empresa.objects.filter(id=empresa_id, is_active=True).exists():
-            return empresa_id
+        if Empresa.objects.filter(id=_normalizar_empresa_id(empresa_id), is_active=True).exists():
+            return _normalizar_empresa_id(empresa_id)
 
     # 5. Fallback: Si no se envió ningún ID de empresa explícito
     # Para usuarios estándar:

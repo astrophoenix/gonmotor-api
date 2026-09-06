@@ -10,6 +10,7 @@ from .models import (
     DetalleServicioInspeccion,
     DetalleServicioOrdenTrabajo,
     FotoRecepcion,
+    FotoInspeccion,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
@@ -33,6 +34,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
 class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
     servicio_codigo = serializers.SerializerMethodField()
     servicio_nombre = serializers.SerializerMethodField()
+    prioridad_display = serializers.CharField(read_only=True, source='get_prioridad_display')
 
     class Meta:
         model = DetalleServicioInspeccion
@@ -80,6 +82,7 @@ class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
 class DetalleRepuestoInspeccionSerializer(serializers.ModelSerializer):
     repuesto_codigo = serializers.SerializerMethodField()
     repuesto_nombre = serializers.SerializerMethodField()
+    prioridad_display = serializers.CharField(read_only=True, source='get_prioridad_display')
 
     class Meta:
         model = DetalleRepuestoInspeccion
@@ -124,9 +127,41 @@ class DetalleRepuestoInspeccionSerializer(serializers.ModelSerializer):
         return rep
 
 
+class FotoInspeccionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FotoInspeccion
+        fields = ['id', 'inspeccion', 'imagen', 'descripcion', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def validate_imagen(self, imagen):
+        if imagen.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
+        if imagen.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
+        return imagen
+
+    def validate(self, attrs):
+        inspeccion = attrs.get('inspeccion')
+        if inspeccion is None:
+            return attrs
+
+        request = self.context.get('request')
+        empresa_id = get_empresa_id_desde_request(request)
+        if empresa_id and inspeccion.empresa_id != empresa_id:
+            raise serializers.ValidationError({'inspeccion': 'La inspección no pertenece a tu empresa.'})
+
+        if self.instance is None or self.instance.inspeccion_id != inspeccion.id:
+            if inspeccion.fotos.count() >= FotoInspeccion.MAX_FOTOS:
+                raise serializers.ValidationError(
+                    {'inspeccion': f'Solo se permiten hasta {FotoInspeccion.MAX_FOTOS} fotos por inspección.'}
+                )
+        return attrs
+
+
 class InspeccionVehiculoSerializer(serializers.ModelSerializer):
     servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
     repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
+    fotos = FotoInspeccionSerializer(many=True, read_only=True)
 
     class Meta:
         model = InspeccionVehiculo
@@ -149,9 +184,24 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'testigo_bateria',
             'testigo_aceite',
             'testigo_temperatura',
+            'testigo_presion_llantas',
+            'testigo_desempanado',
+            'testigo_limpiaparabrisas',
+            'testigo_luces_largas',
+            'testigo_combustible_bajo',
+            'testigo_antiniebla_traseras',
+            'testigo_esp',
+            'testigo_bujias_precalentamiento',
+            'testigo_pedal_freno',
+            'testigo_luces_emergencia',
+            'testigo_puerta_maletero',
+            'testigo_cinturon',
+            'testigo_freno_estacionamiento',
+            'testigo_frenos_fallo',
             'otros_testigos_observaciones',
             'servicios_detectados',
             'repuestos_sugeridos',
+            'fotos',
             'is_active',
             'created_at',
             'updated_at',
