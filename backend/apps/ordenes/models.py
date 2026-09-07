@@ -549,9 +549,9 @@ class DetalleServicioInspeccion(models.Model):
         help_text='Valor referencial del catálogo; no fija precio comercial.',
     )
     es_sugerido = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name='Es sugerido',
-        help_text='Marcado como recomendación del diagnóstico inicial',
+        help_text='Indica si es una recomendación opcional; por defecto es necesario/obligatorio',
     )
     prioridad = models.CharField(
         max_length=10,
@@ -619,9 +619,9 @@ class DetalleRepuestoInspeccion(models.Model):
         help_text='Valor referencial del catálogo; no fija precio comercial ni descuenta stock.',
     )
     es_sugerido = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name='Es sugerido',
-        help_text='Marcado como recomendación del diagnóstico inicial',
+        help_text='Indica si es una recomendación opcional; por defecto es necesario/obligatorio',
     )
     prioridad = models.CharField(
         max_length=10,

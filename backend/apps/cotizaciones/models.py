@@ -101,6 +101,17 @@ class Cotizacion(BaseModel):
     def __str__(self):
         return f'{self.numero_cotizacion} - {self.cliente}'
 
+    def recalcular_totales(self):
+        """Recomputa subtotal, IVA y total a partir de los ítems de la cotización."""
+        total_servicios = Decimal(sum(item.subtotal for item in self.servicios.all()))
+        total_repuestos = Decimal(sum(item.subtotal for item in self.repuestos.all()))
+        subtotal = total_servicios + total_repuestos
+        total_iva = Decimal('0.15') * subtotal
+        self.subtotal = subtotal
+        self.total_iva = total_iva
+        self.total = subtotal + total_iva
+        self.save(update_fields=['subtotal', 'total_iva', 'total', 'updated_at'])
+
     def _resolver_taller(self):
         """Resuelve el taller que emite los documentos derivados de esta cotización."""
         from apps.empresas.services import resolver_taller
@@ -165,7 +176,8 @@ class Cotizacion(BaseModel):
             recepcion.save(update_fields=['orden_trabajo', 'updated_at'])
         if inspeccion:
             inspeccion.orden_trabajo = ot
-            inspeccion.save(update_fields=['orden_trabajo', 'updated_at'])
+            inspeccion.estado = 'FINALIZADA'
+            inspeccion.save(update_fields=['orden_trabajo', 'estado', 'updated_at'])
 
         self.estado = self.EstadoCotizacion.CONVERTIDA
         self.fecha_aceptacion = timezone.now()
@@ -175,7 +187,7 @@ class Cotizacion(BaseModel):
         return ot
 
 
-class DetalleServicioCotizacion(models.Model):
+class DetalleServicioCotizacion(BaseModel):
     """Mano de obra o servicios estimativos."""
 
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='servicios')
@@ -183,6 +195,7 @@ class DetalleServicioCotizacion(models.Model):
     horas_estimadas = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('1.00'))
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
+    es_opcional = models.BooleanField(default=False, help_text='Para sugerencias adicionales al cliente')
 
     def save(self, *args, **kwargs):
         self.subtotal = Decimal(self.horas_estimadas) * Decimal(self.precio_unitario)
@@ -192,7 +205,7 @@ class DetalleServicioCotizacion(models.Model):
         return f'{self.descripcion} - {self.cotizacion.numero_cotizacion}'
 
 
-class DetalleRepuestoCotizacion(models.Model):
+class DetalleRepuestoCotizacion(BaseModel):
     """Repuestos requeridos para la cotización."""
 
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='repuestos')

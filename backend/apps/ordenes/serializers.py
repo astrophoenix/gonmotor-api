@@ -240,6 +240,16 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep = super().to_representation(instance)
         rep['tipo_inspeccion_display'] = instance.get_tipo_inspeccion_display()
         rep['estado_display'] = instance.get_estado_display()
+        rep['tiene_orden_trabajo'] = instance.orden_trabajo_id is not None
+        from apps.cotizaciones.models import Cotizacion
+
+        rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(
+            estado__in=[Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA]
+        ).exists()
+        cotizacion_activa = instance.cotizaciones_generadas.filter(
+            estado__in=[Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA]
+        ).only('id').first()
+        rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
         if instance.recepcion_id:
             rec = instance.recepcion
             rv = rec.vehiculo if rec.vehiculo_id else None

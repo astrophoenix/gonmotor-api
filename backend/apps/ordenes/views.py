@@ -1,5 +1,5 @@
 from django.utils import timezone
-from rest_framework import filters, permissions, viewsets
+from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +24,13 @@ from .serializers import (
     OrdenTrabajoSerializer,
     RecepcionVehiculoSerializer,
 )
+
+
+def _check_inspeccion_editable(inspeccion):
+    if inspeccion is not None and inspeccion.orden_trabajo_id:
+        raise serializers.ValidationError(
+            'La inspección ya se convirtió en orden de trabajo; no se pueden modificar sus detalles.'
+        )
 
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -117,6 +124,25 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
             'servicios_detectados', 'repuestos_sugeridos', 'fotos'
         )
 
+    @staticmethod
+    def _check_editable(inspeccion):
+        if inspeccion.orden_trabajo_id:
+            raise serializers.ValidationError(
+                'La inspección ya se convirtió en orden de trabajo y no puede modificarse.'
+            )
+
+    def update(self, request, *args, **kwargs):
+        self._check_editable(self.get_object())
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._check_editable(self.get_object())
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self._check_editable(self.get_object())
+        return super().destroy(request, *args, **kwargs)
+
 
 class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleServicioInspeccionSerializer
@@ -136,6 +162,18 @@ class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
         if inspeccion_id:
             queryset = queryset.filter(inspeccion_id=inspeccion_id)
         return queryset
+
+    def perform_create(self, serializer):
+        _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        _check_inspeccion_editable(self.get_object().inspeccion)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        _check_inspeccion_editable(instance.inspeccion)
+        super().perform_destroy(instance)
 
 
 class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
@@ -157,6 +195,18 @@ class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(inspeccion_id=inspeccion_id)
         return queryset
 
+    def perform_create(self, serializer):
+        _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        _check_inspeccion_editable(self.get_object().inspeccion)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        _check_inspeccion_editable(instance.inspeccion)
+        super().perform_destroy(instance)
+
 
 class FotoInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = FotoInspeccionSerializer
@@ -175,6 +225,18 @@ class FotoInspeccionViewSet(viewsets.ModelViewSet):
         if inspeccion_id:
             queryset = queryset.filter(inspeccion_id=inspeccion_id)
         return queryset
+
+    def perform_create(self, serializer):
+        _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        _check_inspeccion_editable(self.get_object().inspeccion)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        _check_inspeccion_editable(instance.inspeccion)
+        super().perform_destroy(instance)
 
 
 class RecepcionPdfExportView(APIView):

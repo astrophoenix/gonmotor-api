@@ -3,3 +3,6 @@ from django.apps import AppConfig
 
 class CotizacionesConfig(AppConfig):
     name = 'apps.cotizaciones'
+
+    def ready(self):
+        from . import signals  # noqa: F401
