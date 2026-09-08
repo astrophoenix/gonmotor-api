@@ -39,6 +39,8 @@ class VehiculoNestedSerializer(serializers.ModelSerializer):
             'tipo',
             'pais_origen',
             'kilometraje_actual',
+            'proximo_mantenimiento_km',
+            'proxima_mantenimiento_fecha',
             'observaciones',
             'is_active',
             'imagen',

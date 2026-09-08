@@ -241,6 +241,9 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['tipo_inspeccion_display'] = instance.get_tipo_inspeccion_display()
         rep['estado_display'] = instance.get_estado_display()
         rep['tiene_orden_trabajo'] = instance.orden_trabajo_id is not None
+        rep['orden_trabajo_numero'] = (
+            instance.orden_trabajo.numero_orden if instance.orden_trabajo_id else None
+        )
         from apps.cotizaciones.models import Cotizacion
 
         rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(
@@ -256,6 +259,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             rc = rec.cliente if rec.cliente_id else None
             rep['recepcion'] = {
                 'id': rec.id,
+                'numero_recepcion': rec.numero_recepcion,
                 'vehiculo': {
                     'id': rv.id,
                     'placa': rv.placa,
@@ -509,6 +513,54 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep['estado_display'] = instance.get_estado_display()
+        rep['tipo_trabajo_display'] = instance.get_tipo_trabajo_display()
+        rep['prioridad_display'] = instance.get_prioridad_display()
+        rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
+        if instance.vehiculo_id:
+            rep['vehiculo'] = {
+                'id': instance.vehiculo_id,
+                'placa': instance.vehiculo.placa,
+                'marca': instance.vehiculo.marca,
+                'modelo': instance.vehiculo.modelo,
+                'color': instance.vehiculo.color,
+                'tipo': instance.vehiculo.tipo,
+            }
+        if instance.cliente_id:
+            rep['cliente'] = {
+                'id': instance.cliente_id,
+                'nombre': instance.cliente.nombre,
+                'identificacion': instance.cliente.identificacion,
+                'telefono': instance.cliente.telefono,
+                'email': instance.cliente.email,
+            }
+        rep['asesor_nombre'] = (
+            instance.asesor.get_full_name() or instance.asesor.username
+        ) if instance.asesor_id else None
+        rep['mecanico_nombre'] = (
+            instance.mecanico_principal.get_full_name() or instance.mecanico_principal.username
+        ) if instance.mecanico_principal_id else None
+        rep['cotizacion_origen_numero'] = (
+            instance.cotizacion_origen.numero_cotizacion if instance.cotizacion_origen_id else None
+        )
+        rep['recepciones'] = [
+            {'id': r.id, 'numero_recepcion': r.numero_recepcion}
+            for r in instance.recepciones.all()
+        ]
+        inspeccion = getattr(instance, 'inspeccion', None)
+        rep['inspeccion'] = (
+            {
+                'id': inspeccion.id,
+                'numero_inspeccion': inspeccion.numero_inspeccion,
+                'tipo_inspeccion': inspeccion.tipo_inspeccion,
+            }
+            if inspeccion is not None
+            else None
+        )
+        return rep
 
     def create(self, validated_data):
         request = self.context.get('request')

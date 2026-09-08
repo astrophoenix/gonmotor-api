@@ -132,6 +132,24 @@ class Vehiculo(BaseModel):
         verbose_name="Kilometraje Actual",
         default=0
     )
+    proximo_mantenimiento_km = models.PositiveIntegerField(
+        verbose_name="Próximo mantenimiento (km)",
+        blank=True,
+        null=True,
+        help_text=(
+            "Kilometraje en el que corresponde el siguiente mantenimiento "
+            "preventivo. Se usa para recordatorios por WhatsApp."
+        )
+    )
+    proxima_mantenimiento_fecha = models.DateField(
+        verbose_name="Próximo mantenimiento (fecha)",
+        blank=True,
+        null=True,
+        help_text=(
+            "Fecha estimada del siguiente mantenimiento preventivo. Se usa "
+            "para recordatorios por WhatsApp."
+        )
+    )
     observaciones = models.TextField(
         verbose_name="Observaciones",
         blank=True,

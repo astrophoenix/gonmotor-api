@@ -136,11 +136,8 @@ class Cotizacion(BaseModel):
         taller = self._resolver_taller()
         return generar_codigo_secuencial(taller, 'ot')
 
-    def convertir_a_orden(self, usuario=None):
-        """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
-        if self.estado != self.EstadoCotizacion.ACEPTADA:
-            raise ValueError("La cotización debe estar aceptada para convertirla a orden.")
-
+    def _crear_orden_trabajo(self, usuario=None):
+        """Crea y devuelve la OrdenTrabajo derivada de esta cotización."""
         from apps.ordenes.models import OrdenTrabajo
 
         inspeccion = self.inspeccion_origen
@@ -152,7 +149,7 @@ class Cotizacion(BaseModel):
         cliente = self.cliente
         if not vehiculo or not cliente:
             raise ValueError(
-                'No se puede convertir la cotización a orden: faltan cliente o vehículo. '
+                'No se puede generar la orden de trabajo: faltan cliente o vehículo. '
                 'Asócialos a la cotización o a su recepción de origen.'
             )
 
@@ -179,9 +176,35 @@ class Cotizacion(BaseModel):
             inspeccion.estado = 'FINALIZADA'
             inspeccion.save(update_fields=['orden_trabajo', 'estado', 'updated_at'])
 
+        return ot
+
+    def convertir_a_orden(self, usuario=None):
+        """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
+        if self.estado != self.EstadoCotizacion.ACEPTADA:
+            raise ValueError("La cotización debe estar aceptada para convertirla a orden.")
+
+        ot = self._crear_orden_trabajo(usuario=usuario)
+
         self.estado = self.EstadoCotizacion.CONVERTIDA
         self.fecha_aceptacion = timezone.now()
         self.aceptada_por = usuario
+        self.save()
+
+        return ot
+
+    def generar_orden(self, usuario=None, metodo_aceptacion=None):
+        """Genera una OrdenTrabajo y deja la cotización aceptada en un solo paso."""
+        if self.orden_trabajo_origen_id:
+            raise ValueError('Esta cotización ya generó una orden de trabajo.')
+        if self.estado == self.EstadoCotizacion.CONVERTIDA:
+            raise ValueError('La cotización ya fue convertida en una orden de trabajo.')
+
+        ot = self._crear_orden_trabajo(usuario=usuario)
+
+        self.estado = self.EstadoCotizacion.ACEPTADA
+        self.fecha_aceptacion = timezone.now()
+        self.aceptada_por = usuario
+        self.metodo_aceptacion = metodo_aceptacion or self.metodo_aceptacion or 'PRESENCIAL'
         self.save()
 
         return ot

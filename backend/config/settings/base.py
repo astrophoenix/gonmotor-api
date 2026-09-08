@@ -54,8 +54,10 @@ INSTALLED_APPS = [
     'apps.vehiculos',
     'apps.cotizaciones',
     'apps.ordenes',
+    'apps.citas',
     'apps.inventario',
     'apps.configuracion',
+    'apps.notificaciones',
 ]
 
 LOCALE_PATHS = [
@@ -241,3 +243,30 @@ PASSWORD_RESET_TIMEOUT = 300  # 5 minutos
 
 # URL base del frontend para construir el enlace del email
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+
+
+# ============================================================================
+# WhatsApp / Recordatorios de mantenimiento (100% gratis en modo desarrollo)
+# ============================================================================
+# Documentación de credenciales: apps/notificaciones/services/whatsapp.py
+#
+# WHATSAPP_MODE (elegir uno):
+#   - "mock"            (default) Sin API, simula el envío y NO cuesta nada.
+#   - "twilio_sandbox"  Sandbox gratuito de Twilio (requiere SID/token).
+#   - "meta_api"        Meta WhatsApp Cloud API en modo de pruebas.
+#
+WHATSAPP_MODE = config('WHATSAPP_MODE', default='mock')
+
+# Modo mock: archivo opcional donde se vuelcan los mensajes simulados.
+WHATSAPP_MOCK_LOG_FILE = config('WHATSAPP_MOCK_LOG_FILE', default='logs/whatsapp_mock.log')
+
+# Twilio Sandbox (https://www.twilio.com — crédito de prueba gratuito)
+WHATSAPP_TWILIO_ACCOUNT_SID = config('WHATSAPP_TWILIO_ACCOUNT_SID', default='')
+WHATSAPP_TWILIO_AUTH_TOKEN = config('WHATSAPP_TWILIO_AUTH_TOKEN', default='')
+WHATSAPP_TWILIO_FROM_NUMBER = config(
+    'WHATSAPP_TWILIO_FROM_NUMBER', default='whatsapp:+14155238886'
+)
+
+# Meta WhatsApp Cloud API (modo de pruebas de desarrollador)
+WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')
+WHATSAPP_META_PHONE_NUMBER_ID = config('WHATSAPP_META_PHONE_NUMBER_ID', default='')

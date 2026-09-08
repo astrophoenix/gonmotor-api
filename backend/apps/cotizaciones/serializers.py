@@ -212,6 +212,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo_origen.numero_orden if instance.orden_trabajo_origen_id else None
         )
+        orden_generada = getattr(instance, 'orden_trabajo', None)
+        rep['orden_generada_numero'] = orden_generada.numero_orden if orden_generada else None
         rep['es_convertible'] = (
             instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA
             and instance.orden_trabajo_origen_id is None

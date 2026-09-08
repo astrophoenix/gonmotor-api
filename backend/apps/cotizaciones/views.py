@@ -43,7 +43,7 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             return Cotizacion.objects.none()
         return (
             Cotizacion.objects.filter(empresa_id=empresa_id)
-            .select_related('cliente', 'vehiculo', 'sucursal', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen')
+            .select_related('cliente', 'vehiculo', 'sucursal', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
             .prefetch_related('servicios', 'repuestos')
         )
 
@@ -56,6 +56,20 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         cotizacion = self.get_object()
         try:
             ot = cotizacion.convertir_a_orden(usuario=request.user)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+        return Response({
+            'id': ot.id,
+            'numero_orden': ot.numero_orden,
+            'estado': cotizacion.estado,
+        })
+
+    @action(detail=True, methods=['post'])
+    def generar_orden(self, request, pk=None):
+        cotizacion = self.get_object()
+        metodo = request.data.get('metodo_aceptacion')
+        try:
+            ot = cotizacion.generar_orden(usuario=request.user, metodo_aceptacion=metodo)
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
         return Response({

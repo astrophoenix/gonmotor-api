@@ -210,42 +210,42 @@ se creo cuenta en https://console.groq.com/ y se creo una KEY en https://console
 llamada AI_TEXT_API_KEY-GONMOTOR
 
 
+Actúa como un Desarrollador Full Stack Senior experto en Django REST Framework y Vue 3 (Composition API / Script Setup).
 
-Testigos que faltan
-Testigo de desempañado del parabrisas - Color: Verde
-Testigo de limpiaparabrisas - Color: Verde
-Testigo de luces largas: Color: Verde
+Necesito implementar el **Módulo de Citas** en mi sistema SaaS de talleres mecánicos (`gonmotor_api` y `gonmotor_ui`), arrancando desde una nueva sección en el sidebar. 
 
-Testigo de nivel bajo de combustible - Color: Ámbar
-Testigo de luces antinieblas traseras - Color: Ámbar
- Testigo de control de estabilidad ESP - Color: Ámbar
-Testigo de bujías de precalentamiento - Color: Ámbar
-Testigo de Pedal de Freno - Color: Ámbar o verde (según fabricante).
+Aplica estrictamente el **estándar actual del proyecto** para la arquitectura de comunicación con el backend (servicios estructurados, manejo centralizado en el request/httpClient, y uso de composables reactivos en Vue 3).
 
-Color: Rojo
-Testigo de luces de emergencia
-Testigo de Puerta o maletero abierto
-Testigo de Cinturón desabrochado
-Testigo de freno de estacionamiento
-Testigo de fallo en el sistema de frenos
+Por favor, implementa lo siguiente:
 
-=================
+1. **BACKEND (Django REST Framework):**
+   - Modelo `Cita` (con relaciones a empresa, cliente, vehículo, asesor, fecha/hora, estado y motivo).
+   - `CitaViewSet` con operaciones CRUD, filtros por fecha/estado, y una acción específica para **convertir una cita en una Recepción / Orden de Trabajo** evitando duplicar datos.
 
-Color: Verde
-Testigo de desempañado del parabrisas (Parabrisas con tres flechas verticales ascendentes.)
-Testigo de limpiaparabrisas (Parabrisas con un chorro de agua saliendo.)
-Testigo de luces largas (Haz de líneas horizontales a la izquierda junto a una semicircunferencia.)
+2. **FRONTEND (Vue 3):**
+   - **Sidebar y Rutas:** Agregar la opción "Citas" en el menú lateral con su respectiva ruta `/citas`.
+   - **Servicio:** Siguiendo el estándar del proyecto para el consumo de la API, manejo de tokens y errores de red.
+   - **Composable:** Gestionando estados de carga (`isLoading`), errores y la lógica de negocio (incluyendo la conversión a recepción).
+   - **Vista Principal (`AppointmentsView.vue`):** Una interfaz limpia (con calendario/listado, filtros y modales de creación que permitan buscar o crear clientes/vehículos rápidamente) consumiendo el composable.
 
-Color Amarillo
-Testigo de nivel bajo de combustible (Bomba de combustible.)
-Testigo de luces antinieblas traseras (Semicircunferencia con tres líneas horizontales onduladas hacia la derecha.)
-Testigo de control de estabilidad ESP (Coche con dos líneas onduladas debajo.)
-Testigo de bujías de precalentamiento (Resistencia incandescente en espiral.)
-Testigo de Pedal de Freno (Pie sobre un pedal dentro de un círculo.)
+Genera el código listo para integrar manteniendo la consistencia con los demás módulos del sistema.
 
-Color: Rojo
-Testigo de luces de emergencia (Triángulo con otro triángulo en su interior.)
-Testigo de Puerta o maletero abierto (Representación del coche con una puerta o maletero abierto.)
-Testigo de Cinturón desabrochado (Figura de persona con cinturón desabrochado.)
-Testigo de freno de estacionamiento (Círculo con la letra “P” dentro.)
-Testigo de fallo en el sistema de frenos (Círculo con un signo de exclamación dentro y dos paréntesis a los lados.)
+
+
+Actúa como Desarrollador Full Stack Senior experto en Django REST Framework y Vue 3.
+
+Necesito implementar un módulo de notificaciones vía WhatsApp para recordar a los clientes su próximo mantenimiento en el sistema SaaS de talleres mecánicos (`gonmotor_api` y `gonmotor_ui`), utilizando una estrategia 100% gratuita o en modo de pruebas (sandbox/desarrollo) debido a que somos un equipo pequeño en fase inicial.
+
+Por favor, implementa las siguientes tareas:
+
+1. BACKEND (Django REST Framework):
+   - Crear un servicio de integración con WhatsApp (o un wrapper genérico que soporte entornos de prueba/sandbox gratuitos, como la API de pruebas de Meta para desarrolladores o un servicio mock/gratuito para desarrollo local).
+   - Crear un modelo o tarea programada (ej. comando de gestión en Django o una tarea ligera) que identifique los vehículos cuyo mantenimiento esté próximo (ej. por fecha o kilometraje) y dispare la alerta.
+   - Endpoint en Django para probar el envío manual de la notificación de mantenimiento de prueba hacia un número de teléfono específico.
+
+2. FRONTEND (Vue 3):
+   - Agregar una sección visual o botón en el panel de control / detalle del vehículo o citas para "Enviar Recordatorio de Mantenimiento por WhatsApp".
+   - Integrar el consumo del servicio consumiendo el `httpClient` respetando la estructura de servicios y composables del proyecto (`gonmotor_ui`).
+   - Mostrar notificaciones en la interfaz (Toasts de éxito o error) indicando si el mensaje de prueba se encoló o envió correctamente.
+
+Asegúrate de documentar brevemente en el código qué credenciales de prueba o variables de entorno (en `.env`) se deben configurar para que el equipo de 3 personas pueda probarlo inmediatamente sin costos.

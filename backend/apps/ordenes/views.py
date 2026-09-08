@@ -45,7 +45,19 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return OrdenTrabajo.objects.none()
-        return OrdenTrabajo.objects.filter(empresa_id=empresa_id)
+        return (
+            OrdenTrabajo.objects.filter(empresa_id=empresa_id)
+            .select_related(
+                'cliente',
+                'vehiculo',
+                'sucursal',
+                'asesor',
+                'mecanico_principal',
+                'cotizacion_origen',
+                'inspeccion',
+            )
+            .prefetch_related('servicios', 'repuestos', 'recepciones')
+        )
 
 
 class RecepcionVehiculoViewSet(viewsets.ModelViewSet):

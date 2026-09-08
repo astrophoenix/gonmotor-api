@@ -57,3 +57,29 @@ class ValidarOrigenInspeccionTests(SimpleTestCase):
     def test_inspeccion_libre_aprueba(self):
         inspeccion = self._inspeccion()
         self.assertIsNone(_validar_origen_inspeccion(inspeccion))
+
+
+class GenerarOrdenTests(SimpleTestCase):
+    def _cotizacion(self, estado, orden_origen_id=None):
+        cotizacion = MagicMock()
+        cotizacion.orden_trabajo_origen_id = orden_origen_id
+        cotizacion.estado = estado
+        cotizacion.EstadoCotizacion = Cotizacion.EstadoCotizacion
+        cotizacion.generar_orden = Cotizacion.generar_orden.__get__(cotizacion, Cotizacion)
+        return cotizacion
+
+    def test_con_orden_trabajo_origen_rechazada(self):
+        cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.ENVIADA, orden_origen_id=7)
+        with self.assertRaises(ValueError):
+            cotizacion.generar_orden()
+
+    def test_ya_convertida_rechazada(self):
+        cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.CONVERTIDA)
+        with self.assertRaises(ValueError):
+            cotizacion.generar_orden()
+
+    def test_no_llama_creacion_cuando_hay_orden_origen(self):
+        cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.ENVIADA, orden_origen_id=1)
+        with self.assertRaises(ValueError):
+            cotizacion.generar_orden()
+        cotizacion._crear_orden_trabajo.assert_not_called()

@@ -49,8 +49,14 @@ urlpatterns = [
     # 6.1 Endpoints del Módulo de Recepciones
     path('api/recepciones/', include('apps.ordenes.recepciones_urls')),
 
+    # 6.1.1 Endpoints del Módulo de Citas
+    path('api/citas/', include('apps.citas.urls')),
+
     # 6.2 Endpoints del Módulo de Inventario y Catálogos (Repuestos + Servicios)
     path('api/', include('apps.inventario.urls')),
+
+    # 6.3 Endpoints del Módulo de Notificaciones WhatsApp
+    path('api/notificaciones/', include('apps.notificaciones.urls')),
 
     # 7. Endpoints del Módulo de Configuración (Empresa, Sucursales, Usuarios, Roles)
     path('api/configuracion/', include('apps.configuracion.urls')),
