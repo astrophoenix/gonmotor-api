@@ -163,8 +163,23 @@ class RecepcionVehiculo(BaseModel):
 
     Puede existir independientemente de una Orden de Trabajo.
     """
+    # --- ESTADO Y ACEPTACIÓN DE LA RECEPCIÓN ---
+    ESTADO_CHOICES = [
+        ('PENDIENTE', 'Pendiente'),
+        ('ACEPTADA', 'Aceptada'),
+        ('NO_ACEPTADA', 'Rechazada'),
+    ]
 
-    # --- RELACIONES ---
+    TIPOS_CHOICES = [
+        ('MANTENIMIENTO', 'Mantenimiento'),
+        ('REPARACIÓN', 'Reparación'),
+        ('DIAGNOSTICO', 'Diagnóstico'),
+        ('ESTETICA', 'Estética'),
+        ('GARANTIA', 'Garantía'),
+        ('SINISTRO', 'Siniestro'),
+        ('OTRO', 'Otro'),
+    ]
+
     empresa = models.ForeignKey(
         'empresas.Empresa',
         on_delete=models.CASCADE,
@@ -221,8 +236,8 @@ class RecepcionVehiculo(BaseModel):
     # --- TIPO Y MOTIVO DE INGRESO ---
     tipo_recepcion = models.CharField(
         max_length=20,
-        choices=OrdenTrabajo.TipoTrabajo.choices,
-        default=OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,
+        choices=TIPOS_CHOICES,
+        default='PENDIENTE',
         verbose_name='Tipo de Recepción',
     )
     motivo_ingreso = models.TextField(
@@ -357,13 +372,6 @@ class RecepcionVehiculo(BaseModel):
         verbose_name='Aceptación de condiciones',
         help_text='Indica si el cliente aceptó las condiciones de recepción y estado del vehículo',
     )
-
-    # --- ESTADO Y ACEPTACIÓN DE LA RECEPCIÓN ---
-    ESTADO_CHOICES = [
-        ('PENDIENTE', 'Pendiente de Firma'),
-        ('ACEPTADA', 'Aceptada y Firmada'),
-        ('NO_ACEPTADA', 'No Aceptada / Sin Firma'),
-    ]
     estado = models.CharField(
         max_length=20,
         choices=ESTADO_CHOICES,
@@ -399,19 +407,18 @@ class InspeccionVehiculo(BaseModel):
     """Registro técnico del diagnóstico y estado mecánico del vehículo.
     Puede existir independientemente de una Orden de Trabajo."""
 
-    # Opciones de selección
     TIPO_CHOICES = [
         ('PREVENTIVO', 'Mantenimiento Preventivo'),
-        ('CORRECTIVO', 'Reparación Correctiva'),
-        ('DIAGNOSTICO', 'Solo Diagnóstico / Escaneo'),
-        ('ESTETICA', 'Enderezada, Pintura o Detailing'),
+        ('CORRECTIVO', 'Revisión Correctiva'),
+        ('DIAGNOSTICO', 'Diagnóstico'),
+        ('ESTETICA', 'Evaluación Estética'),
         ('GARANTIA', 'Revisión por Garantía'),
     ]
     
     ESTADO_CHOICES = [
-        ('PENDIENTE', 'Pendiente de Revisión'),
-        ('EN_PROCESO', 'Diagnóstico en Proceso'),
-        ('FINALIZADA', 'Inspección Finalizada'),
+        ('PENDIENTE', 'Pendiente'),
+        ('EN_PROCESO', 'En Proceso'),
+        ('FINALIZADA', 'Finalizada'),
     ]
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='inspecciones', null=True, blank=True)
@@ -451,7 +458,7 @@ class InspeccionVehiculo(BaseModel):
     )
 
     # Clasificación y Estado
-    tipo_inspeccion = models.CharField(max_length=20, choices=OrdenTrabajo.TipoTrabajo.choices, default=OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,)
+    tipo_inspeccion = models.CharField(max_length=20, choices=TIPO_CHOICES, default='DIAGNOSTICO',)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
 
     # Contexto del Cliente (Adaptado para incluir mantenimientos sin fallas)
@@ -484,6 +491,7 @@ class InspeccionVehiculo(BaseModel):
     testigo_freno_estacionamiento = models.BooleanField(default=False, verbose_name='Freno de Estacionamiento')
     testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
+
     class Meta:
         verbose_name = 'Inspección de Vehículo'
         verbose_name_plural = 'Inspecciones de Vehículos'

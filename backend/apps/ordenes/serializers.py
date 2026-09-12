@@ -163,6 +163,12 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
     repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
     fotos = FotoInspeccionSerializer(many=True, read_only=True)
 
+    TRANSICIONES_PERMITIDAS = {
+        'PENDIENTE': {'PENDIENTE', 'EN_PROCESO'},
+        'EN_PROCESO': {'PENDIENTE', 'EN_PROCESO', 'FINALIZADA'},
+        'FINALIZADA': {'FINALIZADA', 'EN_PROCESO'},
+    }
+
     class Meta:
         model = InspeccionVehiculo
         fields = [
@@ -233,6 +239,21 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             if inspecciones.exists():
                 raise serializers.ValidationError(
                     {'recepcion': 'Esta recepción ya tiene una inspección registrada.'}
+                )
+
+        estado = attrs.get('estado')
+        if self.instance and estado and estado != self.instance.estado:
+            permitidas = self.TRANSICIONES_PERMITIDAS.get(self.instance.estado, set())
+            if estado not in permitidas:
+                raise serializers.ValidationError(
+                    {'estado': 'No se permite la transición de estado solicitada.'}
+                )
+
+        if self.instance and self.instance.estado == 'FINALIZADA':
+            es_reapertura = estado == 'EN_PROCESO' and set(attrs.keys()) <= {'estado'}
+            if not es_reapertura:
+                raise serializers.ValidationError(
+                    {'detail': 'La inspección está finalizada; reábrela para poder modificarla.'}
                 )
         return attrs
 

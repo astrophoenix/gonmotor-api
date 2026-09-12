@@ -113,20 +113,33 @@ class Cotizacion(BaseModel):
         self.save(update_fields=['subtotal', 'total_iva', 'total', 'updated_at'])
 
     def _resolver_taller(self):
-        """Resuelve el taller que emite los documentos derivados de esta cotización."""
+        """Resuelve el taller que emite la OT derivada de esta cotización.
+
+        Fuente de verdad: `self.sucursal` (persistida al crear la cotización).
+        Solo si falta (registros legacy o creación programática sin taller) se
+        hereda del origen en orden recepción → inspección (o su recepción) →
+        orden de trabajo. Como último recurso, `resolver_taller` usa el primer
+        taller activo de la empresa.
+        """
         from apps.empresas.services import resolver_taller
 
-        sucursal = self.sucursal
-        if sucursal is None and self.recepcion_origen_id and self.recepcion_origen.sucursal_id:
+        if self.sucursal_id:
+            return self.sucursal
+
+        sucursal = None
+        if self.recepcion_origen_id and self.recepcion_origen.sucursal_id:
             sucursal = self.recepcion_origen.sucursal
+
         if sucursal is None and self.inspeccion_origen_id:
-            inspeccion_obj = self.inspeccion_origen
-            if inspeccion_obj.sucursal_id:
-                sucursal = inspeccion_obj.sucursal
-            elif inspeccion_obj.recepcion_id and inspeccion_obj.recepcion.sucursal_id:
-                sucursal = inspeccion_obj.recepcion.sucursal
+            inspeccion = self.inspeccion_origen
+            if inspeccion.sucursal_id:
+                sucursal = inspeccion.sucursal
+            elif inspeccion.recepcion_id and inspeccion.recepcion.sucursal_id:
+                sucursal = inspeccion.recepcion.sucursal
+
         if sucursal is None and self.orden_trabajo_origen_id and self.orden_trabajo_origen.sucursal_id:
             sucursal = self.orden_trabajo_origen.sucursal
+
         return resolver_taller(self.empresa_id, sucursal)
 
     def _generar_numero_orden(self):
@@ -154,7 +167,7 @@ class Cotizacion(BaseModel):
             )
 
         numero_orden = self._generar_numero_orden()
-        sucursal_ot = self.sucursal or self._resolver_taller()
+        sucursal_ot = self._resolver_taller()
 
         ot = OrdenTrabajo.objects.create(
             empresa=self.empresa,
@@ -178,33 +191,34 @@ class Cotizacion(BaseModel):
 
         return ot
 
-    def convertir_a_orden(self, usuario=None):
-        """Crea una OrdenTrabajo desde esta cotización y vincula la recepción/inspección."""
-        if self.estado != self.EstadoCotizacion.ACEPTADA:
-            raise ValueError("La cotización debe estar aceptada para convertirla a orden.")
-
-        ot = self._crear_orden_trabajo(usuario=usuario)
-
-        self.estado = self.EstadoCotizacion.CONVERTIDA
-        self.fecha_aceptacion = timezone.now()
-        self.aceptada_por = usuario
-        self.save()
-
-        return ot
-
     def generar_orden(self, usuario=None, metodo_aceptacion=None):
-        """Genera una OrdenTrabajo y deja la cotización aceptada en un solo paso."""
+        """
+        Genera una OrdenTrabajo a partir de una cotización aceptada.
+
+        La cotización mantiene el estado ACEPTADA.
+        La relación orden_trabajo_origen_id determina si ya generó una OT.
+        """
+
+        if self.estado != self.EstadoCotizacion.ACEPTADA:
+            raise ValueError(
+                "La cotización debe estar aceptada para generar una orden."
+            )
+
         if self.orden_trabajo_origen_id:
-            raise ValueError('Esta cotización ya generó una orden de trabajo.')
-        if self.estado == self.EstadoCotizacion.CONVERTIDA:
-            raise ValueError('La cotización ya fue convertida en una orden de trabajo.')
+            raise ValueError(
+                "Esta cotización ya generó una orden de trabajo."
+            )
 
         ot = self._crear_orden_trabajo(usuario=usuario)
 
-        self.estado = self.EstadoCotizacion.ACEPTADA
-        self.fecha_aceptacion = timezone.now()
-        self.aceptada_por = usuario
-        self.metodo_aceptacion = metodo_aceptacion or self.metodo_aceptacion or 'PRESENCIAL'
+        self.fecha_aceptacion = self.fecha_aceptacion or timezone.now()
+        self.aceptada_por = self.aceptada_por or usuario
+        self.metodo_aceptacion = (
+            metodo_aceptacion
+            or self.metodo_aceptacion
+            or 'PRESENCIAL'
+        )
+
         self.save()
 
         return ot

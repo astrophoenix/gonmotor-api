@@ -27,9 +27,9 @@ from .serializers import (
 
 
 def _check_inspeccion_editable(inspeccion):
-    if inspeccion is not None and inspeccion.orden_trabajo_id:
+    if inspeccion is not None and inspeccion.estado == 'FINALIZADA':
         raise serializers.ValidationError(
-            'La inspección ya se convirtió en orden de trabajo; no se pueden modificar sus detalles.'
+            'La inspección está finalizada; reábrela para poder modificar sus detalles.'
         )
 
 
@@ -140,16 +140,8 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
     def _check_editable(inspeccion):
         if inspeccion.orden_trabajo_id:
             raise serializers.ValidationError(
-                'La inspección ya se convirtió en orden de trabajo y no puede modificarse.'
+                'La inspección ya se convirtió en orden de trabajo y no puede eliminarse.'
             )
-
-    def update(self, request, *args, **kwargs):
-        self._check_editable(self.get_object())
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        self._check_editable(self.get_object())
-        return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         self._check_editable(self.get_object())

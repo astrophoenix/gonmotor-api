@@ -174,7 +174,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
             if taller is not None:
                 validated_data.setdefault('sucursal', taller)
                 validated_data['numero_cotizacion'] = generar_codigo_secuencial(taller, 'cotizacion')
-        return super().create(validated_data)
+        cotizacion = super().create(validated_data)
+        inspeccion = validated_data.get('inspeccion_origen')
+        if inspeccion is not None and inspeccion.estado != 'FINALIZADA':
+            inspeccion.estado = 'FINALIZADA'
+            inspeccion.save(update_fields=['estado', 'updated_at'])
+        return cotizacion
 
     def update(self, instance, validated_data):
         request = self.context.get('request')
