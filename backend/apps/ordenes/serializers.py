@@ -11,10 +11,20 @@ from .models import (
     DetalleServicioOrdenTrabajo,
     FotoRecepcion,
     FotoInspeccion,
+    FotoOrdenTrabajo,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
 )
+
+
+def url_imagen_absoluta(request, url):
+    """Convierte una URL relativa de archivo en absoluta (basada en el Host de la API)."""
+    if not url:
+        return None
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
 
 
 class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
@@ -157,6 +167,49 @@ class FotoInspeccionSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        request = self.context.get('request')
+        rep['imagen'] = url_imagen_absoluta(request, rep.get('imagen'))
+        return rep
+
+
+class FotoOrdenTrabajoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FotoOrdenTrabajo
+        fields = ['id', 'orden_trabajo', 'imagen', 'descripcion', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def validate_imagen(self, imagen):
+        if imagen.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
+        if imagen.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
+        return imagen
+
+    def validate(self, attrs):
+        orden_trabajo = attrs.get('orden_trabajo')
+        if orden_trabajo is None:
+            return attrs
+
+        request = self.context.get('request')
+        empresa_id = get_empresa_id_desde_request(request)
+        if empresa_id and orden_trabajo.empresa_id != empresa_id:
+            raise serializers.ValidationError({'orden_trabajo': 'La orden de trabajo no pertenece a tu empresa.'})
+
+        if self.instance is None or self.instance.orden_trabajo_id != orden_trabajo.id:
+            if orden_trabajo.fotos.count() >= FotoOrdenTrabajo.MAX_FOTOS:
+                raise serializers.ValidationError(
+                    {'orden_trabajo': f'Solo se permiten hasta {FotoOrdenTrabajo.MAX_FOTOS} fotos por orden de trabajo.'}
+                )
+        return attrs
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        request = self.context.get('request')
+        rep['imagen'] = url_imagen_absoluta(request, rep.get('imagen'))
+        return rep
+
 
 class InspeccionVehiculoSerializer(serializers.ModelSerializer):
     servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
@@ -259,7 +312,6 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
-        rep['tipo_inspeccion_display'] = instance.get_tipo_inspeccion_display()
         rep['estado_display'] = instance.get_estado_display()
         rep['tiene_orden_trabajo'] = instance.orden_trabajo_id is not None
         rep['orden_trabajo_numero'] = (
@@ -315,6 +367,12 @@ class FotoRecepcionSerializer(serializers.ModelSerializer):
         model = FotoRecepcion
         fields = ['id', 'tipo_vista', 'tipo_vista_display', 'imagen', 'descripcion', 'created_at']
         read_only_fields = ['id', 'tipo_vista_display', 'created_at']
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        request = self.context.get('request')
+        rep['imagen'] = url_imagen_absoluta(request, rep.get('imagen'))
+        return rep
 
 
 class RecepcionVehiculoSerializer(serializers.ModelSerializer):
@@ -503,6 +561,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
     repuestos = DetalleRepuestoOrdenTrabajoSerializer(many=True, read_only=True)
     recepciones = RecepcionVehiculoSerializer(many=True, read_only=True)
     inspeccion = InspeccionVehiculoSerializer(read_only=True)
+    fotos = FotoOrdenTrabajoSerializer(many=True, read_only=True)
 
     class Meta:
         model = OrdenTrabajo
@@ -532,6 +591,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'repuestos',
             'recepciones',
             'inspeccion',
+            'fotos',
             'is_active',
             'created_at',
             'updated_at',
@@ -540,6 +600,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        request = self.context.get('request')
         rep['estado_display'] = instance.get_estado_display()
         rep['tipo_trabajo_display'] = instance.get_tipo_trabajo_display()
         rep['prioridad_display'] = instance.get_prioridad_display()
@@ -552,6 +613,8 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
                 'modelo': instance.vehiculo.modelo,
                 'color': instance.vehiculo.color,
                 'tipo': instance.vehiculo.tipo,
+                'anio': instance.vehiculo.anio,
+                'kilometraje_actual': instance.vehiculo.kilometraje_actual,
             }
         if instance.cliente_id:
             rep['cliente'] = {
@@ -571,7 +634,25 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             instance.cotizacion_origen.numero_cotizacion if instance.cotizacion_origen_id else None
         )
         rep['recepciones'] = [
-            {'id': r.id, 'numero_recepcion': r.numero_recepcion}
+            {
+                'id': r.id,
+                'numero_recepcion': r.numero_recepcion,
+                'tipo_recepcion': r.tipo_recepcion,
+                'fecha_ingreso': r.fecha_ingreso,
+                'kilometraje_ingreso': r.kilometraje_ingreso,
+                'nivel_combustible': r.nivel_combustible,
+                'motivo_ingreso': r.motivo_ingreso,
+                'fotos': [
+                    {
+                        'id': f.id,
+                        'tipo_vista': f.tipo_vista,
+                        'tipo_vista_display': f.get_tipo_vista_display(),
+                        'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
+                        'descripcion': f.descripcion,
+                    }
+                    for f in r.fotos.all()
+                ],
+            }
             for r in instance.recepciones.all()
         ]
         inspeccion = getattr(instance, 'inspeccion', None)
@@ -580,6 +661,22 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
                 'id': inspeccion.id,
                 'numero_inspeccion': inspeccion.numero_inspeccion,
                 'tipo_inspeccion': inspeccion.tipo_inspeccion,
+                'tipo_inspeccion_display': inspeccion.get_tipo_inspeccion_display(),
+                'estado': inspeccion.estado,
+                'motivo_ingreso': inspeccion.motivo_ingreso,
+                'codigos_dtc': inspeccion.codigos_dtc,
+                'diagnostico_tecnico': inspeccion.diagnostico_tecnico,
+                'recomendaciones': inspeccion.recomendaciones,
+                'fotos': [
+                    {
+                        'id': f.id,
+                        'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
+                        'descripcion': f.descripcion,
+                        'created_at': f.created_at,
+                    }
+                    for f in inspeccion.fotos.all()
+                ],
+                'created_at': inspeccion.created_at,
             }
             if inspeccion is not None
             else None

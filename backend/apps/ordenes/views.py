@@ -10,16 +10,22 @@ from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
 from .models import (
     DetalleRepuestoInspeccion,
+    DetalleRepuestoOrdenTrabajo,
     DetalleServicioInspeccion,
+    DetalleServicioOrdenTrabajo,
     FotoInspeccion,
+    FotoOrdenTrabajo,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
 )
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
+    DetalleRepuestoOrdenTrabajoSerializer,
     DetalleServicioInspeccionSerializer,
+    DetalleServicioOrdenTrabajoSerializer,
     FotoInspeccionSerializer,
+    FotoOrdenTrabajoSerializer,
     InspeccionVehiculoSerializer,
     OrdenTrabajoSerializer,
     RecepcionVehiculoSerializer,
@@ -56,7 +62,7 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
                 'cotizacion_origen',
                 'inspeccion',
             )
-            .prefetch_related('servicios', 'repuestos', 'recepciones')
+            .prefetch_related('servicios', 'repuestos', 'recepciones', 'fotos', 'recepciones__fotos', 'inspeccion__fotos')
         )
 
 
@@ -241,6 +247,118 @@ class FotoInspeccionViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         _check_inspeccion_editable(instance.inspeccion)
         super().perform_destroy(instance)
+
+
+def _check_orden_editable(orden):
+    if orden is not None and orden.estado == 'CANCELADO':
+        raise serializers.ValidationError(
+            'La orden de trabajo está cancelada; no se pueden modificar sus detalles.'
+        )
+
+
+class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
+    serializer_class = FotoOrdenTrabajoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering = ['created_at', 'id']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return FotoOrdenTrabajo.objects.none()
+        queryset = FotoOrdenTrabajo.objects.filter(
+            orden_trabajo__empresa_id=empresa_id
+        ).select_related('orden_trabajo')
+        orden_id = self.request.query_params.get('orden')
+        if orden_id:
+            queryset = queryset.filter(orden_trabajo_id=orden_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        _check_orden_editable(serializer.validated_data.get('orden_trabajo'))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        _check_orden_editable(self.get_object().orden_trabajo)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        _check_orden_editable(instance.orden_trabajo)
+        super().perform_destroy(instance)
+
+
+class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
+    serializer_class = DetalleServicioOrdenTrabajoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['id']
+    ordering = ['id']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return DetalleServicioOrdenTrabajo.objects.none()
+        queryset = DetalleServicioOrdenTrabajo.objects.filter(
+            orden_trabajo__empresa_id=empresa_id
+        ).select_related('orden_trabajo')
+        orden_id = self.request.query_params.get('orden')
+        if orden_id:
+            queryset = queryset.filter(orden_trabajo_id=orden_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        orden = serializer.validated_data.get('orden_trabajo')
+        _check_orden_editable(orden)
+        serializer.save()
+        orden.calcular_totales()
+
+    def perform_update(self, serializer):
+        _check_orden_editable(self.get_object().orden_trabajo)
+        serializer.save()
+        serializer.instance.orden_trabajo.calcular_totales()
+
+    def perform_destroy(self, instance):
+        orden = instance.orden_trabajo
+        _check_orden_editable(orden)
+        instance.delete()
+        orden.calcular_totales()
+
+
+class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
+    serializer_class = DetalleRepuestoOrdenTrabajoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['id']
+    ordering = ['id']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return DetalleRepuestoOrdenTrabajo.objects.none()
+        queryset = DetalleRepuestoOrdenTrabajo.objects.filter(
+            orden_trabajo__empresa_id=empresa_id
+        ).select_related('orden_trabajo')
+        orden_id = self.request.query_params.get('orden')
+        if orden_id:
+            queryset = queryset.filter(orden_trabajo_id=orden_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        orden = serializer.validated_data.get('orden_trabajo')
+        _check_orden_editable(orden)
+        serializer.save()
+        orden.calcular_totales()
+
+    def perform_update(self, serializer):
+        _check_orden_editable(self.get_object().orden_trabajo)
+        serializer.save()
+        serializer.instance.orden_trabajo.calcular_totales()
+
+    def perform_destroy(self, instance):
+        orden = instance.orden_trabajo
+        _check_orden_editable(orden)
+        instance.delete()
+        orden.calcular_totales()
 
 
 class RecepcionPdfExportView(APIView):

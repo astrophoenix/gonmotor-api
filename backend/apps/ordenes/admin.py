@@ -6,6 +6,7 @@ from .models import (
     DetalleServicioInspeccion,
     DetalleServicioOrdenTrabajo,
     FotoRecepcion,
+    FotoOrdenTrabajo,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
@@ -64,3 +65,9 @@ class RecepcionVehiculoAdmin(admin.ModelAdmin):
 class FotoRecepcionAdmin(admin.ModelAdmin):
     list_display = ('recepcion', 'descripcion', 'created_at')
     search_fields = ('descripcion', 'recepcion__orden_trabajo__numero_orden')
+
+
+@admin.register(FotoOrdenTrabajo)
+class FotoOrdenTrabajoAdmin(admin.ModelAdmin):
+    list_display = ('orden_trabajo', 'descripcion', 'created_at')
+    search_fields = ('descripcion', 'orden_trabajo__numero_orden')

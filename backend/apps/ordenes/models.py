@@ -715,3 +715,27 @@ class FotoInspeccion(models.Model):
 
     def __str__(self):
         return f'Inspección #{self.inspeccion_id} - foto {self.pk}'
+
+
+class FotoOrdenTrabajo(models.Model):
+    """Adjunta hasta 5 fotos de evidencia del trabajo realizado en la orden."""
+
+    MAX_FOTOS = 5
+
+    orden_trabajo = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.CASCADE,
+        related_name='fotos',
+        verbose_name='Orden de Trabajo',
+    )
+    imagen = models.ImageField(upload_to='ordenes/orden_fotos/')
+    descripcion = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Foto de la Orden de Trabajo'
+        verbose_name_plural = 'Fotos de las Ordenes de Trabajo'
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return f'OT #{self.orden_trabajo_id} - foto {self.pk}'

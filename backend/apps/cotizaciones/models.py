@@ -191,7 +191,7 @@ class Cotizacion(BaseModel):
 
     def _crear_orden_trabajo(self, usuario=None):
         """Crea y devuelve la OrdenTrabajo derivada de esta cotización."""
-        from apps.ordenes.models import OrdenTrabajo
+        from apps.ordenes.models import DetalleRepuestoOrdenTrabajo, DetalleServicioOrdenTrabajo, OrdenTrabajo
 
         inspeccion = self.inspeccion_origen
         if inspeccion is None and self.recepcion_origen:
@@ -228,6 +228,25 @@ class Cotizacion(BaseModel):
             inspeccion.orden_trabajo = ot
             inspeccion.estado = 'FINALIZADA'
             inspeccion.save(update_fields=['orden_trabajo', 'estado', 'updated_at'])
+
+        for det in self.servicios.all():
+            DetalleServicioOrdenTrabajo.objects.create(
+                orden_trabajo=ot,
+                descripcion=det.descripcion,
+                horas_aplicadas=det.horas_estimadas,
+                precio_unitario=det.precio_unitario,
+            )
+
+        for det in self.repuestos.all():
+            DetalleRepuestoOrdenTrabajo.objects.create(
+                orden_trabajo=ot,
+                codigo_repuesto=det.codigo_repuesto,
+                descripcion=det.descripcion,
+                cantidad=Decimal(det.cantidad or 1),
+                precio_unitario=det.precio_unitario_referencial,
+            )
+
+        ot.calcular_totales()
 
         return ot
 
