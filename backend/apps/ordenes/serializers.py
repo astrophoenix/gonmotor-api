@@ -272,8 +272,11 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         ).exists()
         cotizacion_activa = instance.cotizaciones_generadas.filter(
             estado__in=[Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA]
-        ).only('id').first()
+        ).only('id', 'numero_cotizacion').first()
         rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
+        rep['numero_cotizacion'] = (
+            cotizacion_activa.numero_cotizacion if cotizacion_activa else None
+        )
         if instance.recepcion_id:
             rec = instance.recepcion
             rv = rec.vehiculo if rec.vehiculo_id else None

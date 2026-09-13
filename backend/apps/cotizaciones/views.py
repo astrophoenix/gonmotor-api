@@ -52,6 +52,23 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         super().perform_create(serializer)
 
     @action(detail=True, methods=['post'])
+    def sincronizar_inspeccion(self, request, pk=None):
+        cotizacion = self.get_object()
+        _check_cotizacion_editable(cotizacion)
+        try:
+            cotizacion.sincronizar_desde_inspeccion()
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+        return Response({
+            'id': cotizacion.id,
+            'numero_cotizacion': cotizacion.numero_cotizacion,
+            'cantidad_servicios': cotizacion.servicios.count(),
+            'cantidad_repuestos': cotizacion.repuestos.count(),
+            'subtotal': cotizacion.subtotal,
+            'total': cotizacion.total,
+        })
+
+    @action(detail=True, methods=['post'])
     def convertir_a_orden(self, request, pk=None):
         cotizacion = self.get_object()
         try:

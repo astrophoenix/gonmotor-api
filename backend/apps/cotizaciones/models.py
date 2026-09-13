@@ -112,6 +112,46 @@ class Cotizacion(BaseModel):
         self.total = subtotal + total_iva
         self.save(update_fields=['subtotal', 'total_iva', 'total', 'updated_at'])
 
+    def sincronizar_desde_inspeccion(self):
+        """Reemplaza los ítems de la cotización por los de la inspección de origen.
+
+        Borra los servicios y repuestos actuales de la cotización y los vuelve a
+        crear desde la inspección, de modo que la cotización sea un espejo fiel del
+        diagnóstico. Después recalcula los totales.
+        """
+        inspeccion = self.inspeccion_origen
+        if inspeccion is None:
+            raise ValueError('La cotización no tiene una inspección de origen.')
+        if inspeccion.orden_trabajo_id:
+            raise ValueError(
+                'La inspección ya se convirtió en orden de trabajo; no se puede sincronizar la cotización.'
+            )
+
+        self.servicios.all().delete()
+        self.repuestos.all().delete()
+
+        for det in inspeccion.servicios_detectados.all():
+            DetalleServicioCotizacion.objects.create(
+                cotizacion=self,
+                codigo=det.servicio.codigo if det.servicio_id else None,
+                descripcion=(det.descripcion or '').strip(),
+                horas_estimadas=det.horas_estimadas,
+                precio_unitario=Decimal(det.precio_referencial or '0.00'),
+                es_opcional=det.es_sugerido,
+            )
+
+        for det in inspeccion.repuestos_sugeridos.all():
+            DetalleRepuestoCotizacion.objects.create(
+                cotizacion=self,
+                codigo_repuesto=det.repuesto.codigo if det.repuesto_id else None,
+                descripcion=(det.descripcion or '').strip(),
+                cantidad=int(Decimal(det.cantidad or 1)),
+                precio_unitario_referencial=Decimal(det.precio_referencial or '0.00'),
+                es_opcional=det.es_sugerido,
+            )
+
+        self.recalcular_totales()
+
     def _resolver_taller(self):
         """Resuelve el taller que emite la OT derivada de esta cotización.
 
