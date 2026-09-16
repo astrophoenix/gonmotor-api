@@ -407,15 +407,23 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
         rep = super().to_representation(instance)
         rep['estado_display'] = instance.get_estado_display()
         if instance.vehiculo_id:
+            request = self.context.get('request')
             rep['vehiculo'] = {
                 'id': instance.vehiculo_id,
                 'placa': instance.vehiculo.placa,
+                'numero_motor': instance.vehiculo.numero_motor,
                 'marca': instance.vehiculo.marca,
                 'modelo': instance.vehiculo.modelo,
                 'color': instance.vehiculo.color,
                 'tipo': instance.vehiculo.tipo,
+                'transmision': instance.vehiculo.transmision,
+                'combustible': instance.vehiculo.combustible,
                 'grupo_blueprint': instance.vehiculo.grupo_blueprint,
                 'kilometraje_actual': instance.vehiculo.kilometraje_actual,
+                'imagen': url_imagen_absoluta(
+                    request,
+                    instance.vehiculo.imagen.url if instance.vehiculo.imagen else None,
+                ),
             }
         if instance.cliente_id:
             rep['cliente'] = {
