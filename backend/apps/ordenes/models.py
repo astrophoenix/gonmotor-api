@@ -284,6 +284,62 @@ class RecepcionVehiculo(BaseModel):
         verbose_name='Datos de la grúa / Chófer',
     )
 
+    # --- CUSTODIA / LL LAVES Y PERTENENCIAS ---
+    cantidad_llaves = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name='Cantidad de llaves',
+        help_text='Cantidad de llaves del vehículo entregadas por el cliente',
+    )
+    tiene_llave_control = models.BooleanField(
+        default=False, verbose_name='Llave de control / Control remoto'
+    )
+    pertenencia_celular = models.BooleanField(default=False, verbose_name='Celular')
+    pertenencia_billetera = models.BooleanField(default=False, verbose_name='Billetera')
+    pertenencia_dinero = models.BooleanField(default=False, verbose_name='Dinero en efectivo')
+    pertenencia_documentos = models.BooleanField(default=False, verbose_name='Documentos personales')
+    pertenencia_gafas = models.BooleanField(default=False, verbose_name='Gafas / Lentes')
+    pertenencia_equipaje = models.BooleanField(default=False, verbose_name='Equipaje / Bolsos')
+    pertenencia_otros = models.BooleanField(default=False, verbose_name='Otros objetos de valor')
+    pertenencias_observaciones = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='Observaciones de pertenencias',
+        help_text='Detalles adicionales sobre objetos de valor dejados en el vehículo',
+    )
+
+    # --- SEGURO / SINIESTROS ---
+    compania_seguro = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        verbose_name='Compañía de seguro',
+    )
+    numero_poliza = models.CharField(
+        max_length=80,
+        blank=True,
+        null=True,
+        verbose_name='Número de póliza',
+    )
+    numero_reclamo = models.CharField(
+        max_length=80,
+        blank=True,
+        null=True,
+        verbose_name='Número de reclamo / siniestro',
+    )
+    ajustador_nombre = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        verbose_name='Nombre del ajustador',
+    )
+    ajustador_telefono = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        verbose_name='Teléfono del ajustador',
+    )
+
     # --- TESTIGOS DEL TABLERO AL INGRESO ---
     testigo_check_engine = models.BooleanField(default=False, verbose_name='Check Engine')
     testigo_abs = models.BooleanField(default=False, verbose_name='ABS')
@@ -345,22 +401,11 @@ class RecepcionVehiculo(BaseModel):
         null=True,
         verbose_name='Observaciones / Descripción de Golpes, Rayones o Estado de Pintura',
     )
-    firma_receptor = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name='Firma del receptor',
-        help_text='Firma digital del empleado que recibió el vehículo (base64)',
-    )
     firma_cliente = models.TextField(
         blank=True,
         null=True,
         verbose_name='Firma del cliente',
         help_text='Firma digital del cliente aceptando la recepción (base64)',
-    )
-    fecha_firma_receptor = models.DateTimeField(
-        null=True,
-        blank=True,
-        verbose_name='Fecha y hora de firma del receptor',
     )
     fecha_firma_cliente = models.DateTimeField(
         null=True,
@@ -446,6 +491,22 @@ class InspeccionVehiculo(BaseModel):
         blank=True,
         related_name='inspecciones',
         help_text='Recepción del vehículo de la cual se derivó esta inspección'
+    )
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspecciones',
+        help_text='Cliente asociado cuando la inspección no proviene de una recepción'
+    )
+    vehiculo = models.ForeignKey(
+        'vehiculos.Vehiculo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspecciones',
+        help_text='Vehículo asociado cuando la inspección no proviene de una recepción'
     )
 
     # Número de inspección (secuencia configurable por taller)

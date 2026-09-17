@@ -230,6 +230,8 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'sucursal',
             'orden_trabajo',
             'recepcion',
+            'cliente',
+            'vehiculo',
             'numero_inspeccion',
             'tipo_inspeccion',
             'estado',
@@ -281,6 +283,11 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             if taller is not None:
                 validated_data.setdefault('sucursal', taller)
                 validated_data['numero_inspeccion'] = generar_codigo_secuencial(taller, 'inspeccion')
+            if recepcion is not None:
+                if validated_data.get('cliente') is None and recepcion.cliente_id:
+                    validated_data['cliente'] = recepcion.cliente
+                if validated_data.get('vehiculo') is None and recepcion.vehiculo_id:
+                    validated_data['vehiculo'] = recepcion.vehiculo
         return super().create(validated_data)
 
     def validate(self, attrs):
@@ -342,6 +349,13 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                     'marca': rv.marca,
                     'modelo': rv.modelo,
                     'color': rv.color,
+                    'numero_motor': rv.numero_motor,
+                    'transmision': rv.transmision,
+                    'combustible': rv.combustible,
+                    'imagen': url_imagen_absoluta(
+                        self.context.get('request'),
+                        rv.imagen.url if rv.imagen else None,
+                    ),
                 } if rv else None,
                 'cliente': {
                     'id': rc.id,
@@ -357,6 +371,33 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                 'motivo_ingreso': rec.motivo_ingreso,
                 'created_at': rec.created_at.isoformat() if rec.created_at else None,
             }
+            if instance.cliente_id is None and rc:
+                instance.cliente = rc
+            if instance.vehiculo_id is None and rv:
+                instance.vehiculo = rv
+        cliente_obj = instance.cliente if instance.cliente_id else None
+        vehiculo_obj = instance.vehiculo if instance.vehiculo_id else None
+        rep['cliente'] = {
+            'id': cliente_obj.id,
+            'nombre': cliente_obj.nombre,
+            'identificacion': cliente_obj.identificacion,
+            'telefono': cliente_obj.telefono,
+            'email': cliente_obj.email,
+        } if cliente_obj else None
+        rep['vehiculo'] = {
+            'id': vehiculo_obj.id,
+            'placa': vehiculo_obj.placa,
+            'marca': vehiculo_obj.marca,
+            'modelo': vehiculo_obj.modelo,
+            'color': vehiculo_obj.color,
+            'numero_motor': vehiculo_obj.numero_motor,
+            'transmision': vehiculo_obj.transmision,
+            'combustible': vehiculo_obj.combustible,
+            'imagen': url_imagen_absoluta(
+                self.context.get('request'),
+                vehiculo_obj.imagen.url if vehiculo_obj.imagen else None,
+            ),
+        } if vehiculo_obj else None
         return rep
 
 
@@ -387,7 +428,6 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'numero_recepcion',
-            'fecha_firma_receptor',
             'fecha_firma_cliente',
             'aceptacion_condiciones',
         ]
@@ -545,7 +585,6 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'detail': 'No se puede editar una recepción cuyo cliente ya aceptó y firmó las condiciones de recepción.'
             })
-        validated_data.pop('fecha_firma_receptor', None)
         validated_data.pop('fecha_firma_cliente', None)
         validated_data.pop('aceptacion_condiciones', None)
 

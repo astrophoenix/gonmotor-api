@@ -1,5 +1,6 @@
 from django.utils import timezone
-from rest_framework import filters, permissions, serializers, viewsets
+from rest_framework import filters, permissions, serializers, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -37,6 +38,18 @@ def _check_inspeccion_editable(inspeccion):
         raise serializers.ValidationError(
             'La inspección está finalizada; reábrela para poder modificar sus detalles.'
         )
+
+
+MAPA_TIPO_INSPECCION = {
+    'MANTENIMIENTO': 'PREVENTIVO',
+    'REPARACIÓN': 'CORRECTIVO',
+    'REPARACION': 'CORRECTIVO',
+    'DIAGNOSTICO': 'DIAGNOSTICO',
+    'ESTETICA': 'ESTETICA',
+    'GARANTIA': 'GARANTIA',
+    'SINISTRO': 'CORRECTIVO',
+    'OTRO': 'DIAGNOSTICO',
+}
 
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -96,9 +109,6 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save()
         self._sincronizar_kilometraje_vehiculo(instance)
-        if instance.firma_receptor and not instance.fecha_firma_receptor:
-            instance.fecha_firma_receptor = timezone.now()
-            instance.save(update_fields=['fecha_firma_receptor'])
         if instance.firma_cliente and not instance.aceptacion_condiciones:
             instance.fecha_firma_cliente = timezone.now()
             instance.aceptacion_condiciones = True
@@ -108,12 +118,6 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = serializer.save()
         self._sincronizar_kilometraje_vehiculo(instance)
-        if instance.firma_receptor and not instance.fecha_firma_receptor:
-            instance.fecha_firma_receptor = timezone.now()
-            instance.save(update_fields=['fecha_firma_receptor'])
-        elif not instance.firma_receptor and instance.fecha_firma_receptor:
-            instance.fecha_firma_receptor = None
-            instance.save(update_fields=['fecha_firma_receptor'])
         if instance.firma_cliente and not instance.aceptacion_condiciones:
             instance.fecha_firma_cliente = timezone.now()
             instance.aceptacion_condiciones = True
@@ -124,6 +128,41 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             instance.aceptacion_condiciones = False
             instance.estado = 'PENDIENTE'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
+
+    @action(detail=True, methods=['post'], url_path='crear-inspeccion')
+    def crear_inspeccion(self, request, pk=None):
+        recepcion = self.get_object()
+        if recepcion.estado != 'ACEPTADA':
+            return Response(
+                {'detail': 'Solo puede crearse una inspección desde una recepción aceptada y firmada.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if recepcion.inspecciones.exists():
+            return Response(
+                {'detail': 'Esta recepción ya tiene una inspección registrada.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        testigo_campos = [
+            f.name
+            for f in RecepcionVehiculo._meta.fields
+            if f.name.startswith('testigo_')
+        ]
+        data = {
+            'recepcion': recepcion.id,
+            'tipo_inspeccion': MAPA_TIPO_INSPECCION.get(recepcion.tipo_recepcion, 'DIAGNOSTICO'),
+            'estado': 'PENDIENTE',
+            'motivo_ingreso': recepcion.motivo_ingreso or '',
+            'otros_testigos_observaciones': recepcion.otros_testigos_observaciones or '',
+            **{campo: getattr(recepcion, campo, False) for campo in testigo_campos},
+        }
+        serializer = InspeccionVehiculoSerializer(data=data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        inspeccion = serializer.save()
+        return Response(
+            InspeccionVehiculoSerializer(inspeccion, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
