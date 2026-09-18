@@ -364,6 +364,8 @@ class EmpleadoWriteSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     telefono = serializers.CharField(required=False, allow_blank=True, default='')
+    identificacion = serializers.CharField(required=False, allow_blank=True, default='', max_length=13)
+    direccion = serializers.CharField(required=False, allow_blank=True, default='', max_length=255)
     rol = serializers.ChoiceField(choices=UsuarioEmpresa.ROLES)
     talleres = serializers.ListField(
         child=serializers.IntegerField(),
@@ -385,6 +387,8 @@ class EmpleadoWriteSerializer(serializers.Serializer):
                 'last_name': user.last_name,
                 'is_active': user.is_active,
                 'telefono': getattr(profile, 'telefono', '') if profile else '',
+                'identificacion': getattr(profile, 'identificacion', '') if profile else '',
+                'direccion': getattr(profile, 'direccion', '') if profile else '',
             },
             'empresa': {
                 'id': instance.empresa_id,
@@ -419,6 +423,8 @@ class EmpleadoReadSerializer(serializers.ModelSerializer):
             'last_name': obj.user.last_name,
             'is_active': obj.user.is_active,
             'telefono': getattr(profile, 'telefono', '') if profile else '',
+            'identificacion': getattr(profile, 'identificacion', '') if profile else '',
+            'direccion': getattr(profile, 'direccion', '') if profile else '',
         }
 
     def get_rol_display(self, obj):

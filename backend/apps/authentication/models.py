@@ -18,6 +18,18 @@ class UserProfile(BaseModel):
         blank=True, 
         default=""
     )
+    identificacion = models.CharField(
+        max_length=13,
+        blank=True,
+        default="",
+        verbose_name="Identificación (Cédula/RUC/Pasaporte)"
+    )
+    direccion = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Dirección"
+    )
     # Taller en el que está trabajando actualmente durante su sesión actual
     taller_activo = models.ForeignKey(
         'empresas.Taller',

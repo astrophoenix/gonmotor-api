@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status, viewsets, permissions
+from rest_framework import status, viewsets, permissions, filters
 from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -289,6 +289,18 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = [
+        'user__first_name',
+        'user__last_name',
+        'user__username',
+        'user__email',
+        'user__profile__identificacion',
+        'user__profile__direccion',
+    ]
+    ordering_fields = ['user__first_name', 'user__last_name', 'created_at']
+    ordering = ['user__first_name', 'user__last_name']
+
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
         query_empresa_id = self.request.query_params.get('empresa')
@@ -362,7 +374,12 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         user.is_active = True
         user.save()
         
-        UserProfile.objects.create(user=user, telefono=validated_data.get('telefono', ''))
+        UserProfile.objects.create(
+            user=user,
+            telefono=validated_data.get('telefono', ''),
+            identificacion=validated_data.get('identificacion', ''),
+            direccion=validated_data.get('direccion', ''),
+        )
         
         usuario_empresa = UsuarioEmpresa.objects.create(
             user=user,
@@ -411,6 +428,8 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.telefono = validated_data.get('telefono', profile.telefono)
+        profile.identificacion = validated_data.get('identificacion', profile.identificacion)
+        profile.direccion = validated_data.get('direccion', profile.direccion)
         profile.save()
 
         usuario_empresa.rol = validated_data.get('rol', usuario_empresa.rol)

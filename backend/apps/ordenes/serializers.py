@@ -232,6 +232,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'recepcion',
             'cliente',
             'vehiculo',
+            'responsable',
             'numero_inspeccion',
             'tipo_inspeccion',
             'estado',
@@ -275,6 +276,8 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             empresa_id = get_empresa_id_desde_request(request)
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
+            if validated_data.get('responsable') is None and request.user.is_authenticated:
+                validated_data['responsable'] = request.user
             sucursal = validated_data.get('sucursal')
             recepcion = validated_data.get('recepcion')
             if sucursal is None and recepcion is not None and recepcion.sucursal_id:
@@ -324,6 +327,9 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo.numero_orden if instance.orden_trabajo_id else None
         )
+        rep['responsable_nombre'] = (
+            instance.responsable.get_full_name() or instance.responsable.username
+        ) if instance.responsable_id else None
         from apps.cotizaciones.models import Cotizacion
 
         rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(

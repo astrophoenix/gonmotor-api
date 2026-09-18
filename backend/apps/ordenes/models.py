@@ -508,6 +508,15 @@ class InspeccionVehiculo(BaseModel):
         related_name='inspecciones',
         help_text='Vehículo asociado cuando la inspección no proviene de una recepción'
     )
+    responsable = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inspecciones_responsables',
+        verbose_name='Responsable',
+        help_text='Mecánico o técnico responsable de la inspección'
+    )
 
     # Número de inspección (secuencia configurable por taller)
     numero_inspeccion = models.CharField(
