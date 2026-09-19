@@ -32,6 +32,15 @@ def transicion_estado_valida(actual, nuevo):
     return nuevo in TRANSICIONES_VALIDAS.get(actual, set())
 
 
+def url_imagen_absoluta(request, url):
+    """Convierte una URL relativa de archivo en absoluta (basada en el Host de la API)."""
+    if not url:
+        return None
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
 class DetalleServicioCotizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetalleServicioCotizacion
@@ -205,6 +214,11 @@ class CotizacionSerializer(serializers.ModelSerializer):
             rep['vehiculo_placa'] = vh.placa
             rep['vehiculo_marca'] = vh.marca
             rep['vehiculo_modelo'] = vh.modelo
+            rep['vehiculo_color'] = vh.color
+            rep['vehiculo_imagen'] = url_imagen_absoluta(
+                self.context.get('request'),
+                vh.imagen.url if vh.imagen else None,
+            )
         rep['recepcion_numero'] = (
             instance.recepcion_origen.numero_recepcion if instance.recepcion_origen_id else None
         )

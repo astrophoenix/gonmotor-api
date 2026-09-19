@@ -327,6 +327,12 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo.numero_orden if instance.orden_trabajo_id else None
         )
+        rep['orden_trabajo_estado'] = (
+            instance.orden_trabajo.estado if instance.orden_trabajo_id else None
+        )
+        rep['orden_trabajo_estado_display'] = (
+            instance.orden_trabajo.get_estado_display() if instance.orden_trabajo_id else None
+        )
         rep['responsable_nombre'] = (
             instance.responsable.get_full_name() or instance.responsable.username
         ) if instance.responsable_id else None
@@ -342,6 +348,11 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['numero_cotizacion'] = (
             cotizacion_activa.numero_cotizacion if cotizacion_activa else None
         )
+        ultima_cotizacion = instance.cotizaciones_generadas.order_by('created_at', 'id').last()
+        rep['cotizacion_estado'] = ultima_cotizacion.estado if ultima_cotizacion else None
+        rep['cotizacion_estado_display'] = (
+            ultima_cotizacion.get_estado_display() if ultima_cotizacion else None
+        )
         if instance.recepcion_id:
             rec = instance.recepcion
             rv = rec.vehiculo if rec.vehiculo_id else None
@@ -349,6 +360,8 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             rep['recepcion'] = {
                 'id': rec.id,
                 'numero_recepcion': rec.numero_recepcion,
+                'estado': rec.estado,
+                'estado_display': rec.get_estado_display(),
                 'vehiculo': {
                     'id': rv.id,
                     'placa': rv.placa,
@@ -440,7 +453,12 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
 
     def get_cotizaciones_generadas(self, instance):
         return [
-            {'id': cotizacion.id, 'numero_cotizacion': cotizacion.numero_cotizacion}
+            {
+                'id': cotizacion.id,
+                'numero_cotizacion': cotizacion.numero_cotizacion,
+                'estado': cotizacion.estado,
+                'estado_display': cotizacion.get_estado_display(),
+            }
             for cotizacion in instance.cotizaciones_generadas.order_by('created_at')
         ]
 
@@ -452,6 +470,12 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         rep['estado_display'] = instance.get_estado_display()
+        if instance.orden_trabajo_id:
+            rep['orden_trabajo_estado'] = instance.orden_trabajo.estado
+            rep['orden_trabajo_estado_display'] = instance.orden_trabajo.get_estado_display()
+        else:
+            rep['orden_trabajo_estado'] = None
+            rep['orden_trabajo_estado_display'] = None
         if instance.vehiculo_id:
             request = self.context.get('request')
             rep['vehiculo'] = {
