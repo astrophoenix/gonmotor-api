@@ -30,6 +30,12 @@ class UserProfile(BaseModel):
         default="",
         verbose_name="Dirección"
     )
+    avatar = models.ImageField(
+        upload_to='perfiles/avatares/',
+        blank=True,
+        null=True,
+        verbose_name="Foto de perfil"
+    )
     # Taller en el que está trabajando actualmente durante su sesión actual
     taller_activo = models.ForeignKey(
         'empresas.Taller',

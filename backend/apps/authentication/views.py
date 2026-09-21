@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.renderers import JSONRenderer
 from reportlab.platypus import Paragraph
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
+from .serializers import _user_payload
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -98,16 +99,7 @@ class SelectCompanyView(APIView):
         return Response({
             "access": str(refresh.access_token),
             "refresh": str(refresh),
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "rol": rol,
-                "empresa_id": empresa.id,
-                "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', ''))
-            }
+            "user": _user_payload(user, empresa, rol, request)
         }, status=status.HTTP_200_OK)
 
 
@@ -146,6 +138,7 @@ class UserProfileView(APIView):
         empresa_id = get_empresa_id_desde_request(request)
         profile = getattr(user, 'profile', None)
         telefono = getattr(profile, 'telefono', '') if profile else ''
+        avatar = _avatar_absoluta(request, profile.avatar.url if profile and profile.avatar else None)
 
         return Response({
             'id': user.id,
@@ -154,6 +147,7 @@ class UserProfileView(APIView):
             'first_name': user.first_name,
             'last_name': user.last_name,
             'telefono': telefono,
+            'avatar': avatar,
             'is_staff': user.is_staff,
             'empresa_id': empresa_id,
         }, status=status.HTTP_200_OK)
@@ -168,9 +162,10 @@ class UserProfileView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        
-        profile = getattr(user, 'profile', None)
+
+        profile = UserProfile.objects.filter(user=user).first()
         telefono = getattr(profile, 'telefono', '') if profile else ''
+        avatar = _avatar_absoluta(request, profile.avatar.url if profile and profile.avatar else None)
 
         user_data = {
             'id': user.id,
@@ -179,6 +174,7 @@ class UserProfileView(APIView):
             'first_name': user.first_name,
             'last_name': user.last_name,
             'telefono': telefono,
+            'avatar': avatar,
             'is_staff': user.is_staff,
         }
 
@@ -485,6 +481,13 @@ def _usuario_nombre(request):
     if request.user and request.user.is_authenticated:
         return getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
     return ''
+
+
+def _avatar_absoluta(request, url):
+    """Convierte una URL relativa de avatar en absoluta (basada en el Host de la API)."""
+    if not url:
+        return None
+    return request.build_absolute_uri(url)
 
 
 class EmpleadoPdfExportView(APIView):

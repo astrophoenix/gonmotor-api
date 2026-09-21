@@ -12,6 +12,29 @@ from apps.empresas.models import Empresa
 from .models import UserProfile
 from .models import UsuarioEmpresa
 
+
+def _user_payload(user, empresa, rol, request=None):
+    """Payload de usuario incluyendo datos del perfil (teléfono y avatar absoluto)."""
+    profile = getattr(user, 'profile', None)
+    telefono = getattr(profile, 'telefono', '') if profile else ''
+    avatar_url = None
+    if profile and profile.avatar:
+        avatar_url = profile.avatar.url
+        if request is not None:
+            avatar_url = request.build_absolute_uri(avatar_url)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "rol": rol,
+        "empresa_id": empresa.id,
+        "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
+        "telefono": telefono,
+        "avatar": avatar_url,
+    }
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     def validate(self, attrs):
@@ -60,16 +83,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     'access': str(refresh.access_token),
                     'refresh': str(refresh),
                     'requires_company_selection': False,
-                    'user': {
-                        "id": user.id,
-                        "username": user.username,
-                        "email": user.email,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "rol": 'ADMIN_SISTEMA',
-                        "empresa_id": emp.id,
-                        "empresa_nombre": emp.nombre_comercial
-                    }
+                    'user': _user_payload(user, emp, 'ADMIN_SISTEMA', self.context.get('request')),
                 }
             return {
                 "requires_company_selection": True,
@@ -98,16 +112,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
                 'requires_company_selection': False,
-                'user': {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "rol": relacion.rol,
-                    "empresa_id": empresa.id,
-                    "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', ''))
-                }
+                'user': _user_payload(user, empresa, relacion.rol, self.context.get('request')),
             }
             return data
 
@@ -237,6 +242,24 @@ class UserProfileUpdateSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
     last_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
     telefono = serializers.CharField(required=False, allow_blank=True, default='')
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    remove_avatar = serializers.BooleanField(required=False, default=False)
+
+    FORMATOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp']
+    MAX_AVATAR_BYTES = 1024 * 1024
+
+    def validate_avatar(self, value):
+        if value is None:
+            return value
+        if value.content_type not in self.FORMATOS_PERMITIDOS:
+            raise serializers.ValidationError(
+                'Formato de imagen no válido. Usa JPG, PNG o WebP.'
+            )
+        if value.size > self.MAX_AVATAR_BYTES:
+            raise serializers.ValidationError(
+                'La imagen supera el tamaño máximo de 1 MB.'
+            )
+        return value
 
     def validate_email(self, value):
         user = self.context.get('request').user
@@ -255,15 +278,24 @@ class UserProfileUpdateSerializer(serializers.Serializer):
         if 'telefono' in validated_data:
             profile_data['telefono'] = validated_data.pop('telefono')
 
+        remove_avatar = validated_data.pop('remove_avatar', False)
+        avatar = validated_data.pop('avatar', None)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
         instance.save()
 
-        if profile_data:
+        if profile_data or remove_avatar or avatar is not None:
             profile, _ = UserProfile.objects.get_or_create(user=instance)
-            for attr, value in profile_data.items():
-                setattr(profile, attr, value)
+            if 'telefono' in profile_data:
+                profile.telefono = profile_data['telefono']
+            if remove_avatar or avatar is None and 'avatar' in self.initial_data:
+                if profile.avatar:
+                    profile.avatar.delete(save=False)
+                profile.avatar = None
+            elif avatar is not None:
+                profile.avatar = avatar
             profile.save()
 
         return instance

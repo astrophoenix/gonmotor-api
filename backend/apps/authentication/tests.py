@@ -115,3 +115,82 @@ class EmpleadoExportTests(APITestCase):
 		self.client.defaults.pop('HTTP_X_EMPRESA_ID')
 		resp = self.client.get('/api/auth/empleados/exportar-pdf/')
 		self.assertEqual(resp.status_code, 403)
+
+
+class AvatarUploadTests(APITestCase):
+	def setUp(self):
+		from django.core.files.uploadedfile import SimpleUploadedFile
+		from io import BytesIO
+		from PIL import Image
+
+		self.SimpleUploadedFile = SimpleUploadedFile
+		self.user = User.objects.create_user(
+			username='avatar_user',
+			email='avatar@ejemplo.com',
+			password='UnaClaveSegura123!',
+			first_name='Luis',
+			last_name='Pérez',
+		)
+		self.client = APIClient()
+		self.client.force_authenticate(user=self.user)
+
+		def _imagen_png():
+			buf = BytesIO()
+			Image.new('RGB', (80, 80), color='red').save(buf, format='PNG')
+			return buf.getvalue()
+
+		self.png_bytes = _imagen_png()
+
+	def test_subir_avatar_validando_formato(self):
+		foto = self.SimpleUploadedFile(
+			'foto.png', self.png_bytes, content_type='image/png'
+		)
+		resp = self.client.patch(
+			'/api/auth/me/',
+			{'avatar': foto},
+			format='multipart',
+		)
+		self.assertEqual(resp.status_code, 200, resp.data)
+		self.assertIn('avatar', resp.data['user'])
+		self.assertTrue(resp.data['user']['avatar'])
+
+	def test_rechaza_formato_extraño(self):
+		foto = self.SimpleUploadedFile(
+			'foto.txt', b'no soy una imagen', content_type='text/plain'
+		)
+		resp = self.client.patch(
+			'/api/auth/me/',
+			{'avatar': foto},
+			format='multipart',
+		)
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn('avatar', resp.data)
+
+	def test_rechaza_imagen_muy_grande(self):
+		from django.core.files.uploadedfile import SimpleUploadedFile
+		from io import BytesIO
+		from PIL import Image
+		import os
+
+		buf = BytesIO()
+		ruido = Image.frombytes('RGB', (2200, 2200), os.urandom(2200 * 2200 * 3))
+		ruido.save(buf, format='PNG')
+		foto = SimpleUploadedFile('grande.png', buf.getvalue(), content_type='image/png')
+		self.assertGreater(foto.size, 1024 * 1024)
+		resp = self.client.patch(
+			'/api/auth/me/',
+			{'avatar': foto},
+			format='multipart',
+		)
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn('avatar', resp.data)
+
+	def test_eliminar_avatar(self):
+		foto = self.SimpleUploadedFile(
+			'foto.png', self.png_bytes, content_type='image/png'
+		)
+		self.client.patch('/api/auth/me/', {'avatar': foto}, format='multipart')
+
+		resp = self.client.patch('/api/auth/me/', {'remove_avatar': 'true'}, format='multipart')
+		self.assertEqual(resp.status_code, 200, resp.data)
+		self.assertIsNone(resp.data['user']['avatar'])
