@@ -1,10 +1,21 @@
+import html as html_lib
+
 from django.utils import timezone
+from django.utils.html import strip_tags
 from rest_framework import serializers
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
+
+
+def _texto_plano(value):
+    """Normaliza texto libre a texto plano (sin HTML/entidades)."""
+    texto = html_lib.unescape(str(value or ''))
+    texto = strip_tags(texto)
+    lineas = [' '.join(linea.split()) for linea in texto.splitlines()]
+    return '\n'.join(lineas).strip()
 
 ESTADOS_EDITABLES = {
     Cotizacion.EstadoCotizacion.BORRADOR,
@@ -20,7 +31,9 @@ TRANSICIONES_VALIDAS = {
     },
     Cotizacion.EstadoCotizacion.RECHAZADA: {Cotizacion.EstadoCotizacion.ENVIADA},
     Cotizacion.EstadoCotizacion.VENCIDA: {Cotizacion.EstadoCotizacion.ENVIADA},
-    Cotizacion.EstadoCotizacion.ACEPTADA: set(),
+    # Reapertura: una cotización ACEPTADA vuelve a ENVIADA (estado anterior a la
+    # aceptación) para ajustarse; el cliente debe aceptarla nuevamente.
+    Cotizacion.EstadoCotizacion.ACEPTADA: {Cotizacion.EstadoCotizacion.ENVIADA},
     Cotizacion.EstadoCotizacion.CONVERTIDA: set(),
 }
 
@@ -58,6 +71,7 @@ class DetalleRepuestoCotizacionSerializer(serializers.ModelSerializer):
 class CotizacionSerializer(serializers.ModelSerializer):
     servicios = DetalleServicioCotizacionSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoCotizacionSerializer(many=True, read_only=True)
+    observaciones = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Cotizacion
@@ -87,6 +101,10 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'empresa', 'numero_cotizacion', 'subtotal', 'total_iva', 'total', 'created_at', 'updated_at']
+
+    def validate_observaciones(self, value):
+        # Barrera de almacenamiento: nada de HTML/markup llega a la BD.
+        return _texto_plano(value)
 
     def _derivar_cliente_vehiculo(self, attrs):
         """Completa cliente/vehículo desde la inspección o recepción de origen."""
@@ -193,10 +211,19 @@ class CotizacionSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         request = self.context.get('request')
 
-        if 'estado' in validated_data and validated_data['estado'] == Cotizacion.EstadoCotizacion.ACEPTADA:
-            validated_data['fecha_aceptacion'] = timezone.now()
-            if request and request.user.is_authenticated:
-                validated_data['aceptada_por'] = request.user
+        if 'estado' in validated_data:
+            nuevo = validated_data['estado']
+            if nuevo == Cotizacion.EstadoCotizacion.ACEPTADA:
+                validated_data['fecha_aceptacion'] = timezone.now()
+                if request and request.user.is_authenticated:
+                    validated_data['aceptada_por'] = request.user
+            elif instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA:
+                # Reapertura: se abandona el estado ACEPTADA (vuelve a ENVIADA).
+                # Se limpian los datos de la aceptación anterior para que el
+                # cliente deba aceptar nuevamente la cotización.
+                validated_data['fecha_aceptacion'] = None
+                validated_data['metodo_aceptacion'] = None
+                validated_data['aceptada_por'] = None
 
         return super().update(instance, validated_data)
 
@@ -228,10 +255,21 @@ class CotizacionSerializer(serializers.ModelSerializer):
         rep['inspeccion_tipo'] = (
             instance.inspeccion_origen.tipo_inspeccion if instance.inspeccion_origen_id else None
         )
+        recepcion = instance.recepcion_origen
+        inspeccion = instance.inspeccion_origen
+        if recepcion is None and inspeccion is not None:
+            recepcion = inspeccion.recepcion
+        rep['recepcion_estado'] = recepcion.estado if recepcion else None
+        rep['recepcion_estado_display'] = recepcion.get_estado_display() if recepcion else None
+        rep['inspeccion_estado'] = inspeccion.estado if inspeccion else None
+        rep['inspeccion_estado_display'] = inspeccion.get_estado_display() if inspeccion else None
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo_origen.numero_orden if instance.orden_trabajo_origen_id else None
         )
         orden_generada = getattr(instance, 'orden_trabajo', None)
+        orden = orden_generada or instance.orden_trabajo_origen
+        rep['orden_trabajo_estado'] = orden.estado if orden else None
+        rep['orden_trabajo_estado_display'] = orden.get_estado_display() if orden else None
         rep['orden_generada_numero'] = orden_generada.numero_orden if orden_generada else None
         rep['es_convertible'] = (
             instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA

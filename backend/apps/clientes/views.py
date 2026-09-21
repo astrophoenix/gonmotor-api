@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -5,13 +7,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Count, Q
 from django.db.models import Prefetch
-from django.utils import timezone
-from django.http import HttpResponse
+from django.http import FileResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import _formatear_saldo, exportar_clientes_pdf
 # from apps.empresas.models import Empresa, Taller
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import Paragraph
 from .models import Cliente
 from apps.vehiculos.models import VehiculoPropietario
 from apps.core.mixins import SoftDeleteDestroyMixin
@@ -92,9 +91,9 @@ class ClientePdfExportView(APIView):
             )
 
         try:
-            queryset = Cliente.objects.filter(empresa_id=empresa_id, is_active=True).select_related(
-                'empresa'
-            ).prefetch_related(
+            queryset = Cliente.objects.filter(
+                empresa_id=empresa_id, is_active=True
+            ).select_related('empresa').prefetch_related(
                 Prefetch(
                     'vehiculos_asociados',
                     queryset=VehiculoPropietario.objects.filter(
@@ -103,51 +102,6 @@ class ClientePdfExportView(APIView):
                     to_attr='propietarios_actuales',
                 )
             ).order_by('nombre')
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-
-                primera_empresa = qs.first().empresa
-                if not primera_empresa:
-                    return None
-
-                empresa_nombre = primera_empresa.nombre_comercial or primera_empresa.razon_social
-                return f'Empresa: {empresa_nombre}<br/>Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
-
-            def row_builder(cliente, cell_style):
-                identificacion = cliente.identificacion or ''
-                nombre = cliente.nombre or ''
-
-                telefono = cliente.telefono or ''
-                email = cliente.email or ''
-                if telefono and email:
-                    contacto = f'{telefono}<br/>{email}'
-                elif telefono:
-                    contacto = telefono
-                elif email:
-                    contacto = email
-                else:
-                    contacto = 'Sin contacto'
-
-                relaciones = getattr(cliente, 'propietarios_actuales', [])
-                vehiculos = [relacion.vehiculo for relacion in relaciones]
-                vehiculos.sort(key=lambda v: v.id)
-                if vehiculos:
-                    placas = [v.placa for v in vehiculos if v.placa]
-                    grupos = []
-                    for i in range(0, len(placas), 3):
-                        grupos.append(', '.join(placas[i:i + 3]))
-                    vehiculos_texto = '<br/>'.join(grupos) if grupos else 'Sin vehículos'
-                else:
-                    vehiculos_texto = 'Sin vehículos'
-
-                return [
-                    Paragraph(identificacion, cell_style),
-                    Paragraph(nombre, cell_style),
-                    Paragraph(contacto, cell_style),
-                    Paragraph(vehiculos_texto, cell_style),
-                ]
 
             empresa = None
             taller = None
@@ -161,24 +115,24 @@ class ClientePdfExportView(APIView):
             if request.user and request.user.is_authenticated:
                 usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
 
-            config = PdfExportConfig(
-                title='Listado de Clientes',
-                filename='listado_clientes.pdf',
-                headers=[
-                    ('Identificación', 1.4),
-                    ('Nombre / Razón Social', 2.2),
-                    ('Contacto', 2.0),
-                    ('Vehículos', 2.0),
-                ],
+            buffer = BytesIO()
+            exportar_clientes_pdf(
+                buffer,
+                queryset,
+                total_registros=queryset.count(),
+                titulo='Listado de Clientes',
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
-                row_builder=row_builder,
+                logo=empresa.logo if empresa else None,
             )
-
-            service = PdfExportService(config, queryset)
-            return service.generate_response()
+            buffer.seek(0)
+            return FileResponse(
+                buffer,
+                content_type='application/pdf',
+                filename='listado_clientes.pdf',
+                as_attachment=False,
+            )
 
         except Exception as e:
             return Response(
@@ -240,28 +194,40 @@ class ClienteExcelExportView(APIView):
                 relaciones = getattr(cliente, 'propietarios_actuales', [])
                 vehiculos = [relacion.vehiculo for relacion in relaciones]
                 vehiculos.sort(key=lambda v: v.id)
-                if vehiculos:
-                    placas = [v.placa for v in vehiculos if v.placa]
-                    vehiculos_texto = ', '.join(placas) if placas else 'Sin vehículos'
-                else:
-                    vehiculos_texto = 'Sin vehículos'
+                lineas_vehiculos = []
+                for v in vehiculos:
+                    placa = (v.placa or '').strip()
+                    detalle = f'{v.marca} {v.modelo}'.strip()
+                    if placa and detalle:
+                        lineas_vehiculos.append(f'• {placa} - {detalle}')
+                    elif placa:
+                        lineas_vehiculos.append(f'• {placa}')
+                    elif detalle:
+                        lineas_vehiculos.append(f'• {detalle}')
+                vehiculos_texto = '\n'.join(lineas_vehiculos) if lineas_vehiculos else 'Sin vehículos'
+
+                saldo, _ = _formatear_saldo(getattr(cliente, 'saldo', 0))
 
                 return [
                     cliente.identificacion or '',
                     cliente.nombre or '',
                     contacto,
                     vehiculos_texto,
+                    saldo,
                 ]
 
             config = ExcelExportConfig(
                 title='Listado de Clientes',
                 filename='listado_clientes.xlsx',
                 headers=[
-                    ('Identificación', 1.4),
-                    ('Nombre / Razón Social', 2.2),
-                    ('Contacto', 2.0),
-                    ('Vehículos', 2.0),
+                    ('Identificación', 2.0),
+                    ('Cliente', 2.6),
+                    ('Contacto', 3.2),
+                    ('Vehículos', 2.6),
+                    ('Saldo', 1.2),
                 ],
+                metadata=f'Número total de Clientes: {queryset.count()}',
+                alignments=['left', 'left', 'left', 'left', 'right'],
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,

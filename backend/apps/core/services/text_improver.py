@@ -12,6 +12,8 @@ Características:
 - No envía datos personales (identificaciones, placas, teléfonos); solo el texto.
 """
 
+import html
+import re
 import threading
 import time
 
@@ -214,6 +216,13 @@ def _extraer_resultado(response):
 def _limpiar_respuesta(texto):
     texto = (texto or '').strip()
     if not texto:
+        return ''
+    # El modelo puede devolver etiquetas HTML/SVG sueltas (botones, iconos con
+    # clases Tailwind, <path>, etc.) o entidades escapadas. Se eliminan para que
+    # el texto guardado sea siempre texto plano.
+    texto = html.unescape(texto)
+    texto = re.sub(r'<[^>]*>', '', texto)
+    if not texto.strip():
         return ''
     if texto.startswith('```'):
         lines = texto.splitlines()

@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, serializers
+from rest_framework import viewsets, status, serializers, filters
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
@@ -27,6 +27,9 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
     """
     serializer_class = TallerConfigSerializer
     permission_classes = [IsEmpresaAdminOrReadOnly]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['nombre', 'codigo_sucursal', 'ciudad', 'direccion', 'telefono']
+    ordering_fields = ['nombre']
 
     def get_empresa_id(self, request):
         return get_empresa_id_desde_request(request)
