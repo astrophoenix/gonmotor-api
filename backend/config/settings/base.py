@@ -108,6 +108,9 @@ DATABASES = {
         'HOST': config('DB_HOST'),
         'PORT': config('DB_PORT'),
         'OPTIONS': {},
+        # Reutiliza la conexión entre requests (evita el handshake TCP/TLS con
+        # Postgres en cada búsqueda). Con gunicorn sync el worker la mantiene viva.
+        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', cast=int, default=60),
     }
 }
 
@@ -190,6 +193,15 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
+    # Red de seguridad ante ráfagas de búsqueda/abuso. Holgado para uso normal.
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': config('THROTTLE_USER_RATE', default='300/min'),
+        'anon': config('THROTTLE_ANON_RATE', default='60/min'),
+    },
 }
 
 # Configuración de JWT

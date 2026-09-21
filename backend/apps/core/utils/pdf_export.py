@@ -904,6 +904,7 @@ class PdfExportConfig:
         empresa=None,
         taller=None,
         usuario: Optional[str] = None,
+        metadata: Optional[str] = None,
     ):
         self.title = title
         self.filename = filename
@@ -913,6 +914,7 @@ class PdfExportConfig:
         self.empresa = empresa
         self.taller = taller
         self.usuario = usuario
+        self.metadata = metadata
 
 
 class PdfExportService:
@@ -934,6 +936,12 @@ class PdfExportService:
         if not texto:
             return None
         return Paragraph(texto, _estilo_informacion())
+
+    def _build_metadata(self) -> Optional[Paragraph]:
+        """Metadato del reporte (ej. 'Número total de Vehículos: X')."""
+        if not self.config.metadata:
+            return None
+        return Paragraph(_escape_xml(self.config.metadata), _estilo_metadato_reporte())
 
     def _build_table(self, ancho_util: float) -> Table:
         styles = getSampleStyleSheet()
@@ -985,7 +993,7 @@ class PdfExportService:
                 _estilo_titulo_reporte(),
             ),
         ]
-        subtitulo = self._build_subtitle()
+        subtitulo = self._build_metadata() or self._build_subtitle()
         if subtitulo:
             story.append(subtitulo)
         story.append(Spacer(1, 10))

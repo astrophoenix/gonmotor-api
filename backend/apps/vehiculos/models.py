@@ -212,6 +212,16 @@ class VehiculoPropietario(BaseModel):
     fecha_inicio = models.DateField(auto_now_add=True)
     fecha_fin = models.DateField(null=True, blank=True)
 
+    @property
+    def cliente_nombre_estado(self):
+        """Nombre del dueño, marcado como '(inactivo)' si el cliente lo está."""
+        if not self.cliente_id:
+            return ''
+        nombre = self.cliente.nombre or ''
+        if not self.cliente.is_active:
+            return f'{nombre} (inactivo)'
+        return nombre
+
     class Meta:
         verbose_name = "Relación Vehículo-Propietario"
         constraints = [

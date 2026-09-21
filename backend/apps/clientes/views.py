@@ -1,6 +1,7 @@
 from io import BytesIO
 
 from rest_framework import viewsets, permissions, filters, status
+from rest_framework.decorators import action
 from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
@@ -50,11 +51,14 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         queryset = Cliente.objects.filter(empresa_id=empresa_id)
 
-        include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
-
-        # Las acciones de mutación (editar/reactivar/eliminar) deben acceder
-        # también a registros desactivados; solo list/retrieve ocultan inactivos.
-        if self.action in ['list', 'retrieve'] and not include_inactive:
+        # Sin `estado` se devuelven TODOS los clientes de la empresa (activos e
+        # inactivos); el listado los distingue con la columna Estado. `estado`
+        # permite acotar a activos o inactivos. Los selectores de búsqueda que
+        # solo deben ofrecer activos envían `estado=activo`.
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
             queryset = queryset.filter(is_active=True)
 
         if self.action in ['list', 'retrieve']:
@@ -75,6 +79,27 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             )
 
         return queryset
+
+    @action(detail=True, methods=['post'], url_path='reactivar')
+    def reactivar(self, request, pk=None):
+        """Reactiva un cliente desactivado (soft delete) sin tocar sus vehículos."""
+        instance = self.get_object()
+
+        if instance.is_active:
+            return Response(
+                {'detail': 'El cliente ya se encuentra activo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        instance.is_active = True
+        instance.save(update_fields=['is_active'])
+
+        return Response({
+            'status': 'success',
+            'id': instance.id,
+            'is_active': instance.is_active,
+            'message': f"El cliente '{instance.nombre}' fue reactivado correctamente.",
+        })
 
 
 class ClientePdfExportView(APIView):

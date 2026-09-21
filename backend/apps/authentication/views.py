@@ -4,6 +4,8 @@ from rest_framework import status, viewsets, permissions, filters
 from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework.renderers import JSONRenderer
+from reportlab.platypus import Paragraph
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
 
 from django.contrib.auth.models import User
@@ -12,6 +14,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 from .serializers import UserAdminSerializer, UserProfileUpdateSerializer, ChangePasswordSerializer
@@ -19,6 +22,8 @@ from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
 from .utils import get_empresa_id_desde_request
 from .models import UserProfile, UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
+from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -463,3 +468,140 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         instance.is_active = False
         instance.save(update_fields=['is_active'])
         return Response({'detail': 'Empleado dado de baja correctamente.'}, status=200)
+
+
+def _empleado_identificacion(ue):
+    try:
+        return ue.user.profile.identificacion or ''
+    except Exception:
+        return ''
+
+
+def _empleado_talleres(ue):
+    return ', '.join(t.nombre for t in ue.talleres.all()) or ''
+
+
+def _usuario_nombre(request):
+    if request.user and request.user.is_authenticated:
+        return getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+    return ''
+
+
+class EmpleadoPdfExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403,
+            )
+
+        try:
+            queryset = UsuarioEmpresa.objects.filter(
+                empresa_id=empresa_id,
+                is_active=True,
+            ).select_related('user', 'user__profile').prefetch_related('talleres').order_by('user__first_name', 'user__last_name')
+
+            empresa = queryset.first().empresa if queryset.exists() else None
+            taller = empresa.talleres.first() if empresa else None
+
+            def subtitle_builder(qs):
+                if not qs.exists():
+                    return None
+                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+
+            def row_builder(ue, cell_style):
+                nombre = f"{ue.user.first_name} {ue.user.last_name}".strip()
+                return [
+                    Paragraph(_empleado_identificacion(ue), cell_style),
+                    Paragraph(nombre, cell_style),
+                    Paragraph(ue.user.email or '', cell_style),
+                    Paragraph(ue.get_rol_display(), cell_style),
+                    Paragraph(_empleado_talleres(ue), cell_style),
+                    Paragraph('Activo' if ue.is_active else 'Inactivo', cell_style),
+                ]
+
+            config = PdfExportConfig(
+                title='Listado de Empleados',
+                filename='listado_empleados.pdf',
+                headers=[
+                    ('Identificación', 1.3),
+                    ('Empleado', 1.8),
+                    ('Correo', 1.9),
+                    ('Rol', 1.3),
+                    ('Talleres', 2.0),
+                    ('Estado', 0.9),
+                ],
+                empresa=empresa,
+                taller=taller,
+                usuario=_usuario_nombre(request),
+                subtitle_builder=subtitle_builder,
+                row_builder=row_builder,
+            )
+            service = PdfExportService(config, queryset)
+            return service.generate_response()
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
+
+
+class EmpleadoExcelExportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=403,
+            )
+
+        try:
+            queryset = UsuarioEmpresa.objects.filter(
+                empresa_id=empresa_id,
+                is_active=True,
+            ).select_related('user', 'user__profile').prefetch_related('talleres').order_by('user__first_name', 'user__last_name')
+
+            empresa = queryset.first().empresa if queryset.exists() else None
+            taller = empresa.talleres.first() if empresa else None
+
+            def row_builder(ue):
+                nombre = f"{ue.user.first_name} {ue.user.last_name}".strip()
+                return [
+                    _empleado_identificacion(ue),
+                    nombre,
+                    ue.user.email or '',
+                    ue.get_rol_display(),
+                    _empleado_talleres(ue),
+                    'Activo' if ue.is_active else 'Inactivo',
+                ]
+
+            config = ExcelExportConfig(
+                title='Listado de Empleados',
+                filename='listado_empleados.xlsx',
+                headers=[
+                    ('Identificación', 1.3),
+                    ('Empleado', 1.8),
+                    ('Correo', 1.9),
+                    ('Rol', 1.3),
+                    ('Talleres', 2.2),
+                    ('Estado', 0.9),
+                ],
+                empresa=empresa,
+                taller=taller,
+                usuario=_usuario_nombre(request),
+                row_builder=row_builder,
+            )
+            service = ExcelExportService(config, queryset)
+            return service.generate_response()
+        except Exception as e:
+            return Response(
+                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
+                status=500,
+            )

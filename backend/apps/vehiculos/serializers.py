@@ -185,7 +185,7 @@ class VehiculoSerializer(serializers.ModelSerializer):
 
     def get_cliente_nombre(self, obj):
         propietario = self._propietario_actual(obj)
-        return propietario.cliente.nombre if propietario else None
+        return propietario.cliente_nombre_estado if propietario else None
 
     def get_cliente_id(self, obj):
         propietario = self._propietario_actual(obj)

@@ -1,7 +1,11 @@
+import operator
+import re
+from functools import reduce
+
 from rest_framework import viewsets, permissions, filters, status
 from django.db.models import Count, Q, Prefetch
 from django_countries import countries
-from django.utils import timezone, translation
+from django.utils import translation
 from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -16,6 +20,49 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
 
 
+def formatear_placa(placa):
+    """Inserta el guion visual de la placa (GSU5812 -> GSU-5812).
+
+    Misma lógica que el frontend (`formatPlate`): si ya trae guion o no
+    coincide con el patrón letras+números, se devuelve tal cual.
+    """
+    if not placa:
+        return ''
+    placa = str(placa).strip()
+    if '-' in placa:
+        return placa
+    match = re.match(r'^([A-Za-z]+)(\d+)$', placa)
+    if not match:
+        return placa
+    return f'{match.group(1)}-{match.group(2)}'
+
+
+class PlacaNormalizableSearchFilter(filters.SearchFilter):
+    """SearchFilter que además busca placas con/sin guiones o espacios.
+
+    Ej.: almacenado 'GSU5812' también aparece al buscar 'GSU-5812' o 'GSU 5812'.
+    """
+
+    def filter_queryset(self, request, queryset, view):
+        search_terms = self.get_search_terms(request)
+        search_fields = getattr(view, 'search_fields', None)
+
+        if not search_fields or not search_terms:
+            return queryset
+
+        lookups = [self.construct_search(str(field), queryset) for field in search_fields]
+
+        conditions = []
+        for term in search_terms:
+            queries = [Q(**{lookup: term}) for lookup in lookups]
+            normalized = term.replace('-', '').replace(' ', '').upper()
+            if normalized:
+                queries.append(Q(**{'placa__icontains': normalized}))
+            conditions.append(reduce(operator.or_, queries))
+
+        return queryset.filter(reduce(operator.and_, conditions))
+
+
 class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = VehiculoSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -23,7 +70,7 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     delete_identifier_fields = ['placa']
     delete_relation_fields = ['ordenes_trabajo', 'propietarios']
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [PlacaNormalizableSearchFilter, filters.OrderingFilter]
     search_fields = [
         'placa',
         'vin',
@@ -55,8 +102,22 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         # Las acciones de mutación (editar/reactivar/eliminar) deben acceder
         # también a registros desactivados; solo list/retrieve ocultan inactivos.
-        if self.action in ['list', 'retrieve'] and not include_inactive:
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
             queryset = queryset.filter(is_active=True)
+        elif self.action in ['list', 'retrieve'] and not include_inactive:
+            queryset = queryset.filter(is_active=True)
+
+        anio = self.request.query_params.get('anio')
+        if anio:
+            try:
+                anio_int = int(anio)
+            except (TypeError, ValueError):
+                anio_int = None
+            if anio_int:
+                queryset = queryset.filter(anio=anio_int)
 
         cliente_id = self.request.query_params.get('cliente')
         if cliente_id:
@@ -125,19 +186,26 @@ class VehiculoPdfExportView(APIView):
             )
 
         try:
-            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa')
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa').prefetch_related(
+                Prefetch(
+                    'propietarios',
+                    queryset=VehiculoPropietario.objects.filter(
+                        es_actual=True
+                    ).select_related('cliente'),
+                    to_attr='propietarios_actuales',
+                ),
+            )
 
             def row_builder(vehiculo, cell_style):
+                propietario = getattr(vehiculo, 'propietarios_actuales', [])
+                cliente_nombre = propietario[0].cliente_nombre_estado if propietario else ''
                 return [
-                    Paragraph(vehiculo.placa or '', cell_style),
+                    Paragraph(formatear_placa(vehiculo.placa), cell_style),
                     Paragraph(vehiculo.marca or '', cell_style),
                     Paragraph(vehiculo.modelo or '', cell_style),
-                    Paragraph(vehiculo.color or '', cell_style),
+                    Paragraph(str(vehiculo.anio) if vehiculo.anio else '', cell_style),
+                    Paragraph(cliente_nombre or 'Sin dueño', cell_style),
+                    Paragraph('Activo' if vehiculo.is_active else 'Inactivo', cell_style),
                 ]
 
             empresa = None
@@ -156,15 +224,17 @@ class VehiculoPdfExportView(APIView):
                 title='Listado de Vehículos',
                 filename='listado_vehiculos.pdf',
                 headers=[
-                    ('Placa', 1.6),
-                    ('Marca', 1.8),
-                    ('Modelo', 1.8),
-                    ('Color', 1.8),
+                    ('Placa', 1.0),
+                    ('Marca', 1.3),
+                    ('Modelo', 1.4),
+                    ('Año', 0.7),
+                    ('Dueño', 1.9),
+                    ('Estado', 0.9),
                 ],
+                metadata=f'Número total de Vehículos: {queryset.count()}',
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
                 row_builder=row_builder,
             )
 
@@ -216,27 +286,29 @@ class VehiculoExcelExportView(APIView):
 
             def row_builder(vehiculo):
                 propietario = getattr(vehiculo, 'propietarios_actuales', [])
-                cliente_nombre = propietario[0].cliente.nombre if propietario else ''
+                cliente_nombre = propietario[0].cliente_nombre_estado if propietario else ''
                 return [
-                    vehiculo.placa or '',
+                    formatear_placa(vehiculo.placa),
                     vehiculo.marca or '',
                     vehiculo.modelo or '',
                     str(vehiculo.anio) if vehiculo.anio else '',
                     cliente_nombre or 'Sin dueño',
-                    vehiculo.color or '',
+                    'Activo' if vehiculo.is_active else 'Inactivo',
                 ]
 
             config = ExcelExportConfig(
                 title='Listado de Vehículos',
                 filename='listado_vehiculos.xlsx',
                 headers=[
-                    ('Placa', 1.6),
-                    ('Marca', 1.8),
-                    ('Modelo', 1.8),
-                    ('Año', 1.2),
-                    ('Dueño', 2.0),
-                    ('Color', 1.8),
+                    ('Placa', 1.0),
+                    ('Marca', 1.3),
+                    ('Modelo', 1.4),
+                    ('Año', 0.7),
+                    ('Dueño', 2.3),
+                    ('Estado', 0.9),
                 ],
+                metadata=f'Número total de Vehículos: {queryset.count()}',
+                alignments=['left', 'left', 'left', 'center', 'left', 'center'],
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,

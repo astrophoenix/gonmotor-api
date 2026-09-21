@@ -10,6 +10,8 @@ from .views import (
     UserProfileView, 
     UserManagementViewSet,
     EmpleadoViewSet,
+    EmpleadoPdfExportView,
+    EmpleadoExcelExportView,
     PasswordResetRequestView,
     PasswordResetConfirmView,
     ChangePasswordView
@@ -20,6 +22,10 @@ router.register(r'usuarios', UserManagementViewSet, basename='usuarios-gestion')
 router.register(r'empleados', EmpleadoViewSet, basename='empleados')
 
 urlpatterns = [
+    # Exportación de listado de empleados
+    path('empleados/exportar-pdf/', EmpleadoPdfExportView.as_view(), name='empleado-exportar-pdf'),
+    path('empleados/export-excel/', EmpleadoExcelExportView.as_view(), name='empleado-export-excel'),
+
     # Endpoint de Login (Obtener Token o lista de empresas)
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
 
