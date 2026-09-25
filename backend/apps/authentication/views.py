@@ -1,3 +1,7 @@
+import operator
+from functools import reduce
+
+from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions, filters
@@ -319,8 +323,22 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         queryset = UsuarioEmpresa.objects.filter(empresa_id=final_empresa_id)
-        if not include_inactive:
+
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
             queryset = queryset.filter(is_active=True)
+        elif not include_inactive:
+            queryset = queryset.filter(is_active=True)
+
+        rol = self.request.query_params.get('rol')
+        if rol:
+            queryset = queryset.filter(rol=rol)
+
+        taller = self.request.query_params.get('taller')
+        if taller:
+            queryset = queryset.filter(talleres__id=taller).distinct()
 
         return queryset.select_related('user', 'empresa').prefetch_related('talleres', 'user__profile')
 
@@ -490,6 +508,48 @@ def _avatar_absoluta(request, url):
     return request.build_absolute_uri(url)
 
 
+def _empleado_export_queryset(request, empresa_id):
+    """Aplica los filtros del listado (search, estado, rol, taller) a las
+    exportaciones PDF/Excel de empleados."""
+    queryset = UsuarioEmpresa.objects.filter(
+        empresa_id=empresa_id
+    ).select_related('user', 'user__profile').prefetch_related('talleres')
+
+    search = request.query_params.get('search')
+    if search:
+        search_fields = [
+            'user__first_name',
+            'user__last_name',
+            'user__username',
+            'user__email',
+            'user__profile__identificacion',
+            'user__profile__direccion',
+        ]
+        for term in [t for t in search.replace(',', ' ').split() if t]:
+            conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
+            queryset = queryset.filter(reduce(operator.or_, conditions))
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+    else:
+        # Misma semántica que el listado: sin filtro de estado solo se
+        # exportan los empleados activos.
+        queryset = queryset.filter(is_active=True)
+
+    rol = request.query_params.get('rol')
+    if rol:
+        queryset = queryset.filter(rol=rol)
+
+    taller = request.query_params.get('taller')
+    if taller:
+        queryset = queryset.filter(talleres__id=taller).distinct()
+
+    return queryset
+
+
 class EmpleadoPdfExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [JSONRenderer]
@@ -503,10 +563,7 @@ class EmpleadoPdfExportView(APIView):
             )
 
         try:
-            queryset = UsuarioEmpresa.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).select_related('user', 'user__profile').prefetch_related('talleres').order_by('user__first_name', 'user__last_name')
+            queryset = _empleado_export_queryset(request, empresa_id).order_by('user__first_name', 'user__last_name')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None
@@ -566,10 +623,7 @@ class EmpleadoExcelExportView(APIView):
             )
 
         try:
-            queryset = UsuarioEmpresa.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).select_related('user', 'user__profile').prefetch_related('talleres').order_by('user__first_name', 'user__last_name')
+            queryset = _empleado_export_queryset(request, empresa_id).order_by('user__first_name', 'user__last_name')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None

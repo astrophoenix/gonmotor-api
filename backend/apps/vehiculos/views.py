@@ -119,6 +119,10 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             if anio_int:
                 queryset = queryset.filter(anio=anio_int)
 
+        tipo = self.request.query_params.get('tipo')
+        if tipo:
+            queryset = queryset.filter(tipo=tipo)
+
         cliente_id = self.request.query_params.get('cliente')
         if cliente_id:
             queryset = queryset.filter(propietarios__cliente_id=cliente_id, propietarios__es_actual=True)
@@ -172,6 +176,57 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
+def _vehiculo_export_queryset(request, empresa_id):
+    """Aplica los mismos filtros del listado (search, estado, anio, tipo) a las
+    exportaciones PDF/Excel."""
+    queryset = Vehiculo.objects.filter(empresas=empresa_id)
+
+    search = request.query_params.get('search')
+    if search:
+        search_fields = [
+            'placa',
+            'vin',
+            'numero_motor',
+            'marca',
+            'modelo',
+            'propietarios__cliente__nombre',
+            'propietarios__cliente__identificacion',
+            'empresas__nombre_comercial',
+            'empresas__ruc',
+        ]
+        for term in [t for t in search.replace(',', ' ').split() if t]:
+            conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
+            normalized = term.replace('-', '').replace(' ', '').upper()
+            if normalized:
+                conditions.append(Q(placa__icontains=normalized))
+            queryset = queryset.filter(reduce(operator.or_, conditions))
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+    else:
+        # Misma semántica que el listado: sin filtro de estado solo se
+        # exportan los vehículos activos.
+        queryset = queryset.filter(is_active=True)
+
+    anio = request.query_params.get('anio')
+    if anio:
+        try:
+            anio_int = int(anio)
+        except (TypeError, ValueError):
+            anio_int = None
+        if anio_int:
+            queryset = queryset.filter(anio=anio_int)
+
+    tipo = request.query_params.get('tipo')
+    if tipo:
+        queryset = queryset.filter(tipo=tipo)
+
+    return queryset.distinct()
+
+
 class VehiculoPdfExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [JSONRenderer]
@@ -186,7 +241,7 @@ class VehiculoPdfExportView(APIView):
             )
 
         try:
-            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa').prefetch_related(
+            queryset = _vehiculo_export_queryset(request, empresa_id).order_by('placa').prefetch_related(
                 Prefetch(
                     'propietarios',
                     queryset=VehiculoPropietario.objects.filter(
@@ -262,7 +317,7 @@ class VehiculoExcelExportView(APIView):
             )
 
         try:
-            queryset = Vehiculo.objects.filter(empresas=empresa_id, is_active=True).order_by('placa').prefetch_related(
+            queryset = _vehiculo_export_queryset(request, empresa_id).order_by('placa').prefetch_related(
                 Prefetch(
                     'propietarios',
                     queryset=VehiculoPropietario.objects.filter(

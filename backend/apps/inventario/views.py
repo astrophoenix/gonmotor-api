@@ -1,4 +1,7 @@
-from django.db.models import F
+import operator
+from functools import reduce
+
+from django.db.models import F, Q
 from django.utils import timezone
 from rest_framework import filters, permissions, viewsets
 from rest_framework.decorators import action
@@ -36,7 +39,12 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         queryset = Repuesto.objects.filter(empresa_id=empresa_id)
 
-        if self.action in ['list', 'retrieve'] and not include_inactive:
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
+            queryset = queryset.filter(is_active=True)
+        elif self.action in ['list', 'retrieve'] and not include_inactive:
             queryset = queryset.filter(is_active=True)
 
         categoria = self.request.query_params.get('categoria')
@@ -86,7 +94,12 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         queryset = Servicio.objects.filter(empresa_id=empresa_id)
 
-        if self.action in ['list', 'retrieve'] and not include_inactive:
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
+            queryset = queryset.filter(is_active=True)
+        elif self.action in ['list', 'retrieve'] and not include_inactive:
             queryset = queryset.filter(is_active=True)
 
         categoria = self.request.query_params.get('categoria')
@@ -112,6 +125,67 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         return Response({'results': data})
 
 
+def _repuesto_export_queryset(request, empresa_id):
+    """Aplica los filtros del listado (search, estado, categoria, stock_bajo)
+    a las exportaciones PDF/Excel de repuestos."""
+    queryset = Repuesto.objects.filter(empresa_id=empresa_id)
+
+    search = request.query_params.get('search')
+    if search:
+        search_fields = ['codigo', 'nombre', 'descripcion', 'marca', 'numero_parte', 'ubicacion', 'proveedor']
+        for term in [t for t in search.replace(',', ' ').split() if t]:
+            conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
+            queryset = queryset.filter(reduce(operator.or_, conditions))
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+    else:
+        # Misma semántica que el listado: sin filtro de estado solo se
+        # exportan los repuestos activos.
+        queryset = queryset.filter(is_active=True)
+
+    categoria = request.query_params.get('categoria')
+    if categoria:
+        queryset = queryset.filter(categoria=categoria)
+
+    if request.query_params.get('stock_bajo', 'false').lower() == 'true':
+        queryset = queryset.filter(stock_actual__lte=F('stock_minimo'))
+
+    return queryset
+
+
+def _servicio_export_queryset(request, empresa_id):
+    """Aplica los filtros del listado (search, estado, categoria) a las
+    exportaciones PDF/Excel de servicios."""
+    queryset = Servicio.objects.filter(empresa_id=empresa_id)
+
+    search = request.query_params.get('search')
+    if search:
+        search_fields = ['codigo', 'nombre', 'descripcion', 'tareas_estandar']
+        for term in [t for t in search.replace(',', ' ').split() if t]:
+            conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
+            queryset = queryset.filter(reduce(operator.or_, conditions))
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+    else:
+        # Misma semántica que el listado: sin filtro de estado solo se
+        # exportan los servicios activos.
+        queryset = queryset.filter(is_active=True)
+
+    categoria = request.query_params.get('categoria')
+    if categoria:
+        queryset = queryset.filter(categoria=categoria)
+
+    return queryset
+
+
 class RepuestoPdfExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [JSONRenderer]
@@ -125,10 +199,7 @@ class RepuestoPdfExportView(APIView):
             )
 
         try:
-            queryset = Repuesto.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).order_by('codigo')
+            queryset = _repuesto_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None
@@ -195,10 +266,7 @@ class RepuestoExcelExportView(APIView):
             )
 
         try:
-            queryset = Repuesto.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).order_by('codigo')
+            queryset = _repuesto_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None
@@ -263,10 +331,7 @@ class ServicioPdfExportView(APIView):
             )
 
         try:
-            queryset = Servicio.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).order_by('codigo')
+            queryset = _servicio_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None
@@ -327,10 +392,7 @@ class ServicioExcelExportView(APIView):
             )
 
         try:
-            queryset = Servicio.objects.filter(
-                empresa_id=empresa_id,
-                is_active=True,
-            ).order_by('codigo')
+            queryset = _servicio_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa = queryset.first().empresa if queryset.exists() else None
             taller = empresa.talleres.first() if empresa else None

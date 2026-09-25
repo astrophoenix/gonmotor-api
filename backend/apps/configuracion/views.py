@@ -1,8 +1,12 @@
+import operator
+from functools import reduce
+
 from rest_framework import viewsets, status, serializers, filters
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from django.db import IntegrityError
+from django.db.models import Q
 from django.utils import timezone
 from reportlab.platypus import Paragraph
 
@@ -38,7 +42,20 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
         empresa_id = self.get_empresa_id(self.request)
         if not empresa_id:
             return Taller.objects.none()
-        return Taller.objects.filter(empresa_id=empresa_id)
+
+        queryset = Taller.objects.filter(empresa_id=empresa_id)
+
+        estado = self.request.query_params.get('estado')
+        if estado == 'inactivo':
+            queryset = queryset.filter(is_active=False)
+        elif estado == 'activo':
+            queryset = queryset.filter(is_active=True)
+
+        ciudad = self.request.query_params.get('ciudad')
+        if ciudad:
+            queryset = queryset.filter(ciudad__icontains=ciudad)
+
+        return queryset
 
     def _validar_nombre_duplicado(self, nombre, taller_id=None):
         empresa_id = self.get_empresa_id(self.request)
@@ -86,6 +103,31 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
             raise exc
 
 
+def _taller_export_queryset(request, empresa_id):
+    """Aplica los filtros del listado (search, estado, ciudad) a las
+    exportaciones PDF/Excel de talleres."""
+    queryset = Taller.objects.filter(empresa_id=empresa_id)
+
+    search = request.query_params.get('search')
+    if search:
+        search_fields = ['nombre', 'codigo_sucursal', 'ciudad', 'direccion', 'telefono']
+        for term in [t for t in search.replace(',', ' ').split() if t]:
+            conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
+            queryset = queryset.filter(reduce(operator.or_, conditions))
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+
+    ciudad = request.query_params.get('ciudad')
+    if ciudad:
+        queryset = queryset.filter(ciudad__icontains=ciudad)
+
+    return queryset
+
+
 class TallerPdfExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [JSONRenderer]
@@ -99,7 +141,7 @@ class TallerPdfExportView(APIView):
             )
 
         try:
-            queryset = Taller.objects.filter(empresa_id=empresa_id).order_by('nombre')
+            queryset = _taller_export_queryset(request, empresa_id).order_by('nombre')
 
             empresa = queryset.first().empresa if queryset.exists() else None
 
@@ -160,7 +202,7 @@ class TallerExcelExportView(APIView):
             )
 
         try:
-            queryset = Taller.objects.filter(empresa_id=empresa_id).order_by('nombre')
+            queryset = _taller_export_queryset(request, empresa_id).order_by('nombre')
 
             empresa = queryset.first().empresa if queryset.exists() else None
 

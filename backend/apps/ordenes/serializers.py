@@ -692,6 +692,10 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
                 'tipo': instance.vehiculo.tipo,
                 'anio': instance.vehiculo.anio,
                 'kilometraje_actual': instance.vehiculo.kilometraje_actual,
+                'imagen': url_imagen_absoluta(
+                    request,
+                    instance.vehiculo.imagen.url if instance.vehiculo.imagen else None,
+                ),
             }
         if instance.cliente_id:
             rep['cliente'] = {
@@ -757,6 +761,23 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             }
             if inspeccion is not None
             else None
+        )
+        recepcion = instance.recepciones.first()
+        rep['recepcion_estado'] = recepcion.estado if recepcion else None
+        rep['recepcion_estado_display'] = (
+            recepcion.get_estado_display() if recepcion else None
+        )
+        inspeccion_estado = getattr(instance, 'inspeccion', None)
+        rep['inspeccion_estado'] = inspeccion_estado.estado if inspeccion_estado else None
+        rep['inspeccion_estado_display'] = (
+            inspeccion_estado.get_estado_display() if inspeccion_estado else None
+        )
+        cotizacion = instance.cotizacion_origen
+        if cotizacion is None and inspeccion_estado is not None:
+            cotizacion = inspeccion_estado.cotizaciones_generadas.order_by('created_at', 'id').last()
+        rep['cotizacion_estado'] = cotizacion.estado if cotizacion else None
+        rep['cotizacion_estado_display'] = (
+            cotizacion.get_estado_display() if cotizacion else None
         )
         return rep
 

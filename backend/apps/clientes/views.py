@@ -61,14 +61,22 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         elif estado == 'activo':
             queryset = queryset.filter(is_active=True)
 
+        tipo_identificacion = self.request.query_params.get('tipo_identificacion')
+        if tipo_identificacion:
+            queryset = queryset.filter(tipo_identificacion=tipo_identificacion)
+
         if self.action in ['list', 'retrieve']:
-            return queryset.select_related('empresa').annotate(
+            queryset = queryset.select_related('empresa').annotate(
                 vehiculos_count=Count(
                     'vehiculos_asociados__vehiculo',
                     filter=Q(vehiculos_asociados__es_actual=True),
                     distinct=True,
                 )
-            ).prefetch_related(
+            )
+            min_vehiculos = self.request.query_params.get('min_vehiculos')
+            if min_vehiculos and min_vehiculos.isdigit():
+                queryset = queryset.filter(vehiculos_count__gte=int(min_vehiculos))
+            queryset = queryset.prefetch_related(
                 Prefetch(
                     'vehiculos_asociados',
                     queryset=VehiculoPropietario.objects.filter(
@@ -77,6 +85,7 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
                     to_attr='propietarios_actuales',
                 )
             )
+            return queryset
 
         return queryset
 
@@ -102,6 +111,43 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         })
 
 
+def _cliente_export_queryset(request, empresa_id):
+    """Aplica los mismos filtros del listado (search, estado, tipo_identificacion,
+    min_vehiculos) a las exportaciones PDF/Excel."""
+    queryset = Cliente.objects.filter(empresa_id=empresa_id)
+
+    search = request.query_params.get('search')
+    if search:
+        queryset = queryset.filter(
+            Q(nombre__icontains=search)
+            | Q(identificacion__icontains=search)
+            | Q(email__icontains=search)
+            | Q(telefono__icontains=search)
+        )
+
+    estado = request.query_params.get('estado')
+    if estado == 'inactivo':
+        queryset = queryset.filter(is_active=False)
+    elif estado == 'activo':
+        queryset = queryset.filter(is_active=True)
+
+    tipo_identificacion = request.query_params.get('tipo_identificacion')
+    if tipo_identificacion:
+        queryset = queryset.filter(tipo_identificacion=tipo_identificacion)
+
+    min_vehiculos = request.query_params.get('min_vehiculos')
+    if min_vehiculos and min_vehiculos.isdigit():
+        queryset = queryset.annotate(
+            vehiculos_count=Count(
+                'vehiculos_asociados__vehiculo',
+                filter=Q(vehiculos_asociados__es_actual=True),
+                distinct=True,
+            )
+        ).filter(vehiculos_count__gte=int(min_vehiculos))
+
+    return queryset
+
+
 class ClientePdfExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [JSONRenderer]
@@ -116,9 +162,9 @@ class ClientePdfExportView(APIView):
             )
 
         try:
-            queryset = Cliente.objects.filter(
-                empresa_id=empresa_id, is_active=True
-            ).select_related('empresa').prefetch_related(
+            queryset = _cliente_export_queryset(request, empresa_id).select_related(
+                'empresa'
+            ).prefetch_related(
                 Prefetch(
                     'vehiculos_asociados',
                     queryset=VehiculoPropietario.objects.filter(
@@ -180,7 +226,7 @@ class ClienteExcelExportView(APIView):
             )
 
         try:
-            queryset = Cliente.objects.filter(empresa_id=empresa_id, is_active=True).select_related(
+            queryset = _cliente_export_queryset(request, empresa_id).select_related(
                 'empresa'
             ).prefetch_related(
                 Prefetch(
