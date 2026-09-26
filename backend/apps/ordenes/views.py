@@ -1,3 +1,5 @@
+import datetime
+
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -83,19 +85,65 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
-    ordering_fields = ['created_at', 'id']
+    search_fields = ['numero_recepcion', 'vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
+    ordering_fields = ['created_at', 'id', 'fecha_ingreso']
     ordering = ['-created_at']
+
+    # Filtros del panel "Búsqueda" del listado. Se aplican por query params
+    # (no django-filter) siguiendo el criterio de clientes/vehículos.
+    FILTROS_LISTADO = {
+        'estado': 'estado',
+        'tipo_recepcion': 'tipo_recepcion',
+    }
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return RecepcionVehiculo.objects.none()
-        return (
+        queryset = (
             RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
             .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal')
             .prefetch_related('inspecciones', 'cotizaciones_generadas')
         )
+        return self._filtrar_recepciones(queryset)
+
+    def _filtrar_recepciones(self, queryset):
+        """Aplica los filtros del panel de búsqueda del listado de recepciones."""
+        params = self.request.query_params
+
+        for parametro, campo in self.FILTROS_LISTADO.items():
+            valor = params.get(parametro)
+            if valor:
+                queryset = queryset.filter(**{campo: valor})
+
+        sucursal = params.get('sucursal')
+        if sucursal and sucursal.isdigit():
+            queryset = queryset.filter(sucursal_id=int(sucursal))
+
+        # Rango de fechas sobre la fecha de ingreso (comparación por día, ambos
+        # extremos incluidos) para que el filtro funcione en cualquier zona horaria.
+        fecha_desde = self._parse_fecha(params.get('fecha_desde'))
+        if fecha_desde:
+            queryset = queryset.filter(fecha_ingreso__date__gte=fecha_desde)
+
+        fecha_hasta = self._parse_fecha(params.get('fecha_hasta'))
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_ingreso__date__lte=fecha_hasta)
+
+        if params.get('solo_grua') in ('1', 'true', 'True'):
+            queryset = queryset.filter(ingreso_en_grua=True)
+
+        return queryset
+
+    @staticmethod
+    def _parse_fecha(valor):
+        """Convierte 'YYYY-MM-DD' en date; un valor inválido se ignora en vez de romper la petición."""
+        if not valor:
+            return None
+        try:
+            return datetime.date.fromisoformat(valor.strip())
+        except (TypeError, ValueError):
+            return None
 
     def _sincronizar_kilometraje_vehiculo(self, instance):
         if instance.estado == 'NO_ACEPTADA':

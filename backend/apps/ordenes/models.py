@@ -176,7 +176,7 @@ class RecepcionVehiculo(BaseModel):
         ('DIAGNOSTICO', 'Diagnóstico'),
         ('ESTETICA', 'Estética'),
         ('GARANTIA', 'Garantía'),
-        ('SINISTRO', 'Siniestro'),
+        ('SINIESTRO', 'Siniestro'),
         ('OTRO', 'Otro'),
     ]
 

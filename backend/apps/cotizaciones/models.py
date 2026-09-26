@@ -16,6 +16,17 @@ class Cotizacion(BaseModel):
         VENCIDA = 'VENCIDA', 'Vencida'
         CONVERTIDA = 'CONVERTIDA', 'Convertida a Orden'
 
+    # Estados en los que la cotización sigue vigente: el presupuesto está en
+    # negociación o el cliente ya lo aceptó. Solo puede existir una cotización
+    # vigente por recepción y por inspección (ver constraints); el trabajo
+    # adicional se cotiza desde la orden de trabajo (`orden_trabajo_origen`).
+    ESTADOS_VIGENTES = (
+        EstadoCotizacion.BORRADOR,
+        EstadoCotizacion.ENVIADA,
+        EstadoCotizacion.ACEPTADA,
+    )
+
+
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='cotizaciones')
     sucursal = models.ForeignKey(
         'empresas.Taller',
@@ -95,7 +106,20 @@ class Cotizacion(BaseModel):
             models.UniqueConstraint(
                 fields=['empresa', 'numero_cotizacion'],
                 name='cotizacion_empresa_numero_unico'
-            )
+            ),
+            # Una sola cotización vigente por inspección y por recepción. Las
+            # columnas son null cuando la cotización se creó de forma directa
+            # (sin origen previo) y Postgres no las considera duplicadas.
+            models.UniqueConstraint(
+                fields=['inspeccion_origen'],
+                condition=models.Q(estado__in=['BORRADOR', 'ENVIADA', 'ACEPTADA']),
+                name='cotizacion_inspeccion_vigente_unica'
+            ),
+            models.UniqueConstraint(
+                fields=['recepcion_origen'],
+                condition=models.Q(estado__in=['BORRADOR', 'ENVIADA', 'ACEPTADA']),
+                name='cotizacion_recepcion_vigente_unica'
+            ),
         ]
 
     def __str__(self):
@@ -266,6 +290,36 @@ class Cotizacion(BaseModel):
         if self.orden_trabajo_origen_id:
             raise ValueError(
                 "Esta cotización ya generó una orden de trabajo."
+            )
+
+        # Una inspección genera como máximo una OT (su orden_trabajo es
+        # OneToOne) y la recepción tiene un único espacio para la OT asociada.
+        if self.inspeccion_origen_id and self.inspeccion_origen.orden_trabajo_id:
+            raise ValueError(
+                f"La inspección {self.inspeccion_origen.numero_inspeccion} ya se convirtió "
+                f"en la orden {self.inspeccion_origen.orden_trabajo.numero_orden}."
+            )
+
+        recepcion = self.recepcion_origen
+        if recepcion is None and self.inspeccion_origen_id and self.inspeccion_origen.recepcion_id:
+            recepcion = self.inspeccion_origen.recepcion
+        if recepcion is not None and recepcion.orden_trabajo_id:
+            raise ValueError(
+                f"La recepción {recepcion.numero_recepcion} ya tiene la orden "
+                f"{recepcion.orden_trabajo.numero_orden}. Cotiza el trabajo adicional "
+                f"desde esa orden de trabajo."
+            )
+
+        if not self.servicios.exists() and not self.repuestos.exists():
+            raise ValueError(
+                "La cotización no tiene servicios ni repuestos: agrega al menos un "
+                "detalle antes de generar la orden de trabajo."
+            )
+
+        if self.total <= Decimal('0.00'):
+            raise ValueError(
+                "La cotización tiene total 0. Revisa precios y cantidades antes de "
+                "generar la orden de trabajo."
             )
 
         ot = self._crear_orden_trabajo(usuario=usuario)

@@ -339,10 +339,10 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         from apps.cotizaciones.models import Cotizacion
 
         rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(
-            estado__in=[Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA]
+            estado__in=Cotizacion.ESTADOS_VIGENTES
         ).exists()
         cotizacion_activa = instance.cotizaciones_generadas.filter(
-            estado__in=[Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA]
+            estado__in=Cotizacion.ESTADOS_VIGENTES
         ).only('id', 'numero_cotizacion').first()
         rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
         rep['numero_cotizacion'] = (
