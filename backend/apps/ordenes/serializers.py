@@ -353,6 +353,10 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['cotizacion_estado_display'] = (
             ultima_cotizacion.get_estado_display() if ultima_cotizacion else None
         )
+        rep['cotizacion_id'] = ultima_cotizacion.id if ultima_cotizacion else None
+        rep['cotizacion_numero'] = (
+            ultima_cotizacion.numero_cotizacion if ultima_cotizacion else None
+        )
         if instance.recepcion_id:
             rec = instance.recepcion
             rv = rec.vehiculo if rec.vehiculo_id else None
@@ -778,6 +782,10 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         rep['cotizacion_estado'] = cotizacion.estado if cotizacion else None
         rep['cotizacion_estado_display'] = (
             cotizacion.get_estado_display() if cotizacion else None
+        )
+        rep['cotizacion_id'] = cotizacion.id if cotizacion else None
+        rep['cotizacion_numero'] = (
+            cotizacion.numero_cotizacion if cotizacion else None
         )
         return rep
 
