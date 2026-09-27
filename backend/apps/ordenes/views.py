@@ -82,6 +82,16 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
         )
 
 
+def parsear_fecha(valor):
+    """Convierte 'YYYY-MM-DD' en date; un valor inválido se ignora en vez de romper la petición."""
+    if not valor:
+        return None
+    try:
+        return datetime.date.fromisoformat(valor.strip())
+    except (TypeError, ValueError):
+        return None
+
+
 class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -123,11 +133,11 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
 
         # Rango de fechas sobre la fecha de ingreso (comparación por día, ambos
         # extremos incluidos) para que el filtro funcione en cualquier zona horaria.
-        fecha_desde = self._parse_fecha(params.get('fecha_desde'))
+        fecha_desde = parsear_fecha(params.get('fecha_desde'))
         if fecha_desde:
             queryset = queryset.filter(fecha_ingreso__date__gte=fecha_desde)
 
-        fecha_hasta = self._parse_fecha(params.get('fecha_hasta'))
+        fecha_hasta = parsear_fecha(params.get('fecha_hasta'))
         if fecha_hasta:
             queryset = queryset.filter(fecha_ingreso__date__lte=fecha_hasta)
 
@@ -138,13 +148,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _parse_fecha(valor):
-        """Convierte 'YYYY-MM-DD' en date; un valor inválido se ignora en vez de romper la petición."""
-        if not valor:
-            return None
-        try:
-            return datetime.date.fromisoformat(valor.strip())
-        except (TypeError, ValueError):
-            return None
+        return parsear_fecha(valor)
 
     def _sincronizar_kilometraje_vehiculo(self, instance):
         if instance.estado == 'NO_ACEPTADA':
@@ -219,17 +223,75 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['recepcion__vehiculo__placa', 'recepcion__cliente__nombre']
-    ordering_fields = ['created_at', 'id']
+    # La búsqueda alcanza el número de la inspección, el de su recepción y los
+    # datos del vehículo/cliente, que pueden venir en la propia inspección o en
+    # la recepción de origen.
+    search_fields = [
+        'numero_inspeccion',
+        'recepcion__numero_recepcion',
+        'vehiculo__placa',
+        'vehiculo__marca',
+        'vehiculo__modelo',
+        'cliente__nombre',
+        'cliente__identificacion',
+        'recepcion__vehiculo__placa',
+        'recepcion__vehiculo__marca',
+        'recepcion__cliente__nombre',
+        'recepcion__cliente__identificacion',
+    ]
+    ordering_fields = ['created_at', 'id', 'fecha_inspeccion', 'fecha_finalizacion', 'numero_inspeccion']
     ordering = ['-created_at']
+
+    # Filtros del panel "Búsqueda" del listado de inspecciones. Se aplican por
+    # query params (no django-filter) siguiendo el criterio de recepciones.
+    FILTROS_LISTADO = {
+        'estado': 'estado',
+        'tipo_inspeccion': 'tipo_inspeccion',
+    }
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return InspeccionVehiculo.objects.none()
-        return InspeccionVehiculo.objects.filter(empresa_id=empresa_id).prefetch_related(
-            'servicios_detectados', 'repuestos_sugeridos', 'fotos'
+        queryset = (
+            InspeccionVehiculo.objects.filter(empresa_id=empresa_id)
+            .select_related(
+                'recepcion',
+                'recepcion__vehiculo',
+                'recepcion__cliente',
+                'vehiculo',
+                'cliente',
+                'orden_trabajo',
+                'sucursal',
+            )
+            .prefetch_related('servicios_detectados', 'repuestos_sugeridos', 'fotos', 'cotizaciones_generadas')
         )
+        return self._filtrar_inspecciones(queryset)
+
+    def _filtrar_inspecciones(self, queryset):
+        """Aplica los filtros del panel de búsqueda del listado de inspecciones."""
+        params = self.request.query_params
+
+        for parametro, campo in self.FILTROS_LISTADO.items():
+            valor = params.get(parametro)
+            if valor:
+                queryset = queryset.filter(**{campo: valor})
+
+        sucursal = params.get('sucursal')
+        if sucursal and sucursal.isdigit():
+            queryset = queryset.filter(sucursal_id=int(sucursal))
+
+        # Rango de fechas sobre la fecha de inspección (comparación por día,
+        # ambos extremos incluidos) para que el filtro no dependa de la zona horaria.
+        fecha_desde = parsear_fecha(params.get('fecha_desde'))
+        if fecha_desde:
+            queryset = queryset.filter(fecha_inspeccion__date__gte=fecha_desde)
+
+        fecha_hasta = parsear_fecha(params.get('fecha_hasta'))
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_inspeccion__date__lte=fecha_hasta)
+
+        return queryset
 
     @staticmethod
     def _check_editable(inspeccion):

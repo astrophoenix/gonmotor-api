@@ -423,6 +423,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                     'modelo': rv.modelo,
                     'color': rv.color,
                     'numero_motor': rv.numero_motor,
+                    'kilometraje_actual': rv.kilometraje_actual,
                     'transmision': rv.transmision,
                     'combustible': rv.combustible,
                     'imagen': url_imagen_absoluta(
@@ -464,6 +465,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'modelo': vehiculo_obj.modelo,
             'color': vehiculo_obj.color,
             'numero_motor': vehiculo_obj.numero_motor,
+            'kilometraje_actual': vehiculo_obj.kilometraje_actual,
             'transmision': vehiculo_obj.transmision,
             'combustible': vehiculo_obj.combustible,
             'imagen': url_imagen_absoluta(
