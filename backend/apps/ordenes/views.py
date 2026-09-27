@@ -21,6 +21,7 @@ from .models import (
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
+    TipoTrabajo,
 )
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
@@ -42,16 +43,16 @@ def _check_inspeccion_editable(inspeccion):
         )
 
 
-MAPA_TIPO_INSPECCION = {
-    'MANTENIMIENTO': 'PREVENTIVO',
-    'REPARACIÓN': 'CORRECTIVO',
-    'REPARACION': 'CORRECTIVO',
-    'DIAGNOSTICO': 'DIAGNOSTICO',
-    'ESTETICA': 'ESTETICA',
-    'GARANTIA': 'GARANTIA',
-    'SINISTRO': 'CORRECTIVO',
-    'OTRO': 'DIAGNOSTICO',
-}
+def tipo_inspeccion_desde_recepcion(tipo_recepcion):
+    """La inspección hereda el motivo de ingreso de la recepción sin degradarlo.
+
+    Recepción, inspección y orden de trabajo comparten la taxonomía `TipoTrabajo`,
+    así que el valor se copia tal cual (incluido SINIESTRO u OTRO). Solo se cae al
+    default cuando la recepción no tiene un valor válido.
+    """
+    if tipo_recepcion in TipoTrabajo.values:
+        return tipo_recepcion
+    return TipoTrabajo.DIAGNOSTICO
 
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -198,10 +199,11 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         ]
         data = {
             'recepcion': recepcion.id,
-            'tipo_inspeccion': MAPA_TIPO_INSPECCION.get(recepcion.tipo_recepcion, 'DIAGNOSTICO'),
+            'tipo_inspeccion': tipo_inspeccion_desde_recepcion(recepcion.tipo_recepcion),
             'estado': 'PENDIENTE',
             'motivo_ingreso': recepcion.motivo_ingreso or '',
             'otros_testigos_observaciones': recepcion.otros_testigos_observaciones or '',
+            'fecha_inspeccion': recepcion.fecha_ingreso or timezone.now(),
             **{campo: getattr(recepcion, campo, False) for campo in testigo_campos},
         }
         serializer = InspeccionVehiculoSerializer(data=data, context={'request': request})

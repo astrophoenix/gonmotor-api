@@ -7,15 +7,30 @@ from django.utils import timezone
 from apps.core.models import BaseModel
 
 
+class TipoTrabajo(models.TextChoices):
+    """Taxonomía única del motivo por el que el vehículo ingresa al taller.
+
+    La comparten `RecepcionVehiculo.tipo_recepcion`, `InspeccionVehiculo.tipo_inspeccion`
+    y `OrdenTrabajo.tipo_trabajo`: las tres responden a la misma pregunta de negocio
+    ("¿por qué entra el vehículo?"), por lo que deben usar exactamente los mismos
+    valores. Se registra en recepción y se hereda en inspección y orden de trabajo.
+    """
+
+    MANTENIMIENTO = 'MANTENIMIENTO', 'Mantenimiento'
+    REPARACION = 'REPARACION', 'Reparación'
+    DIAGNOSTICO = 'DIAGNOSTICO', 'Diagnóstico'
+    ESTETICA = 'ESTETICA', 'Estética'
+    GARANTIA = 'GARANTIA', 'Garantía'
+    SINIESTRO = 'SINIESTRO', 'Siniestro'
+    OTRO = 'OTRO', 'Otro'
+
+
 class OrdenTrabajo(BaseModel):
     """Modelo principal para la gestión de la reparación o mantenimiento del vehículo."""
 
-    class TipoTrabajo(models.TextChoices):
-        PREVENTIVO = 'PREVENTIVO', 'Mantenimiento Preventivo'
-        CORRECTIVO = 'CORRECTIVO', 'Reparación Correctiva'
-        DIAGNOSTICO = 'DIAGNOSTICO', 'Solo Diagnóstico / Escaneo'
-        ESTETICA = 'ESTETICA', 'Enderezada, Pintura o Detailing'
-        GARANTIA = 'GARANTIA', 'Garantía / Retorno'
+    # Alias retrocompatible: el enum vive a nivel de módulo para poder reutilizarlo
+    # desde otros apps (citas, cotizaciones) sin depender de esta clase.
+    TipoTrabajo = TipoTrabajo
 
     class EstadoOrden(models.TextChoices):
         INGRESADO = 'INGRESADO', 'En Recepción / Diagnóstico'
@@ -70,7 +85,7 @@ class OrdenTrabajo(BaseModel):
     numero_orden = models.CharField(max_length=20, verbose_name='Número de OT')
     estado = models.CharField(max_length=20, choices=EstadoOrden.choices, default=EstadoOrden.INGRESADO)
     prioridad = models.CharField(max_length=10, choices=Prioridad.choices, default=Prioridad.MEDIA)
-    tipo_trabajo = models.CharField(max_length=20, choices=TipoTrabajo.choices, default=TipoTrabajo.PREVENTIVO)
+    tipo_trabajo = models.CharField(max_length=20, choices=TipoTrabajo.choices, default=TipoTrabajo.MANTENIMIENTO)
 
     observaciones_internas = models.TextField(blank=True, null=True, help_text='Notas no visibles para el cliente')
 
@@ -170,15 +185,8 @@ class RecepcionVehiculo(BaseModel):
         ('NO_ACEPTADA', 'Rechazada'),
     ]
 
-    TIPOS_CHOICES = [
-        ('MANTENIMIENTO', 'Mantenimiento'),
-        ('REPARACIÓN', 'Reparación'),
-        ('DIAGNOSTICO', 'Diagnóstico'),
-        ('ESTETICA', 'Estética'),
-        ('GARANTIA', 'Garantía'),
-        ('SINIESTRO', 'Siniestro'),
-        ('OTRO', 'Otro'),
-    ]
+    # Misma taxonomía que Inspección y Orden de Trabajo (ver TipoTrabajo).
+    TIPOS_CHOICES = TipoTrabajo.choices
 
     empresa = models.ForeignKey(
         'empresas.Empresa',
@@ -237,7 +245,7 @@ class RecepcionVehiculo(BaseModel):
     tipo_recepcion = models.CharField(
         max_length=20,
         choices=TIPOS_CHOICES,
-        default='PENDIENTE',
+        default=TipoTrabajo.MANTENIMIENTO,
         verbose_name='Tipo de Recepción',
     )
     motivo_ingreso = models.TextField(
@@ -452,13 +460,8 @@ class InspeccionVehiculo(BaseModel):
     """Registro técnico del diagnóstico y estado mecánico del vehículo.
     Puede existir independientemente de una Orden de Trabajo."""
 
-    TIPO_CHOICES = [
-        ('PREVENTIVO', 'Mantenimiento Preventivo'),
-        ('CORRECTIVO', 'Revisión Correctiva'),
-        ('DIAGNOSTICO', 'Diagnóstico'),
-        ('ESTETICA', 'Evaluación Estética'),
-        ('GARANTIA', 'Revisión por Garantía'),
-    ]
+    # Misma taxonomía que Recepción y Orden de Trabajo (ver TipoTrabajo).
+    TIPO_CHOICES = TipoTrabajo.choices
     
     ESTADO_CHOICES = [
         ('PENDIENTE', 'Pendiente'),
@@ -528,7 +531,7 @@ class InspeccionVehiculo(BaseModel):
     )
 
     # Clasificación y Estado
-    tipo_inspeccion = models.CharField(max_length=20, choices=TIPO_CHOICES, default='DIAGNOSTICO',)
+    tipo_inspeccion = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TipoTrabajo.DIAGNOSTICO)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
 
     # Contexto del Cliente (Adaptado para incluir mantenimientos sin fallas)
@@ -562,6 +565,19 @@ class InspeccionVehiculo(BaseModel):
     testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
 
+    fecha_inspeccion = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Fecha de inspección',
+        help_text='Momento real en que se realizó (o se inició) el diagnóstico'
+    )
+
+    fecha_finalizacion = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name='Fecha de finalización',
+        help_text='Se registra automáticamente al finalizar la inspección y se limpia al reabrirla'
+    )
+
     class Meta:
         verbose_name = 'Inspección de Vehículo'
         verbose_name_plural = 'Inspecciones de Vehículos'
@@ -584,6 +600,33 @@ class InspeccionVehiculo(BaseModel):
         if self.recepcion_id:
             return f'Inspección #{self.pk} - Recepción {self.recepcion_id}'
         return f'Inspección #{self.pk} - Sin vínculo'
+
+    @property
+    def duracion_inspeccion(self):
+        """Minutos entre el inicio del diagnóstico y su cierre."""
+        if not self.fecha_finalizacion or not self.fecha_inspeccion:
+            return None
+        return max(0, int((self.fecha_finalizacion - self.fecha_inspeccion).total_seconds() // 60))
+
+    def save(self, *args, **kwargs):
+        # La fecha de cierre la gobierna el sistema, nunca el cliente.
+        if self.estado == 'FINALIZADA':
+            if self.fecha_finalizacion is None:
+                self.fecha_finalizacion = timezone.now()
+        else:
+            self.fecha_finalizacion = None
+
+        if self.fecha_inspeccion is None:
+            self.fecha_inspeccion = timezone.now()
+
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            kwargs['update_fields'] = set(update_fields) | {
+                'fecha_inspeccion',
+                'fecha_finalizacion',
+            }
+
+        super().save(*args, **kwargs)
 
 
 class DetalleServicioInspeccion(models.Model):

@@ -192,13 +192,13 @@ class Cita(BaseModel):
         return recepcion
 
     def _tipo_recepcion_desde_motivo(self):
-        from apps.ordenes.models import OrdenTrabajo
+        from apps.ordenes.models import TipoTrabajo
 
         mapping = {
-            self.MotivoCita.MANTENIMIENTO: OrdenTrabajo.TipoTrabajo.PREVENTIVO,
-            self.MotivoCita.REPARACION: OrdenTrabajo.TipoTrabajo.CORRECTIVO,
-            self.MotivoCita.DIAGNOSTICO: OrdenTrabajo.TipoTrabajo.DIAGNOSTICO,
-            self.MotivoCita.ESTETICA: OrdenTrabajo.TipoTrabajo.ESTETICA,
-            self.MotivoCita.GARANTIA: OrdenTrabajo.TipoTrabajo.GARANTIA,
+            self.MotivoCita.MANTENIMIENTO: TipoTrabajo.MANTENIMIENTO,
+            self.MotivoCita.REPARACION: TipoTrabajo.REPARACION,
+            self.MotivoCita.DIAGNOSTICO: TipoTrabajo.DIAGNOSTICO,
+            self.MotivoCita.ESTETICA: TipoTrabajo.ESTETICA,
+            self.MotivoCita.GARANTIA: TipoTrabajo.GARANTIA,
         }
-        return mapping.get(self.motivo, OrdenTrabajo.TipoTrabajo.DIAGNOSTICO)
+        return mapping.get(self.motivo, TipoTrabajo.DIAGNOSTICO)

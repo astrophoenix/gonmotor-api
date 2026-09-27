@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.authentication.models import UsuarioEmpresa
@@ -264,13 +267,23 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'servicios_detectados',
             'repuestos_sugeridos',
             'fotos',
+            'fecha_inspeccion',
+            'fecha_finalizacion',
             'is_active',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'numero_inspeccion', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id',
+            'numero_inspeccion',
+            'fecha_finalizacion',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
 
     def create(self, validated_data):
+        recepcion = validated_data.get('recepcion')
         request = self.context.get('request')
         if request:
             empresa_id = get_empresa_id_desde_request(request)
@@ -279,7 +292,6 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             if validated_data.get('responsable') is None and request.user.is_authenticated:
                 validated_data['responsable'] = request.user
             sucursal = validated_data.get('sucursal')
-            recepcion = validated_data.get('recepcion')
             if sucursal is None and recepcion is not None and recepcion.sucursal_id:
                 sucursal = recepcion.sucursal
             taller = resolver_taller(empresa_id, sucursal)
@@ -291,6 +303,10 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                     validated_data['cliente'] = recepcion.cliente
                 if validated_data.get('vehiculo') is None and recepcion.vehiculo_id:
                     validated_data['vehiculo'] = recepcion.vehiculo
+
+        if validated_data.get('fecha_inspeccion') is None and recepcion is not None:
+            validated_data['fecha_inspeccion'] = recepcion.fecha_ingreso or timezone.now()
+
         return super().create(validated_data)
 
     def validate(self, attrs):
@@ -303,6 +319,20 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'recepcion': 'Esta recepción ya tiene una inspección registrada.'}
                 )
+
+        fecha_inspeccion = attrs.get('fecha_inspeccion')
+        if fecha_inspeccion is not None and fecha_inspeccion > timezone.now() + timedelta(minutes=5):
+            raise serializers.ValidationError(
+                {'fecha_inspeccion': 'La fecha de inspección no puede ser futura.'}
+            )
+
+        fecha_finalizacion = (
+            attrs.get('fecha_finalizacion') or self._fecha_finalizacion_actual()
+        )
+        if fecha_inspeccion and fecha_finalizacion and fecha_finalizacion < fecha_inspeccion:
+            raise serializers.ValidationError(
+                {'fecha_inspeccion': 'La fecha de inspección no puede ser posterior a la finalización.'}
+            )
 
         estado = attrs.get('estado')
         if self.instance and estado and estado != self.instance.estado:
@@ -320,9 +350,13 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
+    def _fecha_finalizacion_actual(self):
+        return self.instance.fecha_finalizacion if self.instance else None
+
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         rep['estado_display'] = instance.get_estado_display()
+        rep['duracion_inspeccion_minutos'] = instance.duracion_inspeccion
         rep['tiene_orden_trabajo'] = instance.orden_trabajo_id is not None
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo.numero_orden if instance.orden_trabajo_id else None
@@ -336,6 +370,22 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['responsable_nombre'] = (
             instance.responsable.get_full_name() or instance.responsable.username
         ) if instance.responsable_id else None
+        if instance.responsable_id:
+            perfil = getattr(instance.responsable, 'profile', None)
+            rep['responsable_identificacion'] = perfil.identificacion if perfil else None
+            rep['responsable_telefono'] = perfil.telefono if perfil else None
+            usuario_empresa = UsuarioEmpresa.objects.filter(
+                user=instance.responsable, empresa=instance.empresa
+            ).first()
+            rep['responsable_rol'] = usuario_empresa.rol if usuario_empresa else None
+            rep['responsable_rol_display'] = (
+                usuario_empresa.get_rol_display() if usuario_empresa else None
+            )
+        else:
+            rep['responsable_identificacion'] = None
+            rep['responsable_telefono'] = None
+            rep['responsable_rol'] = None
+            rep['responsable_rol_display'] = None
         from apps.cotizaciones.models import Cotizacion
 
         rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(

@@ -215,12 +215,25 @@ class Cotizacion(BaseModel):
 
     def _crear_orden_trabajo(self, usuario=None):
         """Crea y devuelve la OrdenTrabajo derivada de esta cotización."""
-        from apps.ordenes.models import DetalleRepuestoOrdenTrabajo, DetalleServicioOrdenTrabajo, OrdenTrabajo
+        from apps.ordenes.models import (
+            DetalleRepuestoOrdenTrabajo,
+            DetalleServicioOrdenTrabajo,
+            OrdenTrabajo,
+            TipoTrabajo,
+        )
 
         inspeccion = self.inspeccion_origen
         if inspeccion is None and self.recepcion_origen:
             inspeccion = self.recepcion_origen.inspecciones.first()
         recepcion = self.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
+
+        # El tipo de trabajo es único para los tres documentos: manda el de la
+        # inspección (lo define el técnico) y si no existe, el de la recepción.
+        tipo_trabajo = (
+            inspeccion.tipo_inspeccion if inspeccion
+            else recepcion.tipo_recepcion if recepcion
+            else TipoTrabajo.MANTENIMIENTO
+        )
 
         vehiculo = self.vehiculo or (recepcion.vehiculo if recepcion else None)
         cliente = self.cliente
@@ -241,7 +254,7 @@ class Cotizacion(BaseModel):
             asesor=usuario,
             cotizacion_origen=self,
             numero_orden=numero_orden,
-            tipo_trabajo=inspeccion.tipo_inspeccion if inspeccion else OrdenTrabajo.TipoTrabajo.CORRECTIVO,
+            tipo_trabajo=tipo_trabajo,
             observaciones_internas=inspeccion.diagnostico_tecnico if inspeccion else None,
         )
 
