@@ -578,6 +578,16 @@ class InspeccionVehiculo(BaseModel):
         help_text='Se registra automáticamente al finalizar la inspección y se limpia al reabrirla'
     )
 
+    # Lectura del odómetro en el momento del diagnóstico. El vehículo puede salir a
+    # prueba de ruta, así que no siempre coincide con el kilometraje de la recepción.
+    # Al finalizar, si es mayor, se propaga a `Vehiculo.kilometraje_actual`.
+    kilometraje_diagnostico = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        verbose_name='Kilometraje de diagnóstico',
+        help_text='Lectura del odómetro al momento del diagnóstico, después de la prueba de ruta si la hubo',
+    )
+
     class Meta:
         verbose_name = 'Inspección de Vehículo'
         verbose_name_plural = 'Inspecciones de Vehículos'
@@ -608,7 +618,25 @@ class InspeccionVehiculo(BaseModel):
             return None
         return max(0, int((self.fecha_finalizacion - self.fecha_inspeccion).total_seconds() // 60))
 
+    def _sincronizar_kilometraje_vehiculo(self):
+        """Propaga la lectura del diagnóstico al odómetro maestro del vehículo.
+
+        El maestro solo sube: una lectura menor es un error de captura, no un
+        retroceso real del odómetro.
+        """
+        if not self.vehiculo_id or self.kilometraje_diagnostico is None:
+            return
+        vehiculo = self.vehiculo
+        if self.kilometraje_diagnostico > (vehiculo.kilometraje_actual or 0):
+            vehiculo.kilometraje_actual = self.kilometraje_diagnostico
+            vehiculo.save(update_fields=['kilometraje_actual', 'updated_at'])
+
     def save(self, *args, **kwargs):
+        # Al crearla se precarga el odómetro vigente del vehículo; después es una
+        # lectura propia del diagnóstico y no debe volver a sobrescribirse.
+        if self._state.adding and self.vehiculo_id and self.kilometraje_diagnostico is None:
+            self.kilometraje_diagnostico = self.vehiculo.kilometraje_actual
+
         # La fecha de cierre la gobierna el sistema, nunca el cliente.
         if self.estado == 'FINALIZADA':
             if self.fecha_finalizacion is None:
@@ -624,7 +652,12 @@ class InspeccionVehiculo(BaseModel):
             kwargs['update_fields'] = set(update_fields) | {
                 'fecha_inspeccion',
                 'fecha_finalizacion',
+                'kilometraje_diagnostico',
             }
+
+        # Solo se consolida el odómetro cuando el diagnóstico queda confirmado.
+        if self.estado == 'FINALIZADA':
+            self._sincronizar_kilometraje_vehiculo()
 
         super().save(*args, **kwargs)
 

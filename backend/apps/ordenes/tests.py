@@ -303,3 +303,141 @@ class InspeccionListadoFiltrosTests(TestCase):
         self.assertEqual(con_recepcion['recepcion']['vehiculo']['kilometraje_actual'], 72500)
         # Sin recepción: solo el vehículo de la inspección.
         self.assertEqual(resultados['INS-FIL-0003']['vehiculo']['kilometraje_actual'], 12300)
+
+
+class InspeccionKilometrajeDiagnosticoTests(TestCase):
+    """La inspección guarda su propia lectura del odómetro porque el vehículo
+    puede salir a prueba de ruta. Al finalizar la sube al vehículo, y el
+    odómetro maestro nunca retrocede."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+        from .models import RecepcionVehiculo
+
+        self.empresa = Empresa.objects.create(nombre_comercial='Taller Km', ruc='777777777777')
+        self.taller = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Centro', direccion='Av. Central 1', prefijo_inspeccion='KM-'
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Cliente Km', identificacion='0911111111'
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            placa='KM-1234', marca='Toyota', modelo='Corolla', kilometraje_actual=50000
+        )
+        self.recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_recepcion='REC-KM-0001',
+            kilometraje_ingreso=50000,
+            estado='ACEPTADA',
+        )
+        self.inspeccion = self._inspeccion()
+
+        self.usuario = get_user_model().objects.create_superuser(
+            username='km', email='km@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.usuario)
+
+    def _inspeccion(self, **atributos):
+        from .models import InspeccionVehiculo
+
+        atributos = {
+            'empresa': self.empresa,
+            'sucursal': self.taller,
+            'cliente': self.cliente,
+            'vehiculo': self.vehiculo,
+            'recepcion': self.recepcion,
+            'motivo_ingreso': 'Ruido en el motor',
+            **atributos,
+        }
+        if atributos['recepcion'] is None:
+            atributos['sucursal'] = None
+        return InspeccionVehiculo.objects.create(**atributos)
+
+    def _actualizar(self, payload):
+        return self.client.patch(
+            f'/api/ordenes/inspecciones/{self.inspeccion.id}/',
+            data=payload,
+            format='json',
+        )
+
+    def test_precarga_el_odometro_del_vehiculo_al_crear(self):
+        self.assertEqual(self.inspeccion.kilometraje_diagnostico, 50000)
+
+    def test_al_finalizar_sube_el_odometro_del_vehiculo(self):
+        respuesta = self._actualizar({
+            'kilometraje_diagnostico': 52400,
+            'estado': 'EN_PROCESO',
+        })
+        self.assertEqual(respuesta.status_code, 200)
+        respuesta = self._actualizar({
+            'kilometraje_diagnostico': 52400,
+            'estado': 'FINALIZADA',
+        })
+        self.assertEqual(respuesta.status_code, 200)
+
+        self.vehiculo.refresh_from_db()
+        self.assertEqual(self.vehiculo.kilometraje_actual, 52400)
+
+    def test_una_lectura_menor_no_hace_retroceder_el_vehiculo(self):
+        self.vehiculo.kilometraje_actual = 60000
+        self.vehiculo.save(update_fields=['kilometraje_actual'])
+        inspeccion = self._inspeccion(
+            numero_inspeccion='KM-0002', recepcion=None, kilometraje_diagnostico=50000, estado='PENDIENTE'
+        )
+
+        inspeccion.kilometraje_diagnostico = 50000
+        inspeccion.estado = 'FINALIZADA'
+        inspeccion.save()
+
+        self.vehiculo.refresh_from_db()
+        self.assertEqual(self.vehiculo.kilometraje_actual, 60000)
+
+    def test_la_api_rechaza_un_kilometraje_menor_al_del_vehiculo(self):
+        respuesta = self._actualizar({'kilometraje_diagnostico': 40000})
+
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('kilometraje_diagnostico', respuesta.json())
+
+    def test_la_api_permite_conservar_la_lectura_ya_guardada(self):
+        # El vehículo puede haber subido en otra visita: la inspección conserva
+        # su propia lectura sin que el guardado sea rechazado.
+        self.vehiculo.kilometraje_actual = 58000
+        self.vehiculo.save(update_fields=['kilometraje_actual'])
+
+        respuesta = self._actualizar({'motivo_ingreso': 'Se reintervisita la falla'})
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.kilometraje_diagnostico, 50000)
+
+    def test_el_listado_expone_la_lectura_de_la_inspeccion(self):
+        self.inspeccion.kilometraje_diagnostico = 52310
+        self.inspeccion.save(update_fields=['kilometraje_diagnostico'])
+
+        respuesta = self.client.get('/api/ordenes/inspecciones/')
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()['results'][0]['kilometraje_diagnostico'], 52310)
+
+    def test_la_recepcion_no_hace_retroceder_el_odometro(self):
+        self.vehiculo.kilometraje_actual = 70000
+        self.vehiculo.save(update_fields=['kilometraje_actual'])
+        self.recepcion.estado = 'PENDIENTE'
+        self.recepcion.kilometraje_ingreso = 45000
+        self.recepcion.save()
+
+        # Se revalida el flujo de la vista, que es quien sincroniza.
+        from apps.ordenes.views import RecepcionVehiculoViewSet
+
+        RecepcionVehiculoViewSet()._sincronizar_kilometraje_vehiculo(self.recepcion)
+
+        self.vehiculo.refresh_from_db()
+        self.assertEqual(self.vehiculo.kilometraje_actual, 70000)

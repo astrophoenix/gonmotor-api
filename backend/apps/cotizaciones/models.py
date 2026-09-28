@@ -77,6 +77,7 @@ class Cotizacion(BaseModel):
         help_text="Orden de trabajo de la cual surgió este presupuesto tras un diagnóstico"
     )
 
+    fecha_envio = models.DateTimeField(null=True, blank=True, verbose_name='Fecha de envío')
     fecha_aceptacion = models.DateTimeField(null=True, blank=True, verbose_name='Fecha de aceptación')
     aceptada_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,

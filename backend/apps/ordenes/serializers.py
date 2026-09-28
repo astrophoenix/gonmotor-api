@@ -243,6 +243,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             'codigos_dtc',
             'diagnostico_tecnico',
             'recomendaciones',
+            'kilometraje_diagnostico',
             'testigo_check_engine',
             'testigo_abs',
             'testigo_airbag',
@@ -348,7 +349,44 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'detail': 'La inspección está finalizada; reábrela para poder modificarla.'}
                 )
+
+        self._validar_kilometraje_diagnostico(attrs)
         return attrs
+
+    def _vehiculo_de(self, attrs):
+        vehiculo = attrs.get('vehiculo')
+        if vehiculo is not None:
+            return vehiculo
+        if self.instance and self.instance.vehiculo_id:
+            return self.instance.vehiculo
+        return None
+
+    def _validar_kilometraje_diagnostico(self, attrs):
+        """El odómetro del diagnóstico no puede bajar el del vehículo.
+
+        Se permite conservar la lectura ya guardada: puede haber ocurrido otra
+        visita que haya subido el odómetro después de crear la inspección.
+        """
+        if 'kilometraje_diagnostico' not in attrs:
+            return
+        kilometraje = attrs['kilometraje_diagnostico']
+        if kilometraje is None:
+            return
+        vehiculo = self._vehiculo_de(attrs)
+        km_vehiculo = getattr(vehiculo, 'kilometraje_actual', None) or 0
+        conserva_lectura = (
+            self.instance is not None
+            and self.instance.kilometraje_diagnostico == kilometraje
+        )
+        if kilometraje < km_vehiculo and not conserva_lectura:
+            raise serializers.ValidationError(
+                {
+                    'kilometraje_diagnostico': (
+                        'El kilometraje no puede ser menor al registrado del vehículo '
+                        f'({km_vehiculo} km).'
+                    )
+                }
+            )
 
     def _fecha_finalizacion_actual(self):
         return self.instance.fecha_finalizacion if self.instance else None

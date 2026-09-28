@@ -1,5 +1,7 @@
 from django.db import IntegrityError
 
+import datetime
+
 from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,6 +15,16 @@ from .serializers import (
     DetalleServicioCotizacionSerializer,
     ESTADOS_EDITABLES,
 )
+
+
+def _parsear_fecha(valor):
+    """Convierte 'YYYY-MM-DD' en date; un valor inválido se ignora en vez de romper la petición."""
+    if not valor:
+        return None
+    try:
+        return datetime.date.fromisoformat(valor.strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _buscar_cotizacion_vigente(queryset, excluir_id=None):
@@ -101,19 +113,58 @@ class CotizacionViewSet(viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['numero_cotizacion', 'cliente__nombre', 'vehiculo__placa']
+    search_fields = [
+        'numero_cotizacion',
+        'cliente__nombre',
+        'cliente__identificacion',
+        'vehiculo__placa',
+        'vehiculo__marca',
+        'vehiculo__modelo',
+    ]
     ordering_fields = ['numero_cotizacion', 'created_at', 'total']
     ordering = ['-created_at']
+
+    # Filtros del panel "Búsqueda" del listado. Se aplican por query params
+    # (no django-filter) siguiendo el criterio de recepciones/inspecciones.
+    FILTROS_LISTADO = {
+        'estado': 'estado',
+    }
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return Cotizacion.objects.none()
-        return (
+        queryset = (
             Cotizacion.objects.filter(empresa_id=empresa_id)
             .select_related('cliente', 'vehiculo', 'sucursal', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
             .prefetch_related('servicios', 'repuestos')
         )
+        return self._filtrar_cotizaciones(queryset)
+
+    def _filtrar_cotizaciones(self, queryset):
+        """Aplica los filtros del panel de búsqueda del listado de cotizaciones."""
+        params = self.request.query_params
+
+        for parametro, campo in self.FILTROS_LISTADO.items():
+            valor = params.get(parametro)
+            if valor:
+                queryset = queryset.filter(**{campo: valor})
+
+        sucursal = params.get('sucursal')
+        if sucursal and sucursal.isdigit():
+            queryset = queryset.filter(sucursal_id=int(sucursal))
+
+        # Rango de fechas sobre la fecha de creación (comparación por día,
+        # ambos extremos incluidos) para que no dependa de la zona horaria.
+        fecha_desde = _parsear_fecha(params.get('fecha_desde'))
+        if fecha_desde:
+            queryset = queryset.filter(created_at__date__gte=fecha_desde)
+
+        fecha_hasta = _parsear_fecha(params.get('fecha_hasta'))
+        if fecha_hasta:
+            queryset = queryset.filter(created_at__date__lte=fecha_hasta)
+
+        return queryset
 
     def perform_create(self, serializer):
         inspeccion = serializer.validated_data.get('inspeccion_origen')

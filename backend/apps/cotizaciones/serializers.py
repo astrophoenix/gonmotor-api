@@ -91,6 +91,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'recepcion_origen',
             'inspeccion_origen',
             'orden_trabajo_origen',
+            'fecha_envio',
             'fecha_aceptacion',
             'aceptada_por',
             'metodo_aceptacion',
@@ -217,7 +218,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
                 validated_data['fecha_aceptacion'] = timezone.now()
                 if request and request.user.is_authenticated:
                     validated_data['aceptada_por'] = request.user
-            elif instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA:
+            elif nuevo == Cotizacion.EstadoCotizacion.ENVIADA:
+                validated_data['fecha_envio'] = timezone.now()
+            if instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA and nuevo != Cotizacion.EstadoCotizacion.ACEPTADA:
                 # Reapertura: se abandona el estado ACEPTADA (vuelve a ENVIADA).
                 # Se limpian los datos de la aceptación anterior para que el
                 # cliente deba aceptar nuevamente la cotización.
@@ -242,6 +245,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             rep['vehiculo_marca'] = vh.marca
             rep['vehiculo_modelo'] = vh.modelo
             rep['vehiculo_color'] = vh.color
+            rep['vehiculo_kilometraje'] = vh.kilometraje_actual
             rep['vehiculo_imagen'] = url_imagen_absoluta(
                 self.context.get('request'),
                 vh.imagen.url if vh.imagen else None,

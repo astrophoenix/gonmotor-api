@@ -59,15 +59,30 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['numero_orden', 'cliente__nombre', 'vehiculo__placa']
+    search_fields = [
+        'numero_orden',
+        'cliente__nombre',
+        'cliente__identificacion',
+        'vehiculo__placa',
+        'vehiculo__marca',
+        'vehiculo__modelo',
+    ]
     ordering_fields = ['numero_orden', 'created_at', 'total']
     ordering = ['-created_at']
+
+    # Filtros del panel "Búsqueda" del listado. Se aplican por query params
+    # (no django-filter) siguiendo el criterio de recepciones/inspecciones.
+    FILTROS_LISTADO = {
+        'estado': 'estado',
+        'prioridad': 'prioridad',
+        'tipo_trabajo': 'tipo_trabajo',
+    }
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
         if not empresa_id:
             return OrdenTrabajo.objects.none()
-        return (
+        queryset = (
             OrdenTrabajo.objects.filter(empresa_id=empresa_id)
             .select_related(
                 'cliente',
@@ -80,6 +95,32 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
             )
             .prefetch_related('servicios', 'repuestos', 'recepciones', 'fotos', 'recepciones__fotos', 'inspeccion__fotos')
         )
+        return self._filtrar_ordenes(queryset)
+
+    def _filtrar_ordenes(self, queryset):
+        """Aplica los filtros del panel de búsqueda del listado de órdenes."""
+        params = self.request.query_params
+
+        for parametro, campo in self.FILTROS_LISTADO.items():
+            valor = params.get(parametro)
+            if valor:
+                queryset = queryset.filter(**{campo: valor})
+
+        sucursal = params.get('sucursal')
+        if sucursal and sucursal.isdigit():
+            queryset = queryset.filter(sucursal_id=int(sucursal))
+
+        # Rango de fechas sobre la fecha de creación (comparación por día,
+        # ambos extremos incluidos) para que no dependa de la zona horaria.
+        fecha_desde = parsear_fecha(params.get('fecha_desde'))
+        if fecha_desde:
+            queryset = queryset.filter(created_at__date__gte=fecha_desde)
+
+        fecha_hasta = parsear_fecha(params.get('fecha_hasta'))
+        if fecha_hasta:
+            queryset = queryset.filter(created_at__date__lte=fecha_hasta)
+
+        return queryset
 
 
 def parsear_fecha(valor):
@@ -155,7 +196,8 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             return
         if not instance.vehiculo_id or not instance.kilometraje_ingreso:
             return
-        if instance.vehiculo.kilometraje_actual != instance.kilometraje_ingreso:
+        # El odómetro maestro solo sube; una lectura menor es un error de captura.
+        if instance.kilometraje_ingreso > (instance.vehiculo.kilometraje_actual or 0):
             instance.vehiculo.kilometraje_actual = instance.kilometraje_ingreso
             instance.vehiculo.save(update_fields=['kilometraje_actual', 'updated_at'])
 
