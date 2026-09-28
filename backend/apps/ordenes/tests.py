@@ -551,3 +551,42 @@ class OrdenTrabajoEstadosTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(serializer.validated_data['estado'], 'EN_PROCESO')
+
+    def test_api_crea_orden_independiente_sin_cotizacion(self):
+        """Una OT independiente (sin referencia de cotización) se crea por POST
+        sin enviar 'empresa': se resuelve del header X-Empresa-ID y el número
+        se genera desde el taller de la empresa."""
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.empresas.models import Taller
+        from .models import OrdenTrabajo
+
+        Taller.objects.create(
+            empresa=self.empresa, nombre='Taller OT', prefijo_ot='OT-'
+        )
+        usuario = get_user_model().objects.create_superuser(
+            username='crea-ot', email='crea-ot@test.local', password='x'
+        )
+        client = APIClient()
+        client.force_authenticate(usuario)
+
+        response = client.post(
+            '/api/ordenes/ordenes-trabajo/',
+            {
+                'cliente': self.cliente.id,
+                'vehiculo': self.vehiculo.id,
+                'estado': 'PENDIENTE',
+                'prioridad': 'MEDIA',
+                'tipo_trabajo': 'MANTENIMIENTO',
+            },
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa.id),
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        creada = OrdenTrabajo.objects.get(pk=response.data['id'])
+        self.assertEqual(creada.empresa_id, self.empresa.id)
+        self.assertTrue(creada.numero_orden)
+        self.assertEqual(creada.cotizacion_origen_id, None)
+        self.assertEqual(creada.estado, 'PENDIENTE')

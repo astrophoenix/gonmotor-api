@@ -768,7 +768,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'empresa', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
 
     TRANSICIONES_PERMITIDAS = {
         'PENDIENTE': {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
