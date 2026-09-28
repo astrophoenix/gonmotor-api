@@ -1,7 +1,6 @@
 from decimal import Decimal
-
-from django.conf import settings
 from django.db import models
+from django.conf import settings
 from django.utils import timezone
 
 from apps.core.models import BaseModel
@@ -16,16 +15,11 @@ class Cotizacion(BaseModel):
         VENCIDA = 'VENCIDA', 'Vencida'
         CONVERTIDA = 'CONVERTIDA', 'Convertida a Orden'
 
-    # Estados en los que la cotización sigue vigente: el presupuesto está en
-    # negociación o el cliente ya lo aceptó. Solo puede existir una cotización
-    # vigente por recepción y por inspección (ver constraints); el trabajo
-    # adicional se cotiza desde la orden de trabajo (`orden_trabajo_origen`).
     ESTADOS_VIGENTES = (
         EstadoCotizacion.BORRADOR,
         EstadoCotizacion.ENVIADA,
         EstadoCotizacion.ACEPTADA,
     )
-
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='cotizaciones')
     sucursal = models.ForeignKey(
@@ -44,8 +38,15 @@ class Cotizacion(BaseModel):
     estado = models.CharField(max_length=20, choices=EstadoCotizacion.choices, default=EstadoCotizacion.BORRADOR)
     validez_dias = models.PositiveIntegerField(default=15, verbose_name='Días de validez')
 
-    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    total_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    subtotal_servicios = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    subtotal_repuestos = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    descuento = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    subtotal_neto = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    subtotal_base_0 = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    subtotal_base_gravada = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Subtotal bruto acumulado")
+    total_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), verbose_name="Monto total del IVA")
     total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     observaciones = models.TextField(blank=True, null=True)
@@ -127,23 +128,40 @@ class Cotizacion(BaseModel):
         return f'{self.numero_cotizacion} - {self.cliente}'
 
     def recalcular_totales(self):
-        """Recomputa subtotal, IVA y total a partir de los ítems de la cotización."""
-        total_servicios = Decimal(sum(item.subtotal for item in self.servicios.all()))
-        total_repuestos = Decimal(sum(item.subtotal for item in self.repuestos.all()))
-        subtotal = total_servicios + total_repuestos
-        total_iva = Decimal('0.15') * subtotal
-        self.subtotal = subtotal
-        self.total_iva = total_iva
-        self.total = subtotal + total_iva
-        self.save(update_fields=['subtotal', 'total_iva', 'total', 'updated_at'])
+        servicios_activos = self.servicios.all()
+        repuestos_activos = self.repuestos.all()
+
+        self.subtotal_servicios = Decimal(sum(item.subtotal for item in servicios_activos))
+        self.subtotal_repuestos = Decimal(sum(item.subtotal for item in repuestos_activos))
+        
+        total_desc_serv = sum(item.descuento for item in servicios_activos)
+        total_desc_rep = sum(item.descuento for item in repuestos_activos)
+        self.descuento = Decimal(total_desc_serv + total_desc_rep)
+
+        self.subtotal_neto = self.subtotal_servicios + self.subtotal_repuestos
+        self.subtotal = self.subtotal_neto + self.descuento
+
+        base_0_serv = sum(item.subtotal for item in servicios_activos if item.iva_porcentaje == 0)
+        base_0_rep = sum(item.subtotal for item in repuestos_activos if item.iva_porcentaje == 0)
+        self.subtotal_base_0 = Decimal(base_0_serv + base_0_rep)
+
+        base_grav_serv = sum(item.subtotal for item in servicios_activos if item.iva_porcentaje > 0)
+        base_grav_rep = sum(item.subtotal for item in repuestos_activos if item.iva_porcentaje > 0)
+        self.subtotal_base_gravada = Decimal(base_grav_serv + base_grav_rep)
+
+        iva_serv = sum(item.monto_iva for item in servicios_activos)
+        iva_rep = sum(item.monto_iva for item in repuestos_activos)
+        self.total_iva = Decimal(iva_serv + iva_rep)
+
+        self.total = self.subtotal_neto + self.total_iva
+        
+        self.save(update_fields=[
+            'subtotal_servicios', 'subtotal_repuestos', 'descuento', 
+            'subtotal_neto', 'subtotal_base_0', 'subtotal_base_gravada', 
+            'subtotal', 'total_iva', 'total', 'updated_at'
+        ])
 
     def sincronizar_desde_inspeccion(self):
-        """Reemplaza los ítems de la cotización por los de la inspección de origen.
-
-        Borra los servicios y repuestos actuales de la cotización y los vuelve a
-        crear desde la inspección, de modo que la cotización sea un espejo fiel del
-        diagnóstico. Después recalcula los totales.
-        """
         inspeccion = self.inspeccion_origen
         if inspeccion is None:
             raise ValueError('La cotización no tiene una inspección de origen.')
@@ -156,36 +174,34 @@ class Cotizacion(BaseModel):
         self.repuestos.all().delete()
 
         for det in inspeccion.servicios_detectados.all():
-            DetalleServicioCotizacion.objects.create(
+            iva_defecto = getattr(det.servicio, 'iva_porcentaje_defecto', Decimal('0.1500')) if det.servicio_id else Decimal('0.1500')
+            DetalleServiceCotizacion_obj = DetalleServicioCotizacion(
                 cotizacion=self,
                 codigo=det.servicio.codigo if det.servicio_id else None,
                 descripcion=(det.descripcion or '').strip(),
                 horas_estimadas=det.horas_estimadas,
                 precio_unitario=Decimal(det.precio_referencial or '0.00'),
+                iva_porcentaje=iva_defecto,
                 es_opcional=det.es_sugerido,
             )
+            DetalleServiceCotizacion_obj.save()
 
         for det in inspeccion.repuestos_sugeridos.all():
-            DetalleRepuestoCotizacion.objects.create(
+            iva_defecto = getattr(det.repuesto, 'iva_porcentaje_defecto', Decimal('0.1500')) if det.repuesto_id else Decimal('0.1500')
+            DetalleRepuestoCotizacion_obj = DetalleRepuestoCotizacion(
                 cotizacion=self,
                 codigo_repuesto=det.repuesto.codigo if det.repuesto_id else None,
                 descripcion=(det.descripcion or '').strip(),
                 cantidad=int(Decimal(det.cantidad or 1)),
                 precio_unitario_referencial=Decimal(det.precio_referencial or '0.00'),
+                iva_porcentaje=iva_defecto,
                 es_opcional=det.es_sugerido,
             )
+            DetalleRepuestoCotizacion_obj.save()
 
         self.recalcular_totales()
 
     def _resolver_taller(self):
-        """Resuelve el taller que emite la OT derivada de esta cotización.
-
-        Fuente de verdad: `self.sucursal` (persistida al crear la cotización).
-        Solo si falta (registros legacy o creación programática sin taller) se
-        hereda del origen en orden recepción → inspección (o su recepción) →
-        orden de trabajo. Como último recurso, `resolver_taller` usa el primer
-        taller activo de la empresa.
-        """
         from apps.empresas.services import resolver_taller
 
         if self.sucursal_id:
@@ -208,14 +224,11 @@ class Cotizacion(BaseModel):
         return resolver_taller(self.empresa_id, sucursal)
 
     def _generar_numero_orden(self):
-        """Genera un numero_orden secuencial atómico configurable por taller."""
         from apps.empresas.services import generar_codigo_secuencial
-
         taller = self._resolver_taller()
         return generar_codigo_secuencial(taller, 'ot')
 
     def _crear_orden_trabajo(self, usuario=None):
-        """Crea y devuelve la OrdenTrabajo derivada de esta cotización."""
         from apps.ordenes.models import (
             DetalleRepuestoOrdenTrabajo,
             DetalleServicioOrdenTrabajo,
@@ -228,8 +241,6 @@ class Cotizacion(BaseModel):
             inspeccion = self.recepcion_origen.inspecciones.first()
         recepcion = self.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
 
-        # El tipo de trabajo es único para los tres documentos: manda el de la
-        # inspección (lo define el técnico) y si no existe, el de la recepción.
         tipo_trabajo = (
             inspeccion.tipo_inspeccion if inspeccion
             else recepcion.tipo_recepcion if recepcion
@@ -256,7 +267,7 @@ class Cotizacion(BaseModel):
             cotizacion_origen=self,
             numero_orden=numero_orden,
             tipo_trabajo=tipo_trabajo,
-            observaciones_internas=inspeccion.diagnostico_tecnico if inspeccion else None,
+            observaciones=inspeccion.diagnostico_tecnico if inspeccion else None,
         )
 
         if recepcion:
@@ -273,6 +284,8 @@ class Cotizacion(BaseModel):
                 descripcion=det.descripcion,
                 horas_aplicadas=det.horas_estimadas,
                 precio_unitario=det.precio_unitario,
+                descuento=det.descuento,
+                iva_porcentaje=det.iva_porcentaje
             )
 
         for det in self.repuestos.all():
@@ -282,32 +295,20 @@ class Cotizacion(BaseModel):
                 descripcion=det.descripcion,
                 cantidad=Decimal(det.cantidad or 1),
                 precio_unitario=det.precio_unitario_referencial,
+                descuento=det.descuento,
+                iva_porcentaje=det.iva_porcentaje
             )
 
         ot.calcular_totales()
-
         return ot
 
     def generar_orden(self, usuario=None, metodo_aceptacion=None):
-        """
-        Genera una OrdenTrabajo a partir de una cotización aceptada.
-
-        La cotización mantiene el estado ACEPTADA.
-        La relación orden_trabajo_origen_id determina si ya generó una OT.
-        """
-
         if self.estado != self.EstadoCotizacion.ACEPTADA:
-            raise ValueError(
-                "La cotización debe estar aceptada para generar una orden."
-            )
+            raise ValueError("La cotización debe estar aceptada para generar una orden.")
 
         if self.orden_trabajo_origen_id:
-            raise ValueError(
-                "Esta cotización ya generó una orden de trabajo."
-            )
+            raise ValueError("Esta cotización ya generó una orden de trabajo.")
 
-        # Una inspección genera como máximo una OT (su orden_trabajo es
-        # OneToOne) y la recepción tiene un único espacio para la OT asociada.
         if self.inspeccion_origen_id and self.inspeccion_origen.orden_trabajo_id:
             raise ValueError(
                 f"La inspección {self.inspeccion_origen.numero_inspeccion} ya se convirtió "
@@ -340,14 +341,10 @@ class Cotizacion(BaseModel):
 
         self.fecha_aceptacion = self.fecha_aceptacion or timezone.now()
         self.aceptada_por = self.aceptada_por or usuario
-        self.metodo_aceptacion = (
-            metodo_aceptacion
-            or self.metodo_aceptacion
-            or 'PRESENCIAL'
-        )
+        self.metodo_aceptacion = metodo_aceptacion or self.metodo_aceptacion or 'PRESENCIAL'
+        self.estado = self.EstadoCotizacion.CONVERTIDA
 
         self.save()
-
         return ot
 
 
@@ -359,11 +356,18 @@ class DetalleServicioCotizacion(BaseModel):
     descripcion = models.CharField(max_length=255, verbose_name='Servicio / Mano de obra')
     horas_estimadas = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('1.00'))
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
-    subtotal = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    descuento = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal('0.1500'))
+    monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, help_text="Representa el NETO de la línea")
     es_opcional = models.BooleanField(default=False, help_text='Para sugerencias adicionales al cliente')
 
     def save(self, *args, **kwargs):
-        self.subtotal = Decimal(self.horas_estimadas) * Decimal(self.precio_unitario)
+        bruto_linea = Decimal(self.horas_estimadas) * Decimal(self.precio_unitario)
+        self.subtotal = max(Decimal('0.00'), bruto_linea - Decimal(self.descuento))
+        self.monto_iva = (self.subtotal * self.iva_porcentaje).quantize(Decimal('0.01'))
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -378,11 +382,18 @@ class DetalleRepuestoCotizacion(BaseModel):
     descripcion = models.CharField(max_length=255)
     cantidad = models.PositiveIntegerField(default=1)
     precio_unitario_referencial = models.DecimalField(max_digits=10, decimal_places=2)
-    subtotal = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    descuento = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal('0.1500'))
+    monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, help_text="Representa el NETO de la línea")
     es_opcional = models.BooleanField(default=False, help_text='Para sugerencias adicionales al cliente')
 
     def save(self, *args, **kwargs):
-        self.subtotal = Decimal(self.cantidad) * Decimal(self.precio_unitario_referencial)
+        bruto_linea = Decimal(self.cantidad) * Decimal(self.precio_unitario_referencial)
+        self.subtotal = max(Decimal('0.00'), bruto_linea - Decimal(self.descuento))
+        self.monto_iva = (self.subtotal * self.iva_porcentaje).quantize(Decimal('0.01'))
         super().save(*args, **kwargs)
 
     def __str__(self):

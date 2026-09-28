@@ -57,15 +57,39 @@ def url_imagen_absoluta(request, url):
 class DetalleServicioCotizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetalleServicioCotizacion
-        fields = '__all__'
-        read_only_fields = ['id', 'subtotal']
+        fields = [
+            'id',
+            'cotizacion',
+            'codigo',
+            'descripcion',
+            'horas_estimadas',
+            'precio_unitario',
+            'descuento',
+            'iva_porcentaje',
+            'monto_iva',
+            'subtotal',
+            'es_opcional',
+        ]
+        read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
 class DetalleRepuestoCotizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetalleRepuestoCotizacion
-        fields = '__all__'
-        read_only_fields = ['id', 'subtotal']
+        fields = [
+            'id',
+            'cotizacion',
+            'codigo_repuesto',
+            'descripcion',
+            'cantidad',
+            'precio_unitario_referencial',
+            'descuento',
+            'iva_porcentaje',
+            'monto_iva',
+            'subtotal',
+            'es_opcional',
+        ]
+        read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
 class CotizacionSerializer(serializers.ModelSerializer):
@@ -84,6 +108,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'numero_cotizacion',
             'estado',
             'validez_dias',
+            'subtotal_servicios',
+            'subtotal_repuestos',
+            'subtotal_base_0',
+            'subtotal_base_gravada',
+            'descuento',
+            'subtotal_neto',
             'subtotal',
             'total_iva',
             'total',
@@ -101,7 +131,22 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'empresa', 'numero_cotizacion', 'subtotal', 'total_iva', 'total', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id',
+            'empresa',
+            'numero_cotizacion',
+            'subtotal_servicios',
+            'subtotal_repuestos',
+            'subtotal_base_0',
+            'subtotal_base_gravada',
+            'descuento',
+            'subtotal_neto',
+            'subtotal',
+            'total_iva',
+            'total',
+            'created_at',
+            'updated_at',
+        ]
 
     def validate_observaciones(self, value):
         # Barrera de almacenamiento: nada de HTML/markup llega a la BD.

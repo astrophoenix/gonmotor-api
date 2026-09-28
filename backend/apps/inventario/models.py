@@ -81,7 +81,12 @@ class Repuesto(BaseModel):
         default=Decimal('0.00'),
         verbose_name='Precio de venta sugerido (sin IVA)',
     )
-    aplica_iva = models.BooleanField(default=True, verbose_name='Sujeto a IVA')
+    iva_porcentaje_defecto = models.DecimalField(
+        max_digits=5, 
+        decimal_places=4, 
+        default=Decimal('0.1500'), # Configurable según el país default de la empresa
+        verbose_name="Porcentaje de IVA por defecto"
+    )
     stock_actual = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -201,6 +206,12 @@ class Servicio(BaseModel):
         decimal_places=2,
         default=Decimal('0.00'),
         verbose_name='Precio referencial de mano de obra',
+    )
+    iva_porcentaje_defecto = models.DecimalField(
+        max_digits=5, 
+        decimal_places=4, 
+        default=Decimal('0.1500'), 
+        verbose_name="Porcentaje de IVA por defecto"
     )
     contifico_producto_id = models.CharField(
         max_length=100,

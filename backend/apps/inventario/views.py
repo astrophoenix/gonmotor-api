@@ -70,6 +70,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             'marca': item.marca,
             'precio_venta': str(item.precio_venta),
             'stock_actual': str(item.stock_actual),
+            'iva_porcentaje_defecto': str(item.iva_porcentaje_defecto),
         } for item in items]
         return Response({'results': data})
 
@@ -121,6 +122,7 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             'nombre': item.nombre,
             'tiempo_estimado_minutos': item.tiempo_estimado_minutos,
             'precio_referencial': str(item.precio_referencial),
+            'iva_porcentaje_defecto': str(item.iva_porcentaje_defecto),
         } for item in items]
         return Response({'results': data})
 

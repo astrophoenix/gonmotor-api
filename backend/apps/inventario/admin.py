@@ -6,7 +6,7 @@ from .models import Repuesto, Servicio
 @admin.register(Repuesto)
 class RepuestoAdmin(admin.ModelAdmin):
     list_display = ('codigo', 'nombre', 'categoria', 'marca', 'stock_actual', 'stock_minimo', 'precio_venta', 'is_active')
-    list_filter = ('categoria', 'aplica_iva', 'is_active', 'empresa')
+    list_filter = ('categoria', 'iva_porcentaje_defecto', 'is_active', 'empresa')
     search_fields = ('codigo', 'nombre', 'marca', 'numero_parte', 'proveedor')
     list_editable = ('stock_actual',)
     readonly_fields = ('created_at', 'updated_at')

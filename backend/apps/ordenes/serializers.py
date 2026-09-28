@@ -33,15 +33,39 @@ def url_imagen_absoluta(request, url):
 class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetalleServicioOrdenTrabajo
-        fields = '__all__'
-        read_only_fields = ['id', 'subtotal']
+        fields = [
+            'id',
+            'orden_trabajo',
+            'descripcion',
+            'mecanico_asignado',
+            'horas_aplicadas',
+            'precio_unitario',
+            'descuento',
+            'iva_porcentaje',
+            'monto_iva',
+            'subtotal',
+            'completado',
+        ]
+        read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
 class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetalleRepuestoOrdenTrabajo
-        fields = '__all__'
-        read_only_fields = ['id', 'subtotal']
+        fields = [
+            'id',
+            'orden_trabajo',
+            'contifico_producto_id',
+            'codigo_repuesto',
+            'descripcion',
+            'precio_unitario',
+            'cantidad',
+            'descuento',
+            'iva_porcentaje',
+            'monto_iva',
+            'subtotal',
+        ]
+        read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
 class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
@@ -750,11 +774,13 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'motivo_espera',
             'prioridad',
             'tipo_trabajo',
-            'observaciones_internas',
+            'observaciones',
             'fecha_ingreso',
             'fecha_entrega',
             'subtotal_servicios',
             'subtotal_repuestos',
+            'subtotal_base_0',
+            'subtotal_base_gravada',
             'descuento',
             'subtotal_neto',
             'monto_iva',
@@ -768,7 +794,21 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'empresa', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id',
+            'empresa',
+            'numero_orden',
+            'subtotal_servicios',
+            'subtotal_repuestos',
+            'subtotal_base_0',
+            'subtotal_base_gravada',
+            'descuento',
+            'subtotal_neto',
+            'monto_iva',
+            'total',
+            'created_at',
+            'updated_at',
+        ]
 
     TRANSICIONES_PERMITIDAS = {
         'PENDIENTE': {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
