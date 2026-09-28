@@ -747,6 +747,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'cotizacion_origen',
             'numero_orden',
             'estado',
+            'motivo_espera',
             'prioridad',
             'tipo_trabajo',
             'observaciones_internas',
@@ -768,6 +769,38 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'numero_orden', 'subtotal_servicios', 'subtotal_repuestos', 'subtotal_neto', 'monto_iva', 'total', 'created_at', 'updated_at']
+
+    TRANSICIONES_PERMITIDAS = {
+        'PENDIENTE': {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
+        'EN_ESPERA': {'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
+        'EN_PROCESO': {'EN_PROCESO', 'EN_ESPERA', 'COMPLETADO', 'CANCELADO'},
+        'COMPLETADO': {'COMPLETADO', 'ENTREGADO', 'EN_PROCESO'},
+        'ENTREGADO': {'ENTREGADO'},
+        'CANCELADO': {'CANCELADO'},
+    }
+
+    def validate(self, attrs):
+        estado = attrs.get('estado')
+        if self.instance and estado and estado != self.instance.estado:
+            permitidas = self.TRANSICIONES_PERMITIDAS.get(self.instance.estado, set())
+            if estado not in permitidas:
+                raise serializers.ValidationError(
+                    {'estado': 'No se permite la transición de estado solicitada.'}
+                )
+        if estado == 'EN_ESPERA':
+            motivo = attrs.get('motivo_espera')
+            if self.instance and not motivo:
+                motivo = self.instance.motivo_espera
+            if not (motivo or '').strip():
+                raise serializers.ValidationError(
+                    {'motivo_espera': 'Debes indicar el motivo de la espera (repuestos, aprobación del cliente, etc.).'}
+                )
+        return attrs
+
+    def update(self, instance, validated_data):
+        if validated_data.get('estado') == 'ENTREGADO' and 'fecha_entrega' not in validated_data:
+            validated_data['fecha_entrega'] = timezone.now()
+        return super().update(instance, validated_data)
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)

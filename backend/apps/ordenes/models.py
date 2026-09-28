@@ -33,11 +33,12 @@ class OrdenTrabajo(BaseModel):
     TipoTrabajo = TipoTrabajo
 
     class EstadoOrden(models.TextChoices):
-        INGRESADO = 'INGRESADO', 'En Recepción / Diagnóstico'
-        EN_PROCESO = 'EN_PROCESO', 'En Trabajo / Ejecución'
-        COMPLETADO = 'COMPLETADO', 'Trabajo Listo'
-        ENTREGADO = 'ENTREGADO', 'Entregado y Cerrado'
-        CANCELADO = 'CANCELADO', 'Anulado / Cancelado'
+        PENDIENTE = 'PENDIENTE', 'Pendiente'
+        EN_ESPERA = 'EN_ESPERA', 'En espera'
+        EN_PROCESO = 'EN_PROCESO', 'En proceso'
+        COMPLETADO = 'COMPLETADO', 'Completado'
+        ENTREGADO = 'ENTREGADO', 'Entregado'
+        CANCELADO = 'CANCELADO', 'Anulado'
 
     class Prioridad(models.TextChoices):
         BAJA = 'BAJA', 'Baja'
@@ -83,7 +84,14 @@ class OrdenTrabajo(BaseModel):
     )
 
     numero_orden = models.CharField(max_length=20, verbose_name='Número de OT')
-    estado = models.CharField(max_length=20, choices=EstadoOrden.choices, default=EstadoOrden.INGRESADO)
+    estado = models.CharField(max_length=20, choices=EstadoOrden.choices, default=EstadoOrden.PENDIENTE)
+    motivo_espera = models.CharField(
+        max_length=80,
+        blank=True,
+        null=True,
+        verbose_name='Motivo de espera',
+        help_text='Razón de la espera cuando la orden está pausada (repuestos, aprobación del cliente, trabajo adicional, etc.)',
+    )
     prioridad = models.CharField(max_length=10, choices=Prioridad.choices, default=Prioridad.MEDIA)
     tipo_trabajo = models.CharField(max_length=20, choices=TipoTrabajo.choices, default=TipoTrabajo.MANTENIMIENTO)
 
