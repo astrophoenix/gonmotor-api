@@ -34,6 +34,9 @@ urlpatterns = [
     # 3. Endpoints del Módulo de Clientes
     path('api/clientes/', include('apps.clientes.urls')),
 
+    # 3.0.1 Endpoints del Módulo de Proveedores
+    path('api/proveedores/', include('apps.proveedores.urls')),
+
     # 3.1 Endpoints del Módulo de Empresas
     path('api/empresas/', include('apps.empresas.urls')),
 

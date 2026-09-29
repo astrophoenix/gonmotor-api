@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'apps.inventario',
     'apps.configuracion',
     'apps.notificaciones',
+    'apps.proveedores',
 ]
 
 LOCALE_PATHS = [
