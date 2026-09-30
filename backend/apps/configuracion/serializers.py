@@ -41,6 +41,10 @@ class TallerConfigSerializer(serializers.ModelSerializer):
             'direccion',
             'telefono',
             'is_active',
+            'capacidad_citas_dia',
+            'capacidad_simultanea',
+            'hora_apertura',
+            'hora_cierre',
             'prefijo_recepcion',
             'siguiente_recepcion',
             'digitos_recepcion',
@@ -94,6 +98,22 @@ class TallerConfigSerializer(serializers.ModelSerializer):
 
     def validate_telefono(self, value):
         return (value or '').replace(' ', '').strip()[:20]
+
+    def validate_capacidad_citas_dia(self, value):
+        return self._validar_entero(value, 0, None, 'La capacidad de citas por día')
+
+    def validate_capacidad_simultanea(self, value):
+        return self._validar_entero(value, 0, None, 'La capacidad de atenciones simultáneas')
+
+    def validate_hora_apertura(self, value):
+        if value is None:
+            raise serializers.ValidationError('La hora de apertura es obligatoria.')
+        return value
+
+    def validate_hora_cierre(self, value):
+        if value is None:
+            raise serializers.ValidationError('La hora de cierre es obligatoria.')
+        return value
 
     def _validar_prefijo(self, prefijo):
         prefijo = (prefijo or '').strip()
@@ -149,6 +169,17 @@ class TallerConfigSerializer(serializers.ModelSerializer):
         return self._validar_entero(value, 2, 10, 'Los dígitos de OT')
 
     def validate(self, attrs):
+        apertura = attrs.get(
+            'hora_apertura', self.instance.hora_apertura if self.instance else None
+        )
+        cierre = attrs.get(
+            'hora_cierre', self.instance.hora_cierre if self.instance else None
+        )
+        if apertura is not None and cierre is not None and cierre <= apertura:
+            raise serializers.ValidationError({
+                'hora_cierre': 'La hora de cierre debe ser posterior a la hora de apertura.'
+            })
+
         empresa_id = attrs.get('empresa_id')
         codigo = attrs.get('codigo_sucursal')
         activo = attrs.get('is_active', self.instance.is_active if self.instance else True)

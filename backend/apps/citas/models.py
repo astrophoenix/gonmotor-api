@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.dateparse import parse_time
@@ -72,6 +75,12 @@ class Cita(BaseModel):
     # --- DATOS DE LA CITA ---
     fecha_cita = models.DateField(verbose_name='Fecha de la cita')
     hora_cita = models.TimeField(verbose_name='Hora de la cita')
+    duracion_minutos = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(15), MaxValueValidator(24 * 60)],
+        verbose_name='Duración (minutos)',
+        help_text='Duración estimada de la cita; define el espacio que ocupa en la agenda.',
+    )
     fecha_hora_programada = models.DateTimeField(
         null=True,
         blank=True,
@@ -131,11 +140,26 @@ class Cita(BaseModel):
         verbose_name = 'Cita'
         verbose_name_plural = 'Citas'
         ordering = ['-fecha_cita', '-hora_cita']
+        indexes = [
+            models.Index(fields=['empresa', 'fecha_cita'], name='cita_empresa_fecha_idx'),
+            models.Index(fields=['taller', 'fecha_cita'], name='cita_taller_fecha_idx'),
+        ]
 
     def __str__(self):
         vehiculo = getattr(self, 'vehiculo', None)
         placa = vehiculo.placa if vehiculo else '?'
         return f'Cita {self.fecha_cita} {self.hora_cita} - {placa} ({self.get_estado_display()})'
+
+    @property
+    def hora_fin(self):
+        """Hora de término de la cita (inicio + duración), sin desbordar el día."""
+        if not self.hora_cita:
+            return self.hora_cita
+        duracion = self.duracion_minutos or 0
+        base = timezone.datetime.combine(timezone.datetime.today(), self.hora_cita)
+        fin = base + timedelta(minutes=duracion)
+        limite = base.replace(hour=23, minute=59, second=59, microsecond=0)
+        return min(fin, limite).time()
 
     def save(self, *args, **kwargs):
         if self.fecha_cita and self.hora_cita:

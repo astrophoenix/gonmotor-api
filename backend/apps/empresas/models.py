@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from apps.core.models import BaseModel
@@ -122,6 +124,33 @@ class Taller(BaseModel):
         default=5, validators=[MinValueValidator(2), MaxValueValidator(10)], verbose_name='Dígitos de OT'
     )
 
+    # --- CAPACIDAD DE CITAS / HORARIO DE ATENCIÓN ---
+    # Configurable por taller: cada sucursal decide cuántos vehículos puede
+    # recibir y en qué franja horaria agenda citas.
+    capacidad_citas_dia = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Citas máximas por día',
+        help_text='Máximo de citas que el taller puede recibir en un día. 0 = sin límite.',
+    )
+    capacidad_simultanea = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Atenciones simultáneas máximas',
+        help_text=(
+            'Máximo de vehículos que pueden estar atendiéndose al mismo tiempo '
+            '(citas en curso y vehículos ya ingresados al taller). 0 = sin límite.'
+        ),
+    )
+    hora_apertura = models.TimeField(
+        default=time(8, 0),
+        verbose_name='Hora de apertura',
+        help_text='Inicio del horario en el que se pueden agendar citas.',
+    )
+    hora_cierre = models.TimeField(
+        default=time(17, 0),
+        verbose_name='Hora de cierre',
+        help_text='Fin del horario en el que se pueden agendar citas.',
+    )
+
     class Meta:
         verbose_name = "Taller"
         verbose_name_plural = "Talleres"
@@ -130,7 +159,11 @@ class Taller(BaseModel):
                 fields=['empresa', 'codigo_sucursal'],
                 condition=models.Q(is_active=True),
                 name='una_sucursal_activa_por_empresa_codigo'
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hora_cierre__gt=models.F('hora_apertura')),
+                name='taller_horario_atencion_valido',
+            ),
         ]
 
     def __str__(self):
