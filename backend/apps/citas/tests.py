@@ -6,7 +6,8 @@ atenciones simultáneas (incluyendo vehículos ya ingresados al taller), más el
 endpoint `GET /api/citas/disponibilidad/`.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
+from unittest import mock
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -509,3 +510,97 @@ class CompartirIcsTest(AgendaCitasBase):
         resp = self.client.get(LISTADO, HTTP_X_FORWARDED_PROTO='https')
         enlace = resp.json()['results'][0]['enlace_ics']
         self.assertTrue(enlace.startswith('https://'), enlace)
+
+
+class SoloFuturoTest(AgendaCitasBase):
+    """Solo se pueden crear o reprogramar citas en el futuro."""
+
+    def _ayer(self):
+        return (timezone.localdate() - timedelta(days=1)).isoformat()
+
+    def test_rechaza_crear_una_cita_en_el_pasado(self):
+        resp = self.crear(fecha_cita=self._ayer())
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('pasado', resp.json()['fecha_hora_programada'][0])
+
+    def test_rechaza_mover_una_cita_existente_al_pasado(self):
+        creada = self.crear().json()
+        resp = self.client.patch(
+            f'{LISTADO}{creada["id"]}/',
+            {'fecha_cita': self._ayer()},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('pasado', resp.json()['fecha_hora_programada'][0])
+
+    def test_permite_editar_una_cita_que_ya_paso(self):
+        pasada = Cita.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            taller=self.taller,
+            fecha_cita=timezone.localdate() - timedelta(days=2),
+            hora_cita='09:00',
+            duracion_minutos=60,
+            motivo='MANTENIMIENTO',
+        )
+
+        resp = self.client.patch(
+            f'{LISTADO}{pasada.pk}/',
+            {'estado': 'NO_ASISTIO', 'notas_internas': 'No se presentó.'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        pasada.refresh_from_db()
+        self.assertEqual(pasada.estado, 'NO_ASISTIO')
+
+    def test_no_valida_el_pasado_si_el_horario_no_cambia(self):
+        pasada = Cita.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            taller=self.taller,
+            fecha_cita=timezone.localdate() - timedelta(days=2),
+            hora_cita='09:00',
+            duracion_minutos=60,
+            motivo='MANTENIMIENTO',
+        )
+
+        resp = self.client.patch(
+            f'{LISTADO}{pasada.pk}/',
+            {'fecha_cita': pasada.fecha_cita.isoformat(), 'hora_cita': '09:00'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+
+class HoraLocalTest(AgendaCitasBase):
+    """`hora_cita` es hora local del taller (America/Guayaquil), no UTC.
+
+    Regresión: con TIME_ZONE='UTC' una cita para las 09:15 de hoy se comparaba
+    contra las 09:15 UTC (04:15 en Guayaquil) y se rechazaba como pasada
+    aunque a esa hora aún faltaran horas.
+    """
+
+    # 13:49 UTC = 08:49 en Guayaquil.
+    AHORA = datetime(2026, 9, 30, 13, 49, tzinfo=dt_timezone.utc)
+
+    def test_acepta_una_cita_futura_en_hora_local(self):
+        with mock.patch('django.utils.timezone.now', return_value=self.AHORA):
+            resp = self.crear(
+                fecha_cita='2026-09-30',
+                hora_cita='09:15',
+                duracion_minutos=15,
+            )
+
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()['hora_fin'], '09:30')
+        self.assertEqual(resp.json()['fecha_cita'], '2026-09-30')
+        self.assertEqual(resp.json()['hora_cita'][:5], '09:15')
+
+    def test_rechaza_una_cita_ya_transcurrida_en_hora_local(self):
+        with mock.patch('django.utils.timezone.now', return_value=self.AHORA):
+            resp = self.crear(fecha_cita='2026-09-30', hora_cita='08:00')
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('pasado', resp.json()['fecha_hora_programada'][0])

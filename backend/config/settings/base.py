@@ -150,7 +150,13 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'es-ec'
 
-TIME_ZONE = 'UTC'
+# Zona horaria del negocio (Ecuador, UTC-5).
+#
+# `hora_cita` es hora de pared local, así que el backend debe interpretarla en
+# la zona del taller y no en UTC: con TIME_ZONE='UTC' una cita para las 09:15
+# en Guayaquil se comparaba contra las 09:15 UTC (04:15 hora local) y se
+# rechazaba como "pasada" aunque faltaran horas para que ocurriera.
+TIME_ZONE = config('TIME_ZONE', default='America/Guayaquil')
 
 USE_I18N = True
 

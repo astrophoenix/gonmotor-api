@@ -120,11 +120,19 @@ class CitaSerializer(serializers.ModelSerializer):
         if fecha and hora:
             from django.utils import timezone
 
+            # Solo se prohíbe el pasado cuando el horario cambia: una cita ya
+            # agendada debe poder editarse (estado, notas, recepción) aunque su
+            # hora ya haya transcurrido.
+            horario_modificado = (
+                self.instance is None
+                or fecha != self.instance.fecha_cita
+                or hora != self.instance.hora_cita
+            )
             programada = timezone.make_aware(
                 timezone.datetime.combine(fecha, hora),
                 timezone.get_current_timezone(),
             )
-            if programada < timezone.now():
+            if horario_modificado and programada < timezone.now():
                 raise serializers.ValidationError(
                     {'fecha_hora_programada': 'La fecha y hora de la cita no puede estar en el pasado.'}
                 )
