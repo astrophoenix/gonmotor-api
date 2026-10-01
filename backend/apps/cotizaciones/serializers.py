@@ -18,13 +18,13 @@ def _texto_plano(value):
     return '\n'.join(lineas).strip()
 
 ESTADOS_EDITABLES = {
-    Cotizacion.EstadoCotizacion.BORRADOR,
+    Cotizacion.EstadoCotizacion.PENDIENTE,
     Cotizacion.EstadoCotizacion.ENVIADA,
 }
 
 # Transiciones de estado permitidas para el flujo del taller.
 TRANSICIONES_VALIDAS = {
-    Cotizacion.EstadoCotizacion.BORRADOR: {Cotizacion.EstadoCotizacion.ENVIADA},
+    Cotizacion.EstadoCotizacion.PENDIENTE: {Cotizacion.EstadoCotizacion.ENVIADA},
     Cotizacion.EstadoCotizacion.ENVIADA: {
         Cotizacion.EstadoCotizacion.ACEPTADA,
         Cotizacion.EstadoCotizacion.RECHAZADA,
@@ -105,6 +105,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'sucursal',
             'cliente',
             'vehiculo',
+            'asesor',
             'numero_cotizacion',
             'estado',
             'validez_dias',
@@ -201,7 +202,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
                     )
 
         if 'estado' in attrs:
-            actual = instance.estado if instance else Cotizacion.EstadoCotizacion.BORRADOR
+            actual = instance.estado if instance else Cotizacion.EstadoCotizacion.PENDIENTE
             nuevo = attrs['estado']
             if not transicion_estado_valida(actual, nuevo):
                 raise serializers.ValidationError(
@@ -295,6 +296,13 @@ class CotizacionSerializer(serializers.ModelSerializer):
                 self.context.get('request'),
                 vh.imagen.url if vh.imagen else None,
             )
+        if instance.asesor_id:
+            asesor = instance.asesor
+            profile = getattr(asesor, 'profile', None)
+            rep['asesor_nombre'] = asesor.get_full_name() or asesor.username
+            rep['asesor_identificacion'] = getattr(profile, 'identificacion', '') if profile else ''
+            rep['asesor_telefono'] = getattr(profile, 'telefono', '') if profile else ''
+            rep['asesor_email'] = asesor.email
         rep['recepcion_numero'] = (
             instance.recepcion_origen.numero_recepcion if instance.recepcion_origen_id else None
         )

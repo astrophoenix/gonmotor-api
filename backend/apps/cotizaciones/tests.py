@@ -5,6 +5,7 @@ from django.db import IntegrityError
 from django.test import SimpleTestCase
 
 from rest_framework import serializers
+from rest_framework.test import APIClient, APITestCase
 
 from .models import Cotizacion
 from .serializers import transicion_estado_valida
@@ -14,7 +15,7 @@ from .views import _traducir_integridad, _validar_origen_cotizacion, _validar_or
 class TransicionEstadoTests(SimpleTestCase):
     def test_transiciones_validas_del_flujo(self):
         casos = [
-            (Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ENVIADA, True),
+            (Cotizacion.EstadoCotizacion.PENDIENTE, Cotizacion.EstadoCotizacion.ENVIADA, True),
             (Cotizacion.EstadoCotizacion.ENVIADA, Cotizacion.EstadoCotizacion.ACEPTADA, True),
             (Cotizacion.EstadoCotizacion.ENVIADA, Cotizacion.EstadoCotizacion.RECHAZADA, True),
             (Cotizacion.EstadoCotizacion.ACEPTADA, Cotizacion.EstadoCotizacion.ENVIADA, True),
@@ -31,9 +32,9 @@ class TransicionEstadoTests(SimpleTestCase):
             if estado.value != Cotizacion.EstadoCotizacion.ACEPTADA:
                 self.assertTrue(transicion_estado_valida(estado, estado))
 
-    def test_no_hay_salto_de_borrador_a_aceptada(self):
+    def test_no_hay_salto_de_pendiente_a_aceptada(self):
         self.assertFalse(
-            transicion_estado_valida(Cotizacion.EstadoCotizacion.BORRADOR, Cotizacion.EstadoCotizacion.ACEPTADA)
+            transicion_estado_valida(Cotizacion.EstadoCotizacion.PENDIENTE, Cotizacion.EstadoCotizacion.ACEPTADA)
         )
 
 
@@ -231,3 +232,86 @@ class GenerarOrdenTests(SimpleTestCase):
         cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.ACEPTADA)
         cotizacion.generar_orden()
         cotizacion._crear_orden_trabajo.assert_called_once()
+
+
+class CotizacionAsesorApiTests(APITestCase):
+    """El asesor de la cotización se persiste desde el API y se expone en la
+    representación (campo asesor + asesor_nombre/identificacion/telefono/email)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser(username='admin-cot', password='x')
+        self.asesor = User.objects.create_user(
+            username='ana',
+            password='x',
+            first_name='Ana',
+            last_name='Paredes',
+            email='ana@gonmotor.test',
+        )
+        self.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Asesor', razon_social='ASESOR SA', ruc='444444444444'
+        )
+        self.taller = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Central', direccion='Av. Central 200', prefijo_cotizacion='COT-'
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Carlos Ruiz', identificacion='0987654321'
+        )
+        self.vehiculo = Vehiculo.objects.create(placa='ASE-0001', marca='Kia', modelo='Rio')
+        self.vehiculo.empresas.add(self.empresa)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+
+    def test_crear_con_asesor(self):
+        resp = self.client.post(
+            '/api/cotizaciones/',
+            {
+                'cliente': self.cliente.id,
+                'vehiculo': self.vehiculo.id,
+                'asesor': self.asesor.id,
+                'validez_dias': 15,
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        data = resp.json()
+        self.assertEqual(data['asesor'], self.asesor.id)
+        self.assertEqual(data['asesor_nombre'], 'Ana Paredes')
+        self.assertEqual(data['asesor_email'], 'ana@gonmotor.test')
+
+    def test_crear_sin_asesor_y_luego_asignarlo(self):
+        resp = self.client.post(
+            '/api/cotizaciones/',
+            {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id, 'validez_dias': 15},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertIsNone(resp.json()['asesor'])
+        self.assertNotIn('asesor_nombre', resp.json())
+
+        patch = self.client.patch(
+            f"/api/cotizaciones/{resp.json()['id']}/", {'asesor': self.asesor.id}, format='json'
+        )
+        self.assertEqual(patch.status_code, 200, patch.content)
+        self.assertEqual(patch.json()['asesor'], self.asesor.id)
+        self.assertEqual(patch.json()['asesor_nombre'], 'Ana Paredes')
+
+    def test_quitar_asesor(self):
+        cot = Cotizacion.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            asesor=self.asesor,
+        )
+        resp = self.client.patch(f'/api/cotizaciones/{cot.id}/', {'asesor': None}, format='json')
+        self.assertEqual(resp.status_code, 200, resp.content)
+        cot.refresh_from_db()
+        self.assertIsNone(cot.asesor_id)

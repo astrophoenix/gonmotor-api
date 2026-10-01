@@ -8,7 +8,7 @@ from apps.core.models import BaseModel
 
 class Cotizacion(BaseModel):
     class EstadoCotizacion(models.TextChoices):
-        BORRADOR = 'BORRADOR', 'Borrador'
+        PENDIENTE = 'PENDIENTE', 'Pendiente'
         ENVIADA = 'ENVIADA', 'Enviada al Cliente'
         ACEPTADA = 'ACEPTADA', 'Aceptada'
         RECHAZADA = 'RECHAZADA', 'Rechazada'
@@ -16,7 +16,7 @@ class Cotizacion(BaseModel):
         CONVERTIDA = 'CONVERTIDA', 'Convertida a Orden'
 
     ESTADOS_VIGENTES = (
-        EstadoCotizacion.BORRADOR,
+        EstadoCotizacion.PENDIENTE,
         EstadoCotizacion.ENVIADA,
         EstadoCotizacion.ACEPTADA,
     )
@@ -33,9 +33,17 @@ class Cotizacion(BaseModel):
     )
     cliente = models.ForeignKey('clientes.Cliente', on_delete=models.CASCADE, related_name='cotizaciones')
     vehiculo = models.ForeignKey('vehiculos.Vehiculo', on_delete=models.SET_NULL, null=True, blank=True)
+    asesor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cotizaciones_asesoradas',
+        help_text='Asesor o recepcionista a cargo de la atención de la cotización'
+    )
 
     numero_cotizacion = models.CharField(max_length=20, verbose_name='Número de Cotización')
-    estado = models.CharField(max_length=20, choices=EstadoCotizacion.choices, default=EstadoCotizacion.BORRADOR)
+    estado = models.CharField(max_length=20, choices=EstadoCotizacion.choices, default=EstadoCotizacion.PENDIENTE)
     validez_dias = models.PositiveIntegerField(default=15, verbose_name='Días de validez')
 
     subtotal_servicios = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -114,12 +122,12 @@ class Cotizacion(BaseModel):
             # (sin origen previo) y Postgres no las considera duplicadas.
             models.UniqueConstraint(
                 fields=['inspeccion_origen'],
-                condition=models.Q(estado__in=['BORRADOR', 'ENVIADA', 'ACEPTADA']),
+                condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
                 name='cotizacion_inspeccion_vigente_unica'
             ),
             models.UniqueConstraint(
                 fields=['recepcion_origen'],
-                condition=models.Q(estado__in=['BORRADOR', 'ENVIADA', 'ACEPTADA']),
+                condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
                 name='cotizacion_recepcion_vigente_unica'
             ),
         ]
