@@ -13,6 +13,30 @@ from .models import UserProfile
 from .models import UsuarioEmpresa
 
 
+def _taller_sesion_nombre(user, empresa):
+    """Nombre del taller de la sesión actual.
+
+    Usa el taller activo del perfil (`taller_activo`) si pertenece a la empresa
+    activa; si no, resuelve el mismo taller por defecto que asigna el backend al
+    crear documentos (primer taller activo de la empresa).
+    """
+    profile = getattr(user, 'profile', None)
+    taller = getattr(profile, 'taller_activo', None) if profile else None
+
+    empresa_id = getattr(empresa, 'id', empresa)
+    try:
+        empresa_id = int(empresa_id) if empresa_id is not None else None
+    except (TypeError, ValueError):
+        empresa_id = None
+
+    if taller is not None and empresa_id and taller.empresa_id != empresa_id:
+        taller = None
+    if taller is None and empresa_id:
+        from apps.empresas.services import resolver_taller
+        taller = resolver_taller(empresa_id)
+    return getattr(taller, 'nombre', '') or ''
+
+
 def _user_payload(user, empresa, rol, request=None):
     """Payload de usuario incluyendo datos del perfil (teléfono y avatar absoluto)."""
     profile = getattr(user, 'profile', None)
@@ -31,6 +55,7 @@ def _user_payload(user, empresa, rol, request=None):
         "rol": rol,
         "empresa_id": empresa.id,
         "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
+        "taller_nombre": _taller_sesion_nombre(user, empresa),
         "telefono": telefono,
         "avatar": avatar_url,
     }

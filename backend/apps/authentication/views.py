@@ -11,7 +11,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.renderers import JSONRenderer
 from reportlab.platypus import Paragraph
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
-from .serializers import _user_payload
+from .serializers import _user_payload, _taller_sesion_nombre
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -154,6 +154,7 @@ class UserProfileView(APIView):
             'avatar': avatar,
             'is_staff': user.is_staff,
             'empresa_id': empresa_id,
+            'taller_nombre': _taller_sesion_nombre(user, empresa_id),
         }, status=status.HTTP_200_OK)
 
     def patch(self, request):
@@ -180,6 +181,7 @@ class UserProfileView(APIView):
             'telefono': telefono,
             'avatar': avatar,
             'is_staff': user.is_staff,
+            'taller_nombre': _taller_sesion_nombre(user, get_empresa_id_desde_request(request)),
         }
 
         return Response({
