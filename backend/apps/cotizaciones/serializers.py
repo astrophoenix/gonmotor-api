@@ -201,6 +201,35 @@ class CotizacionSerializer(serializers.ModelSerializer):
                         {campo: 'No se puede modificar el origen de una cotización existente.'}
                     )
 
+        # Regla del taller: una sola cotización vigente por vehículo. Se valida
+        # al crear y cuando se cambia el vehículo de una cotización editable.
+        if instance is None:
+            vehiculo_a_validar = attrs.get('vehiculo')
+        elif 'vehiculo' in attrs:
+            vehiculo_a_validar = attrs['vehiculo']
+        else:
+            vehiculo_a_validar = None
+        if vehiculo_a_validar is not None:
+            consulta = Cotizacion.objects.filter(
+                vehiculo=vehiculo_a_validar,
+                estado__in=Cotizacion.ESTADOS_VIGENTES,
+            )
+            if empresa_id:
+                consulta = consulta.filter(empresa_id=empresa_id)
+            if instance is not None:
+                consulta = consulta.exclude(pk=instance.pk)
+            otra_vigente = consulta.order_by('-created_at').first()
+            if otra_vigente is not None:
+                raise serializers.ValidationError(
+                    {
+                        'vehiculo': (
+                            f'Este vehículo ya tiene la cotización {otra_vigente.numero_cotizacion} '
+                            f'vigente ("{otra_vigente.get_estado_display()}"). Edítala o cierra esa '
+                            'cotización antes de crear otra.'
+                        )
+                    }
+                )
+
         if 'estado' in attrs:
             actual = instance.estado if instance else Cotizacion.EstadoCotizacion.PENDIENTE
             nuevo = attrs['estado']

@@ -7,9 +7,101 @@ from django.test import SimpleTestCase
 from rest_framework import serializers
 from rest_framework.test import APIClient, APITestCase
 
+from apps.vehiculos.models import Vehiculo
+
 from .models import Cotizacion
+from .pdf import _consolidar
 from .serializers import transicion_estado_valida
 from .views import _traducir_integridad, _validar_origen_cotizacion, _validar_origen_inspeccion
+
+
+class ConsolidarConceptosTests(SimpleTestCase):
+    """El PDF agrupa ítems idénticos y suma sus cantidades (ahorra alto de página)."""
+
+    def _servicio(self, descripcion, horas, precio='25.00', descuento='0.00',
+                  iva='0.1500', es_opcional=False, codigo='SRV-01'):
+        item = MagicMock()
+        item.codigo = codigo
+        item.descripcion = descripcion
+        item.horas_estimadas = Decimal(horas)
+        item.precio_unitario = Decimal(precio)
+        item.descuento = Decimal(descuento)
+        item.iva_porcentaje = Decimal(iva)
+        item.es_opcional = es_opcional
+        item.subtotal = Decimal(horas) * Decimal(precio) - Decimal(descuento)
+        return item
+
+    def _consolidar_servicios(self, items):
+        return _consolidar(
+            items,
+            campo_cantidad='horas_estimadas',
+            campo_codigo='codigo',
+            campo_precio='precio_unitario',
+        )
+
+    def test_suma_cantidad_de_items_identicos(self):
+        grupos = self._consolidar_servicios([
+            self._servicio('Cambio de aceite', '2.00'),
+            self._servicio('Cambio de aceite', '1.50'),
+            self._servicio('Cambio de aceite', '0.50'),
+        ])
+
+        self.assertEqual(len(grupos), 1)
+        self.assertEqual(grupos[0]['cantidad'], Decimal('4.00'))
+        self.assertEqual(grupos[0]['subtotal'], Decimal('100.00'))
+
+    def test_no_confunde_items_con_datos_distintos(self):
+        grupos = self._consolidar_servicios([
+            self._servicio('Cambio de aceite', '2.00'),
+            self._servicio('Cambio de aceite', '2.00', precio='30.00'),      # otro precio
+            self._servicio('Cambio de aceite', '2.00', iva='0.0000'),       # otro IVA
+            self._servicio('Cambio de aceite', '2.00', es_opcional=True),   # otro status
+            self._servicio('Cambio de aceite', '2.00', codigo='SRV-02'),    # otro código
+        ])
+
+        self.assertEqual(len(grupos), 5)
+
+    def test_conservar_el_importe_total_del_grupo(self):
+        items = [
+            self._servicio('Alineación', '1.50', precio='40.00', descuento='5.00'),
+            self._servicio('Alineación', '1.50', precio='40.00', descuento='5.00'),
+        ]
+        grupos = self._consolidar_servicios(items)
+
+        self.assertEqual(grupos[0]['descuento'], Decimal('10.00'))
+        self.assertEqual(
+            grupos[0]['subtotal'],
+            sum(item.subtotal for item in items),
+        )
+
+    def test_consolida_repuestos_por_cantidad(self):
+        repuestos = []
+        for cantidad in (2, 3):
+            item = MagicMock()
+            item.codigo_repuesto = 'RP-77'
+            item.descripcion = 'Filtro de aceite'
+            item.cantidad = cantidad
+            item.precio_unitario_referencial = Decimal('12.50')
+            item.descuento = Decimal('0.00')
+            item.iva_porcentaje = Decimal('0.1500')
+            item.es_opcional = False
+            item.subtotal = Decimal(cantidad) * Decimal('12.50')
+            repuestos.append(item)
+
+        grupos = _consolidar(
+            repuestos,
+            campo_cantidad='cantidad',
+            campo_codigo='codigo_repuesto',
+            campo_precio='precio_unitario_referencial',
+        )
+
+        self.assertEqual(len(grupos), 1)
+        self.assertEqual(grupos[0]['cantidad'], Decimal('5'))
+        self.assertEqual(grupos[0]['subtotal'], Decimal('62.50'))
+
+    def test_lista_vacia_o_sin_conceptos(self):
+        self.assertEqual(self._consolidar_servicios([]), [])
+        self.assertEqual(self._consolidar_servicios(None), [])
 
 
 class TransicionEstadoTests(SimpleTestCase):
@@ -315,3 +407,199 @@ class CotizacionAsesorApiTests(APITestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         cot.refresh_from_db()
         self.assertIsNone(cot.asesor_id)
+
+
+class CotizacionUnicaPorVehiculoTests(CotizacionAsesorApiTests):
+    """Regla del taller: una sola cotización vigente por vehículo.
+
+    Vigente = PENDIENTE / ENVIADA / ACEPTADA. Al quedar CONVERTIDA,
+    RECHAZADA o VENCIDA el vehículo vuelve a quedar disponible.
+    """
+
+    def _crear(self, **extra):
+        datos = {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id}
+        datos.update(extra)
+        return self.client.post('/api/cotizaciones/', datos, format='json')
+
+    def _cerrar(self, cotizacion, estado):
+        cotizacion.estado = estado
+        cotizacion.save(update_fields=['estado', 'updated_at'])
+
+    def test_segunda_vigente_del_mismo_vehiculo_se_bloquea(self):
+        primera = self._crear()
+        self.assertEqual(primera.status_code, 201, primera.content)
+
+        segunda = self._crear()
+        self.assertEqual(segunda.status_code, 400, segunda.content)
+        self.assertIn('vehiculo', segunda.json())
+        self.assertIn(primera.json()['numero_cotizacion'], segunda.json()['vehiculo'][0])
+
+    def test_vehiculo_distinto_puede_tener_su_cotizacion_vigente(self):
+        otro = Vehiculo.objects.create(placa='ASE-0002', marca='Kia', modelo='Rio')
+        otro.empresas.add(self.empresa)
+        self.assertEqual(self._crear().status_code, 201)
+        respuesta = self._crear(vehiculo=otro.id)
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+
+    def test_cotizaciones_sin_vehiculo_no_se_bloquean(self):
+        primera = self._crear(vehiculo=None)
+        segunda = self._crear(vehiculo=None)
+        self.assertEqual(primera.status_code, 201, primera.content)
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+
+    def test_tras_convertir_el_vehiculo_queda_libre(self):
+        primera = self._crear()
+        numero = primera.json()['numero_cotizacion']
+        self._cerrar(Cotizacion.objects.get(numero_cotizacion=numero), 'CONVERTIDA')
+        segunda = self._crear()
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+
+    def test_tras_rechazar_el_vehiculo_queda_libre(self):
+        primera = self._crear()
+        numero = primera.json()['numero_cotizacion']
+        self._cerrar(Cotizacion.objects.get(numero_cotizacion=numero), 'RECHAZADA')
+        segunda = self._crear()
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+
+    def test_cambiar_de_vehiculo_a_uno_con_cotizacion_vigente_se_bloquea(self):
+        vigente = self._crear()
+        otro = Vehiculo.objects.create(placa='ASE-0003', marca='Toyota', modelo='Hilux')
+        otro.empresas.add(self.empresa)
+        editable = self._crear(vehiculo=otro.id)
+        self.assertEqual(editable.status_code, 201, editable.content)
+
+        respuesta = self.client.patch(
+            f"/api/cotizaciones/{editable.json()['id']}/",
+            {'vehiculo': self.vehiculo.id},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.assertIn(vigente.json()['numero_cotizacion'], respuesta.json()['vehiculo'][0])
+
+    def test_el_vehiculo_no_se_toca_al_crear_una_cotizacion_sin_el(self):
+        # Crear la segunda cotización sin vehículo no debe desasignar nada.
+        primera = self._crear()
+        segunda = self._crear(vehiculo=None)
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+        primera_cot = Cotizacion.objects.get(pk=primera.json()['id'])
+        self.assertEqual(primera_cot.vehiculo_id, self.vehiculo.id)
+
+    def test_filtro_por_vehiculo(self):
+        creada = self._crear()
+        otro = Vehiculo.objects.create(placa='ASE-0004', marca='Mazda', modelo='3')
+        otro.empresas.add(self.empresa)
+        self.assertEqual(self._crear(vehiculo=otro.id).status_code, 201)
+
+        respuesta = self.client.get(f'/api/cotizaciones/?vehiculo={self.vehiculo.id}')
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        ids = [item['id'] for item in respuesta.json()['results']]
+        self.assertIn(creada.json()['id'], ids)
+        self.assertEqual(len(ids), 1)
+
+
+class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
+    """``GET /api/cotizaciones/<id>/exportar-pdf/`` entrega el documento.
+
+    El botón del frontend aparece desde que existe el ID, así que el PDF debe
+    estar disponible en cualquier estado (incluido un borrador PENDIENTE).
+    """
+
+    def _cotizacion_con_detalles(self):
+        creada = self.client.post(
+            '/api/cotizaciones/',
+            {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id, 'validez_dias': 15},
+            format='json',
+        )
+        self.assertEqual(creada.status_code, 201, creada.content)
+        cotizacion_id = creada.json()['id']
+
+        servicios = self.client.post(
+            '/api/cotizaciones/servicios/',
+            {
+                'cotizacion': cotizacion_id,
+                'descripcion': 'Cambio de aceite y filtros',
+                'horas_estimadas': '2.00',
+                'precio_unitario': '25.00',
+            },
+            format='json',
+        )
+        self.assertEqual(servicios.status_code, 201, servicios.content)
+
+        repuesto = self.client.post(
+            '/api/cotizaciones/repuestos/',
+            {
+                'cotizacion': cotizacion_id,
+                'descripcion': 'Filtro de aceite',
+                'cantidad': 2,
+                'precio_unitario_referencial': '12.50',
+                'es_opcional': True,
+            },
+            format='json',
+        )
+        self.assertEqual(repuesto.status_code, 201, repuesto.content)
+        return cotizacion_id
+
+    def test_descarga_pdf_de_una_cotizacion_con_detalles(self):
+        cotizacion_id = self._cotizacion_con_detalles()
+        respuesta = self.client.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        self.assertTrue(b''.join(respuesta.streaming_content).startswith(b'%PDF'))
+
+        cotizacion = Cotizacion.objects.get(pk=cotizacion_id)
+        self.assertIn(
+            cotizacion.numero_cotizacion,
+            respuesta['Content-Disposition'],
+        )
+
+    def test_pdf_disponible_en_cualquier_estado(self):
+        cotizacion_id = self._cotizacion_con_detalles()
+        for estado in (
+            Cotizacion.EstadoCotizacion.PENDIENTE,
+            Cotizacion.EstadoCotizacion.ENVIADA,
+            Cotizacion.EstadoCotizacion.ACEPTADA,
+            Cotizacion.EstadoCotizacion.RECHAZADA,
+            Cotizacion.EstadoCotizacion.CONVERTIDA,
+        ):
+            with self.subTest(estado=estado):
+                Cotizacion.objects.filter(pk=cotizacion_id).update(estado=estado)
+                respuesta = self.client.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
+                self.assertEqual(respuesta.status_code, 200)
+
+    def test_pdf_sin_detalles_no_falla(self):
+        creada = self.client.post(
+            '/api/cotizaciones/',
+            {'cliente': self.cliente.id, 'vehiculo': None, 'validez_dias': 10},
+            format='json',
+        )
+        respuesta = self.client.get(f"/api/cotizaciones/{creada.json()['id']}/exportar-pdf/")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(b''.join(respuesta.streaming_content).startswith(b'%PDF'))
+
+    def test_requiere_autenticacion(self):
+        cotizacion_id = self._cotizacion_con_detalles()
+        anonimo = APIClient()
+        anonimo.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        respuesta = anonimo.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
+        self.assertEqual(respuesta.status_code, 401)
+
+    def test_no_filtra_cotizaciones_de_otra_empresa(self):
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa
+
+        otra_empresa = Empresa.objects.create(
+            nombre_comercial='Otra Empresa', razon_social='OTRA SA', ruc='999999999999'
+        )
+        otro_cliente = Cliente.objects.create(
+            empresa=otra_empresa, nombre='Cliente Ajeno', identificacion='1111111111'
+        )
+        ajena = Cotizacion.objects.create(
+            empresa=otra_empresa,
+            cliente=otro_cliente,
+            numero_cotizacion='COT-AJENA-1',
+        )
+
+        respuesta = self.client.get(f'/api/cotizaciones/{ajena.pk}/exportar-pdf/')
+        self.assertEqual(respuesta.status_code, 404)

@@ -5,7 +5,7 @@ facturación del mes y stock bajo), la tendencia mensual, la distribución por
 tipo de trabajo, las tablas del día y el aislamiento multi-tenant.
 """
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -339,6 +339,10 @@ class DashboardV2EndpointTest(TestCase):
         )
         cls.vehiculo = Vehiculo.objects.create(placa='DSV002', marca='Mazda', modelo='CX-5')
         cls.vehiculo.empresas.add(cls.empresa)
+        # Un vehículo solo admite una cotización vigente: la segunda del panel
+        # va en otro vehículo para poder contar ENVIADA y ACEPTADA a la vez.
+        cls.vehiculo_2 = Vehiculo.objects.create(placa='DSV003', marca='Toyota', modelo='Hilux')
+        cls.vehiculo_2.empresas.add(cls.empresa)
 
         ahora = timezone.now()
 
@@ -372,11 +376,24 @@ class DashboardV2EndpointTest(TestCase):
         RecepcionVehiculo.objects.filter(pk=cls.rec_rechazada.pk).update(
             fecha_ingreso=ahora - timedelta(minutes=5)
         )
+        # Sin fechas de filtro el panel V2 muestra el mes en curso, así que las
+        # recepciones antiguas se anclan dentro del mes (y por detrás de las
+        # recientes): la prueba no puede depender del día en que se ejecute.
+        inicio_mes = timezone.localdate().replace(day=1)
+
+        def _recepcion_vieja(dias_atras):
+            dia = max(timezone.localdate() - timedelta(days=dias_atras), inicio_mes)
+            ancla = timezone.make_aware(
+                datetime.combine(dia, time(20, 0)), timezone.get_current_timezone()
+            )
+            return min(ancla, ahora - timedelta(hours=dias_atras))
+
+        cls.fecha_vieja = _recepcion_vieja(2)
         RecepcionVehiculo.objects.filter(pk=cls.rec_aceptada.pk).update(
-            fecha_ingreso=ahora - timedelta(days=2)
+            fecha_ingreso=cls.fecha_vieja
         )
         RecepcionVehiculo.objects.filter(pk=cls.rec_inspeccionada.pk).update(
-            fecha_ingreso=ahora - timedelta(days=3)
+            fecha_ingreso=min(_recepcion_vieja(3), cls.fecha_vieja - timedelta(seconds=1))
         )
 
         # ── Inspección con un servicio del catálogo ─────────────────────────
@@ -457,7 +474,7 @@ class DashboardV2EndpointTest(TestCase):
         )
         cls.cot_aceptada = Cotizacion.objects.create(
             empresa=cls.empresa, sucursal=cls.taller,
-            cliente=cls.cliente, vehiculo=cls.vehiculo,
+            cliente=cls.cliente, vehiculo=cls.vehiculo_2,
             numero_cotizacion='COT-V2-0002', estado='ACEPTADA',
             total=Decimal('150.00'),
         )

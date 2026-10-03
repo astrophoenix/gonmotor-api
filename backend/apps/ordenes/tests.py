@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -225,8 +226,10 @@ class InspeccionListadoFiltrosTests(TestCase):
         self.assertEqual(self._listar(sucursal=999)['count'], 0)
 
     def test_filtra_por_rango_de_fechas(self):
-        hoy = timezone.now().date().isoformat()
-        ayer = (timezone.now().date() - timedelta(days=1)).isoformat()
+        # La fecha local del taller, no la de UTC: entre las 00:00 y las 05:00
+        # UTC el filtro por fecha_inspeccion__date no ve el mismo día.
+        hoy = timezone.localdate().isoformat()
+        ayer = (timezone.localdate() - timedelta(days=1)).isoformat()
 
         self.assertEqual(self._numeros(fecha_desde=hoy), ['INS-FIL-0001', 'INS-FIL-0003'])
         self.assertEqual(self._numeros(fecha_hasta=ayer), ['INS-FIL-0002'])
@@ -590,3 +593,235 @@ class OrdenTrabajoEstadosTests(TestCase):
         self.assertTrue(creada.numero_orden)
         self.assertEqual(creada.cotizacion_origen_id, None)
         self.assertEqual(creada.estado, 'PENDIENTE')
+
+
+class VinculoCotizacionFlujoTests(TestCase):
+    """La cotización creada sin origen (WhatsApp, teléfono) se ata sola a la
+    recepción y la inspección que nacen después, y la inspección arranca con los
+    ítems de la cotización ya cargados."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.clientes.models import Cliente
+        from apps.cotizaciones.models import (
+            Cotizacion,
+            DetalleRepuestoCotizacion,
+            DetalleServicioCotizacion,
+        )
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        cls.user = User.objects.create_superuser(username='flujo_admin', password='x')
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Flujo', razon_social='FLUJO SA', ruc='555555555555'
+        )
+        cls.taller = Taller.objects.create(
+            empresa=cls.empresa, nombre='Central', direccion='Av. Siempre Viva 742'
+        )
+        cls.cliente = Cliente.objects.create(
+            empresa=cls.empresa, nombre='Ana Lotus', identificacion='0912345678'
+        )
+        cls.vehiculo = Vehiculo.objects.create(placa='FLU-001', marca='Toyota', modelo='Corolla')
+        cls.vehiculo.empresas.add(cls.empresa)
+        cls.Cotizacion = Cotizacion
+        cls.DetalleServicioCotizacion = DetalleServicioCotizacion
+        cls.DetalleRepuestoCotizacion = DetalleRepuestoCotizacion
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+
+    def _recepcion(self, estado='ACEPTADA', numero='REC-0001'):
+        from .models import RecepcionVehiculo
+
+        return RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_recepcion=numero,
+            estado=estado,
+            motivo_ingreso='Ruido en el motor',
+        )
+
+    def _cotizacion(self, estado='PENDIENTE', numero='COT-0001', con_items=True, es_opcional=False):
+        cotizacion = self.Cotizacion.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_cotizacion=numero,
+            estado=estado,
+        )
+        if con_items:
+            self.DetalleServicioCotizacion.objects.create(
+                cotizacion=cotizacion,
+                codigo='SRV-001',
+                descripcion='Cambio de aceite y filtros',
+                horas_estimadas=Decimal('2.00'),
+                precio_unitario=Decimal('45.00'),
+                es_opcional=es_opcional,
+            )
+            self.DetalleRepuestoCotizacion.objects.create(
+                cotizacion=cotizacion,
+                codigo_repuesto='REP-001',
+                descripcion='Filtro de aceite',
+                cantidad=2,
+                precio_unitario_referencial=Decimal('18.50'),
+                es_opcional=es_opcional,
+            )
+        return cotizacion
+
+    # --- Recepción ---
+
+    def test_recepcion_se_vincula_con_la_cotizacion_vigente(self):
+        from apps.cotizaciones.services import conectar_recepcion
+
+        cotizacion = self._cotizacion()
+        recepcion = self._recepcion()
+
+        vinculada = conectar_recepcion(recepcion)
+
+        self.assertEqual(vinculada.pk, cotizacion.pk)
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
+
+    def test_recepcion_no_pisa_un_vinculo_existente(self):
+        from apps.cotizaciones.services import conectar_recepcion
+
+        primera = self._recepcion(numero='REC-0001')
+        cotizacion = self._cotizacion()
+        conectar_recepcion(primera)
+
+        segunda = self._recepcion(numero='REC-0002')
+        conectar_recepcion(segunda)
+
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.recepcion_origen_id, primera.id)
+
+    def test_sin_cotizacion_vigente_no_hace_nada(self):
+        from apps.cotizaciones.services import conectar_recepcion
+
+        recepcion = self._recepcion()
+        self.assertIsNone(conectar_recepcion(recepcion))
+        self.assertEqual(self.Cotizacion.objects.count(), 0)
+
+    def test_cotizacion_vencida_no_se_vincula(self):
+        from apps.cotizaciones.services import conectar_recepcion
+
+        cotizacion = self._cotizacion(estado='VENCIDA', numero='COT-0009')
+        recepcion = self._recepcion()
+
+        self.assertIsNone(conectar_recepcion(recepcion))
+        cotizacion.refresh_from_db()
+        self.assertIsNone(cotizacion.recepcion_origen_id)
+
+    # --- Inspección desde la recepción ---
+
+    def test_crear_inspeccion_vincula_y_siembra_los_items(self):
+        from .models import InspeccionVehiculo
+
+        cotizacion = self._cotizacion(estado='ACEPTADA')
+        recepcion = self._recepcion()
+
+        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        # Regresión: la inspección hereda cliente y vehículo de la recepción.
+        self.assertEqual(respuesta.data['cliente']['id'], self.cliente.id)
+        self.assertEqual(respuesta.data['vehiculo']['id'], self.vehiculo.id)
+
+        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
+        self.assertEqual(inspeccion.recepcion_id, recepcion.id)
+
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
+        self.assertEqual(cotizacion.inspeccion_origen_id, inspeccion.id)
+
+        servicio = inspeccion.servicios_detectados.get()
+        self.assertEqual(servicio.descripcion, 'Cambio de aceite y filtros')
+        self.assertEqual(servicio.horas_estimadas, Decimal('2.00'))
+        self.assertEqual(servicio.precio_referencial, Decimal('45.00'))
+        self.assertFalse(servicio.es_sugerido)
+
+        repuesto = inspeccion.repuestos_sugeridos.get()
+        self.assertEqual(repuesto.descripcion, 'Filtro de aceite')
+        self.assertEqual(repuesto.cantidad, 2)
+        self.assertEqual(repuesto.precio_referencial, Decimal('18.50'))
+
+    def test_items_opcionales_de_la_cotizacion_se_marcan_sugeridos(self):
+        from .models import InspeccionVehiculo
+
+        cotizacion = self._cotizacion(estado='ACEPTADA', es_opcional=True)
+        recepcion = self._recepcion()
+
+        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+
+        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
+        self.assertTrue(inspeccion.servicios_detectados.get().es_sugerido)
+        self.assertTrue(inspeccion.repuestos_sugeridos.get().es_sugerido)
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.inspeccion_origen_id, inspeccion.id)
+
+    def test_crear_inspeccion_sin_cotizacion_no_siembra_items(self):
+        from .models import InspeccionVehiculo
+
+        recepcion = self._recepcion()
+
+        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
+        self.assertEqual(inspeccion.servicios_detectados.count(), 0)
+        self.assertEqual(inspeccion.repuestos_sugeridos.count(), 0)
+
+    def test_la_siembra_no_duplica_items_si_la_inspeccion_ya_tiene(self):
+        from apps.cotizaciones.services import sembrar_inspeccion_desde_cotizacion
+        from .models import DetalleServicioInspeccion, InspeccionVehiculo
+
+        cotizacion = self._cotizacion()
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            numero_inspeccion='INS-9001',
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+        )
+        DetalleServicioInspeccion.objects.create(
+            inspeccion=inspeccion, descripcion='Revisión general', horas_estimadas=1
+        )
+
+        copiados = sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion)
+
+        self.assertEqual(copiados, 0)
+        self.assertEqual(inspeccion.servicios_detectados.count(), 1)
+
+    def test_los_items_se_asocian_al_catalogo_por_codigo(self):
+        from apps.inventario.models import Repuesto, Servicio
+        from apps.cotizaciones.services import sembrar_inspeccion_desde_cotizacion
+        from .models import InspeccionVehiculo
+
+        servicio_catalogo = Servicio.objects.create(
+            empresa=self.empresa, codigo='SRV-001', nombre='Cambio de aceite'
+        )
+        repuesto_catalogo = Repuesto.objects.create(
+            empresa=self.empresa, codigo='REP-001', nombre='Filtro de aceite'
+        )
+        cotizacion = self._cotizacion()
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            numero_inspeccion='INS-9002',
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+        )
+
+        sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion)
+
+        self.assertEqual(inspeccion.servicios_detectados.get().servicio_id, servicio_catalogo.id)
+        self.assertEqual(inspeccion.repuestos_sugeridos.get().repuesto_id, repuesto_catalogo.id)

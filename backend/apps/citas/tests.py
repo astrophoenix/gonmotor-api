@@ -604,3 +604,98 @@ class HoraLocalTest(AgendaCitasBase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn('pasado', resp.json()['fecha_hora_programada'][0])
+
+
+class CitaConversionVinculaCotizacionTests(TestCase):
+    """La cita heredada de una cotización vigente arrastra el vínculo al
+    convertirla en recepción, para que el flujo de WhatsApp no se corte."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.clientes.models import Cliente
+        from apps.cotizaciones.models import Cotizacion
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+
+        User = get_user_model()
+        cls.user = User.objects.create_superuser(username='cita_cot_admin', password='x')
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Cita Cot', ruc=_ruc_unico(), email_contacto='cc@test.com'
+        )
+        cls.taller = Taller.objects.create(
+            empresa=cls.empresa, nombre='Central', direccion='Av. Test 100'
+        )
+        cls.cliente = Cliente.objects.create(
+            empresa=cls.empresa,
+            tipo_identificacion='C',
+            identificacion='1787654321',
+            nombre='Cliente Cita Cot',
+        )
+        cls.vehiculo = Vehiculo.objects.create(placa='CC-001', marca='Kia', modelo='Rio')
+        cls.vehiculo.empresas.add(cls.empresa)
+        cls.manana = timezone.localdate() + timedelta(days=1)
+
+    def _cita(self):
+        return Cita.objects.create(
+            empresa=self.empresa,
+            taller=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            fecha_cita=self.manana,
+            hora_cita=datetime(2026, 1, 1, 9, 0).time(),
+            duracion_minutos=60,
+            motivo='MANTENIMIENTO',
+        )
+
+    def _cotizacion(self, estado='ACEPTADA', numero='COT-0100'):
+        from apps.cotizaciones.models import Cotizacion
+
+        return Cotizacion.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_cotizacion=numero,
+            estado=estado,
+        )
+
+    def test_la_conversion_vincula_la_cotizacion_vigente(self):
+        cotizacion = self._cotizacion()
+        cita = self._cita()
+
+        recepcion = cita.convertir_a_recepcion()
+
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
+        self.assertEqual(recepcion.cliente_id, self.cliente.id)
+        self.assertEqual(recepcion.vehiculo_id, self.vehiculo.id)
+
+    def test_no_se_vincula_una_cotizacion_vencida(self):
+        cotizacion = self._cotizacion(estado='VENCIDA', numero='COT-0101')
+        cita = self._cita()
+
+        cita.convertir_a_recepcion()
+
+        cotizacion.refresh_from_db()
+        self.assertIsNone(cotizacion.recepcion_origen_id)
+
+    def test_no_pisa_un_vinculo_de_recepcion_ya_asignado(self):
+        from apps.ordenes.models import RecepcionVehiculo
+
+        cotizacion = self._cotizacion(numero='COT-0102')
+        otra = RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_recepcion='REC-0102',
+        )
+        cotizacion.recepcion_origen = otra
+        cotizacion.save(update_fields=['recepcion_origen', 'updated_at'])
+
+        cita = self._cita()
+        recepcion = cita.convertir_a_recepcion()
+
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.recepcion_origen_id, otra.id)
+        self.assertNotEqual(otra.id, recepcion.id)

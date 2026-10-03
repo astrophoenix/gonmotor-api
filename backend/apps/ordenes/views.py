@@ -209,6 +209,17 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             instance.aceptacion_condiciones = True
             instance.estado = 'ACEPTADA'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
+        self._conectar_cotizacion(instance)
+
+    def _conectar_cotizacion(self, recepcion):
+        """Liga la recepción con la cotización vigente del vehículo, si existe.
+
+        Cubre el caso en que el cliente llega sin cita pero ya tenía una
+        cotización abierta (por ejemplo, la que pidió por WhatsApp).
+        """
+        from apps.cotizaciones.services import conectar_recepcion
+
+        conectar_recepcion(recepcion)
 
     def perform_update(self, serializer):
         instance = serializer.save()
@@ -255,6 +266,12 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         serializer = InspeccionVehiculoSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         inspeccion = serializer.save()
+        # La inspección hereda cliente/vehículo del serializer; además se ata a
+        # la cotización vigente del vehículo y arranca con sus ítems copiados,
+        # para que el técnico solo tenga que agregar lo que encuentre.
+        from apps.cotizaciones.services import conectar_inspeccion
+
+        conectar_inspeccion(inspeccion)
         return Response(
             InspeccionVehiculoSerializer(inspeccion, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
