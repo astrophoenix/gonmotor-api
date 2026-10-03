@@ -409,12 +409,8 @@ class CotizacionAsesorApiTests(APITestCase):
         self.assertIsNone(cot.asesor_id)
 
 
-class CotizacionUnicaPorVehiculoTests(CotizacionAsesorApiTests):
-    """Regla del taller: una sola cotización vigente por vehículo.
-
-    Vigente = PENDIENTE / ENVIADA / ACEPTADA. Al quedar CONVERTIDA,
-    RECHAZADA o VENCIDA el vehículo vuelve a quedar disponible.
-    """
+class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
+    """Un vehículo puede tener varias cotizaciones vigentes independientes."""
 
     def _crear(self, **extra):
         datos = {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id}
@@ -425,14 +421,21 @@ class CotizacionUnicaPorVehiculoTests(CotizacionAsesorApiTests):
         cotizacion.estado = estado
         cotizacion.save(update_fields=['estado', 'updated_at'])
 
-    def test_segunda_vigente_del_mismo_vehiculo_se_bloquea(self):
+    def test_permite_varias_cotizaciones_vigentes_para_el_mismo_vehiculo(self):
         primera = self._crear()
         self.assertEqual(primera.status_code, 201, primera.content)
 
         segunda = self._crear()
-        self.assertEqual(segunda.status_code, 400, segunda.content)
-        self.assertIn('vehiculo', segunda.json())
-        self.assertIn(primera.json()['numero_cotizacion'], segunda.json()['vehiculo'][0])
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+        self.assertNotEqual(primera.json()['id'], segunda.json()['id'])
+        self.assertEqual(
+            Cotizacion.objects.filter(
+                empresa=self.empresa,
+                vehiculo=self.vehiculo,
+                estado__in=Cotizacion.ESTADOS_VIGENTES,
+            ).count(),
+            2,
+        )
 
     def test_vehiculo_distinto_puede_tener_su_cotizacion_vigente(self):
         otro = Vehiculo.objects.create(placa='ASE-0002', marca='Kia', modelo='Rio')
@@ -461,8 +464,8 @@ class CotizacionUnicaPorVehiculoTests(CotizacionAsesorApiTests):
         segunda = self._crear()
         self.assertEqual(segunda.status_code, 201, segunda.content)
 
-    def test_cambiar_de_vehiculo_a_uno_con_cotizacion_vigente_se_bloquea(self):
-        vigente = self._crear()
+    def test_permite_asignar_un_vehiculo_con_otra_cotizacion_vigente(self):
+        self._crear()
         otro = Vehiculo.objects.create(placa='ASE-0003', marca='Toyota', modelo='Hilux')
         otro.empresas.add(self.empresa)
         editable = self._crear(vehiculo=otro.id)
@@ -473,8 +476,7 @@ class CotizacionUnicaPorVehiculoTests(CotizacionAsesorApiTests):
             {'vehiculo': self.vehiculo.id},
             format='json',
         )
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn(vigente.json()['numero_cotizacion'], respuesta.json()['vehiculo'][0])
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
 
     def test_el_vehiculo_no_se_toca_al_crear_una_cotizacion_sin_el(self):
         # Crear la segunda cotización sin vehículo no debe desasignar nada.

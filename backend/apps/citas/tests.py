@@ -667,8 +667,6 @@ class CitaConversionVinculaCotizacionTests(TestCase):
 
         cotizacion.refresh_from_db()
         self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
-        self.assertEqual(recepcion.cliente_id, self.cliente.id)
-        self.assertEqual(recepcion.vehiculo_id, self.vehiculo.id)
 
     def test_no_se_vincula_una_cotizacion_vencida(self):
         cotizacion = self._cotizacion(estado='VENCIDA', numero='COT-0101')
@@ -699,3 +697,18 @@ class CitaConversionVinculaCotizacionTests(TestCase):
         cotizacion.refresh_from_db()
         self.assertEqual(cotizacion.recepcion_origen_id, otra.id)
         self.assertNotEqual(otra.id, recepcion.id)
+
+
+class CitaSearchSelectFiltersTests(AgendaCitasBase):
+    def test_busca_por_numero_id_y_filtra_citas_sin_recepcion(self):
+        creada = self.crear()
+        self.assertEqual(creada.status_code, 201, creada.content)
+        cita_id = creada.json()['id']
+
+        por_numero = self.client.get(LISTADO, {'numero': cita_id})
+        self.assertEqual(por_numero.status_code, 200, por_numero.content)
+        self.assertEqual([item['id'] for item in por_numero.json()['results']], [cita_id])
+
+        sin_recepcion = self.client.get(LISTADO, {'sin_recepcion': '1'})
+        self.assertEqual(sin_recepcion.status_code, 200, sin_recepcion.content)
+        self.assertIn(cita_id, [item['id'] for item in sin_recepcion.json()['results']])

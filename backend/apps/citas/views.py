@@ -94,6 +94,10 @@ class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             .select_related('cliente', 'vehiculo', 'taller', 'asesor', 'recepcion_generada')
         )
 
+        numero = self.request.query_params.get('numero', '').strip()
+        if numero.isdigit():
+            queryset = queryset.filter(pk=int(numero))
+
         fecha = self.request.query_params.get('fecha')
         if fecha:
             queryset = queryset.filter(fecha_cita=fecha)
@@ -101,6 +105,12 @@ class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         estado = self.request.query_params.get('estado')
         if estado:
             queryset = queryset.filter(estado=estado)
+
+        recepcion_generada = self.request.query_params.get('recepcion_generada')
+        if recepcion_generada:
+            queryset = queryset.filter(recepcion_generada_id=recepcion_generada)
+        elif self.request.query_params.get('sin_recepcion') in ('1', 'true', 'True'):
+            queryset = queryset.filter(recepcion_generada__isnull=True)
 
         desde = self.request.query_params.get('desde')
         if desde:

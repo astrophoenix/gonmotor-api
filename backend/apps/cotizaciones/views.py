@@ -78,7 +78,6 @@ def _validar_origen_inspeccion(inspeccion):
 
 CONSTRAINT_RECEPCION = 'cotizacion_recepcion_vigente_unica'
 CONSTRAINT_INSPECCION = 'cotizacion_inspeccion_vigente_unica'
-CONSTRAINT_VEHICULO = 'cotizacion_vehiculo_vigente_unica'
 
 
 def _detalle_cotizacion_conflicto(origen, excluir_id=None):
@@ -91,7 +90,7 @@ def _detalle_cotizacion_conflicto(origen, excluir_id=None):
     return f' Ya está abierta la cotización {vigente.numero_cotizacion} ({vigente.get_estado_display()}).'
 
 
-def _traducir_integridad(error, inspeccion=None, recepcion=None, excluir_id=None, vehiculo=None):
+def _traducir_integridad(error, inspeccion=None, recepcion=None, excluir_id=None):
     """Convierte el IntegrityError de los constraints de vigencia en un error de validación.
 
     La validación de origen corre antes de guardar, pero dos peticiones
@@ -110,24 +109,6 @@ def _traducir_integridad(error, inspeccion=None, recepcion=None, excluir_id=None
         raise serializers.ValidationError(
             f'La recepción ya tiene una cotización vigente (borrador, enviada o aceptada).{detalle} '
             f'Ciérrala o edítala antes de continuar.'
-        ) from error
-    if CONSTRAINT_VEHICULO in str(error):
-        detalle = ''
-        if vehiculo is not None:
-            consulta = Cotizacion.objects.filter(
-                vehiculo=vehiculo, estado__in=Cotizacion.ESTADOS_VIGENTES
-            )
-            if excluir_id is not None:
-                consulta = consulta.exclude(pk=excluir_id)
-            vigente = consulta.order_by('-created_at').first()
-            if vigente is not None:
-                detalle = (
-                    f' Ya está abierta la cotización {vigente.numero_cotizacion} '
-                    f'({vigente.get_estado_display()}).'
-                )
-        raise serializers.ValidationError(
-            f'El vehículo ya tiene una cotización vigente (borrador, enviada o aceptada).{detalle} '
-            'Ciérrala o edítala antes de continuar.'
         ) from error
     return error
 
@@ -193,19 +174,19 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         if fecha_hasta:
             queryset = queryset.filter(created_at__date__lte=fecha_hasta)
 
+        if params.get('sin_recepcion') in ('1', 'true', 'True'):
+            queryset = queryset.filter(recepcion_origen__isnull=True)
+
         return queryset
 
     def perform_create(self, serializer):
         inspeccion = serializer.validated_data.get('inspeccion_origen')
         recepcion = serializer.validated_data.get('recepcion_origen')
-        vehiculo = serializer.validated_data.get('vehiculo')
         _validar_origen_cotizacion(inspeccion=inspeccion, recepcion=recepcion)
         try:
             super().perform_create(serializer)
         except IntegrityError as error:
-            _traducir_integridad(
-                error, inspeccion=inspeccion, recepcion=recepcion, vehiculo=vehiculo
-            )
+            _traducir_integridad(error, inspeccion=inspeccion, recepcion=recepcion)
             raise
 
     def perform_update(self, serializer):
@@ -223,7 +204,6 @@ class CotizacionViewSet(viewsets.ModelViewSet):
                 inspeccion=instancia.inspeccion_origen,
                 recepcion=instancia.recepcion_origen,
                 excluir_id=instancia.pk,
-                vehiculo=instancia.vehiculo,
             )
             raise
 

@@ -130,16 +130,6 @@ class Cotizacion(BaseModel):
                 condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
                 name='cotizacion_recepcion_vigente_unica'
             ),
-            # Regla del taller: una sola cotización vigente por vehículo. Se
-            # aplica aunque la cotización no tenga origen (recepción/inspección),
-            # que es el caso de las creadas directamente por el asesor. La
-            # columna vehiculo es null cuando el advisor la deja sin definir y
-            # Postgres no considera duplicados los NULL.
-            models.UniqueConstraint(
-                fields=['empresa', 'vehiculo'],
-                condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
-                name='cotizacion_vehiculo_vigente_unica'
-            ),
         ]
 
     def __str__(self):

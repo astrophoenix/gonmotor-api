@@ -2,17 +2,15 @@
 
 Una cotización puede nacer sin origen (el cliente pide precio por teléfono o
 WhatsApp antes de traer el vehículo). Cuando el auto entra al taller y se
-crea la recepción y la inspección, esa cotización se vincula automáticamente a
-esas piezas del flujo, porque solo puede existir una cotización vigente por
-vehículo (constraint `cotizacion_vehiculo_vigente_unica`), así que la
-asignación es inequívoca.
+crea la recepción y la inspección, se vincula automáticamente a esas piezas
+del flujo la cotización vigente más reciente del vehículo.
 """
 
 from decimal import Decimal
 
 
 def buscar_cotizacion_vigente(vehiculo, empresa=None):
-    """Devuelve la cotización vigente del vehículo, o None si no tiene ninguna."""
+    """Devuelve la cotización vigente más reciente del vehículo, si existe."""
     from apps.cotizaciones.models import Cotizacion
 
     if vehiculo is None:
@@ -42,7 +40,7 @@ def vincular_cotizacion(cotizacion, recepcion=None, inspeccion=None):
 
 
 def conectar_recepcion(recepcion, empresa=None):
-    """Vincula la recepción con la cotización vigente del vehículo, si existe."""
+    """Vincula la recepción con la cotización vigente más reciente del vehículo."""
     cotizacion = buscar_cotizacion_vigente(recepcion.vehiculo, empresa=empresa or recepcion.empresa)
     if cotizacion is None:
         return None

@@ -238,6 +238,9 @@ class InspeccionListadoFiltrosTests(TestCase):
             ['INS-FIL-0001', 'INS-FIL-0003'],
         )
 
+    def test_filtra_inspecciones_sin_recepcion(self):
+        self.assertEqual(self._numeros(sin_recepcion='1'), ['INS-FIL-0003'])
+
     def test_ignora_fechas_invalidas(self):
         self.assertEqual(self._listar(fecha_desde='no-es-fecha')['count'], 3)
 
@@ -523,16 +526,13 @@ class OrdenTrabajoEstadosTests(TestCase):
         orden = self._orden(estado='EN_ESPERA', motivo_espera='Esperando repuestos')
         serializer = self._serializer(orden, {'estado': 'CANCELADO'})
         self.assertTrue(serializer.is_valid(), serializer.errors)
-
         orden2 = self._orden(estado='EN_ESPERA', motivo_espera='Esperando aprobación')
         serializer2 = self._serializer(orden2, {'estado': 'EN_PROCESO'})
         self.assertTrue(serializer2.is_valid(), serializer2.errors)
 
     def test_entregar_sella_fecha_entrega(self):
         orden = self._orden(estado='COMPLETADO')
-
         serializer = self._serializer(orden, {'estado': 'ENTREGADO'})
-
         self.assertTrue(serializer.is_valid(), serializer.errors)
         guardada = serializer.save()
         self.assertIsNotNone(guardada.fecha_entrega)
@@ -549,31 +549,24 @@ class OrdenTrabajoEstadosTests(TestCase):
 
     def test_completado_puede_reaperturarse_a_proceso(self):
         orden = self._orden(estado='COMPLETADO')
-
         serializer = self._serializer(orden, {'estado': 'EN_PROCESO'})
-
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(serializer.validated_data['estado'], 'EN_PROCESO')
 
     def test_api_crea_orden_independiente_sin_cotizacion(self):
-        """Una OT independiente (sin referencia de cotización) se crea por POST
-        sin enviar 'empresa': se resuelve del header X-Empresa-ID y el número
-        se genera desde el taller de la empresa."""
+        """Una OT independiente se crea por POST sin referencia de cotización."""
         from django.contrib.auth import get_user_model
         from rest_framework.test import APIClient
 
         from apps.empresas.models import Taller
         from .models import OrdenTrabajo
 
-        Taller.objects.create(
-            empresa=self.empresa, nombre='Taller OT', prefijo_ot='OT-'
-        )
+        Taller.objects.create(empresa=self.empresa, nombre='Taller OT', prefijo_ot='OT-')
         usuario = get_user_model().objects.create_superuser(
             username='crea-ot', email='crea-ot@test.local', password='x'
         )
         client = APIClient()
         client.force_authenticate(usuario)
-
         response = client.post(
             '/api/ordenes/ordenes-trabajo/',
             {
@@ -586,14 +579,167 @@ class OrdenTrabajoEstadosTests(TestCase):
             format='json',
             HTTP_X_EMPRESA_ID=str(self.empresa.id),
         )
-
         self.assertEqual(response.status_code, 201, response.data)
         creada = OrdenTrabajo.objects.get(pk=response.data['id'])
         self.assertEqual(creada.empresa_id, self.empresa.id)
         self.assertTrue(creada.numero_orden)
-        self.assertEqual(creada.cotizacion_origen_id, None)
+        self.assertIsNone(creada.cotizacion_origen_id)
         self.assertEqual(creada.estado, 'PENDIENTE')
 
+
+class RecepcionRelacionesFlujoApiTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.citas.models import Cita
+        from apps.clientes.models import Cliente
+        from apps.cotizaciones.models import Cotizacion
+        from apps.empresas.models import Empresa
+        from apps.vehiculos.models import Vehiculo
+        from .models import OrdenTrabajo, RecepcionVehiculo
+
+        self.empresa = Empresa.objects.create(nombre_comercial='Taller Relaciones', ruc='777777777777')
+        self.cliente = Cliente.objects.create(empresa=self.empresa, nombre='Cliente Relaciones')
+        self.vehiculo = Vehiculo.objects.create(placa='REL-0001', marca='Toyota', modelo='Corolla')
+        self.vehiculo.empresas.add(self.empresa)
+        self.recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_recepcion='REC-REL-0001',
+        )
+        self.cita = Cita.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            fecha_cita=timezone.localdate() + timedelta(days=1),
+            hora_cita='10:00',
+        )
+        self.cotizacion = Cotizacion.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_cotizacion='COT-REL-0001',
+        )
+        self.orden = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_orden='OT-REL-0001',
+        )
+        user = get_user_model().objects.create_superuser(
+            username='relaciones', email='relaciones@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=user)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+
+    def _actualizar(self, tipo, entidad_id, accion):
+        return self.client.post(
+            f'/api/recepciones/{self.recepcion.pk}/relaciones/',
+            {'tipo': tipo, 'id': entidad_id, 'accion': accion},
+            format='json',
+        )
+
+    def test_get_devuelve_relaciones_y_capacidades(self):
+        self._actualizar('cita', self.cita.pk, 'vincular')
+        self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
+        self._actualizar('orden', self.orden.pk, 'vincular')
+        respuesta = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/')
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        datos = respuesta.json()
+        self.assertEqual(datos['relaciones']['cita'][0]['id'], self.cita.pk)
+        self.assertEqual(datos['relaciones']['cotizacion'][0]['id'], self.cotizacion.pk)
+        self.assertEqual(datos['relaciones']['orden'][0]['id'], self.orden.pk)
+        self.assertTrue(datos['puede_agregar']['inspeccion'])
+        self.assertFalse(datos['puede_agregar']['cotizacion'])
+
+    def test_vincula_y_desvincula_cita_sin_borrarla(self):
+        vincular = self._actualizar('cita', self.cita.pk, 'vincular')
+        self.assertEqual(vincular.status_code, 200, vincular.content)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.recepcion_generada_id, self.recepcion.pk)
+        self.assertEqual(self.cita.estado, 'PROGRAMADA')
+
+        desvincular = self._actualizar('cita', self.cita.pk, 'desvincular')
+        self.assertEqual(desvincular.status_code, 200, desvincular.content)
+        self.cita.refresh_from_db()
+        self.assertIsNone(self.cita.recepcion_generada_id)
+
+    def test_vincula_y_desvincula_cotizacion_sin_borrarla(self):
+        vincular = self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
+        self.assertEqual(vincular.status_code, 200, vincular.content)
+        self.cotizacion.refresh_from_db()
+        self.assertEqual(self.cotizacion.recepcion_origen_id, self.recepcion.pk)
+
+        desvincular = self._actualizar('cotizacion', self.cotizacion.pk, 'desvincular')
+        self.assertEqual(desvincular.status_code, 200, desvincular.content)
+        self.cotizacion.refresh_from_db()
+        self.assertIsNone(self.cotizacion.recepcion_origen_id)
+
+    def test_desvincula_cotizacion_relacionada_a_traves_de_inspeccion(self):
+        from apps.cotizaciones.models import Cotizacion
+
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            recepcion=self.recepcion,
+            motivo_ingreso='Inspección relacionada',
+            numero_inspeccion='INS-REL-0003',
+        )
+        cotizacion = Cotizacion.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            inspeccion_origen=inspeccion,
+            numero_cotizacion='COT-REL-0002',
+        )
+
+        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/').json()
+        self.assertIn(cotizacion.pk, [item['id'] for item in relaciones['relaciones']['cotizacion']])
+        respuesta = self._actualizar('cotizacion', cotizacion.pk, 'desvincular')
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        cotizacion.refresh_from_db()
+        inspeccion.refresh_from_db()
+        self.assertIsNone(cotizacion.inspeccion_origen_id)
+        self.assertIsNone(cotizacion.recepcion_origen_id)
+        self.assertEqual(inspeccion.recepcion_id, self.recepcion.pk)
+
+    def test_vincula_y_desvincula_orden_sin_borrarla(self):
+        vincular = self._actualizar('orden', self.orden.pk, 'vincular')
+        self.assertEqual(vincular.status_code, 200, vincular.content)
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.orden_trabajo_id, self.orden.pk)
+
+        desvincular = self._actualizar('orden', self.orden.pk, 'desvincular')
+        self.assertEqual(desvincular.status_code, 200, desvincular.content)
+        self.recepcion.refresh_from_db()
+        self.assertIsNone(self.recepcion.orden_trabajo_id)
+
+    def test_no_permite_dos_inspecciones_en_la_misma_recepcion(self):
+        primera = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            motivo_ingreso='Primera inspección',
+            numero_inspeccion='INS-REL-0001',
+        )
+        segunda = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            motivo_ingreso='Segunda inspección',
+            numero_inspeccion='INS-REL-0002',
+        )
+        self.assertEqual(self._actualizar('inspeccion', primera.pk, 'vincular').status_code, 200)
+        respuesta = self._actualizar('inspeccion', segunda.pk, 'vincular')
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        segunda.refresh_from_db()
+        self.assertIsNone(segunda.recepcion_id)
 
 class VinculoCotizacionFlujoTests(TestCase):
     """La cotización creada sin origen (WhatsApp, teléfono) se ata sola a la
