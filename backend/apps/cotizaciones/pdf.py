@@ -1,32 +1,13 @@
 """
-PDF de UNA cotización: documento sobrio, en una sola hoja A4 (caso habitual).
-
-Usa identidad, márgenes y paginado compartidos de
-``apps.core.utils.pdf_export`` (cabecera p1/cn + ``NumberedCanvas``) y su
-paleta ink-friendly: fondo blanco, cabeceras de tabla en gris muy claro,
-texto oscuro y divisorias horizontales de 0.5pt. El color de la marca se usa
-únicamente como acento tipográfico (la palabra "COTIZACIÓN" y el monto del
-TOTAL); no hay bloques de color sólido.
-
-Estructura del story (vertical, compacta):
-
-    título + estado            Table invisible de 2 columnas
-    metadatos                  línea de emisión / validez / taller / asesor
-    cliente y vehículo         Table invisible de 3 pares etiqueta/valor
-    conceptos                  tablas con cabecera gris y filetes de 0.5pt
-    totales                    Table compacta alineada a la derecha
-    observaciones / aceptación secciones de texto a 8.5pt
-
-Antes de armar las tablas, ``_consolidar`` agrupa ítems idénticos y suma sus
-cantidades: menos filas, menos alto y el documento entra en una sola página.
+PDF de UNA cotización: formato PROFORMA tradicional de taller automotriz.
+Todo en blanco y negro, líneas finas, sin fondos de color ni zebra striping.
 """
 
-from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import (
     KeepTogether,
@@ -38,9 +19,6 @@ from reportlab.platypus import (
 )
 
 from apps.core.utils.pdf_export import (
-    ESTILO_TABLA_INK_FRIENDLY,
-    GRIS_IDENTIDAD,
-    GRIS_INFORMACION,
     GRIS_LINEA_FINA,
     GRIS_OSCURO_TEXTO,
     NEGRO,
@@ -50,73 +28,41 @@ from apps.core.utils.pdf_export import (
     _escape_xml,
 )
 
-# Acento de marca: solo texto, nunca fondos.
-AZUL_MARINO = colors.HexColor('#002B49')
-
-# Color del número de cotización dentro del título (gris oscuro, no marca).
-COLOR_NUMERO = GRIS_OSCURO_TEXTO.hexval().replace('0x', '#')  # '#111827'
-
-# Respiraciones: 10pt entre secciones, 4pt dentro de un bloque.
-ESPACIO = 10
-ESPACIO_COMPACTO = 4
+# Espaciados compactos
+ESPACIO = 8
+ESPACIO_COMPACTO = 3
 
 # ---------------------------------------------------------------------------
-# ESTILOS (heredados de Normal; sin marcado inline salvo el acento de color)
+# ESTILOS
 # ---------------------------------------------------------------------------
 
 _NORMAL = getSampleStyleSheet()['Normal']
 
-COTIZACION_TITULO = ParagraphStyle(
-    'CotizacionTitulo',
+# Título "PROFORMA TALLER I Nº XXX" - derecha, 14pt, bold, subrayado
+PROFORMA_TITULO = ParagraphStyle(
+    'ProformaTitulo',
     parent=_NORMAL,
     fontName='Helvetica-Bold',
     fontSize=14,
     leading=17,
-    alignment=TA_LEFT,
-    textColor=AZUL_MARINO,
-)
-
-COTIZACION_ESTADO = ParagraphStyle(
-    'CotizacionEstado',
-    parent=_NORMAL,
-    fontName='Helvetica',
-    fontSize=10,
-    leading=17,          # mismo leading que el título: baselines alineadas
     alignment=TA_RIGHT,
-    textColor=GRIS_IDENTIDAD,
-)
-
-COTIZACION_METADATO = ParagraphStyle(
-    'CotizacionMetadato',
-    parent=_NORMAL,
-    fontName='Helvetica',
-    fontSize=9,
-    leading=12,
-    textColor=GRIS_OSCURO_TEXTO,
-)
-
-COTIZACION_SECCION = ParagraphStyle(
-    'CotizacionSeccion',
-    parent=_NORMAL,
-    fontName='Helvetica-Bold',
-    fontSize=9.5,
-    leading=12,
-    spaceBefore=2,
-    spaceAfter=3,
     textColor=NEGRO,
+    underline=True,
 )
 
-COTIZACION_ETIQUETA = ParagraphStyle(
-    'CotizacionEtiqueta',
+# Etiquetas dentro de cajas (Cliente, Fecha, etc.) - 7.5pt, gris
+CAJA_ETIQUETA = ParagraphStyle(
+    'CajaEtiqueta',
     parent=_NORMAL,
     fontName='Helvetica',
     fontSize=7.5,
     leading=9.5,
-    textColor=GRIS_INFORMACION,
+    textColor=colors.HexColor('#555555'),
 )
 
-COTIZACION_VALOR = ParagraphStyle(
-    'CotizacionValor',
+# Valores dentro de cajas - 9pt, negro
+CAJA_VALOR = ParagraphStyle(
+    'CajaValor',
     parent=_NORMAL,
     fontName='Helvetica',
     fontSize=9,
@@ -124,66 +70,91 @@ COTIZACION_VALOR = ParagraphStyle(
     textColor=GRIS_OSCURO_TEXTO,
 )
 
-COTIZACION_NOTA = ParagraphStyle(
-    'CotizacionNota',
+# Encabezados de tabla de ítems - 9pt, bold, negro
+ITEM_ENCABEZADO = ParagraphStyle(
+    'ItemEncabezado',
     parent=_NORMAL,
-    fontName='Helvetica',
-    fontSize=7.5,
-    leading=10,
-    textColor=GRIS_INFORMACION,
-)
-
-OBSERVACIONES_TEXTO = ParagraphStyle(
-    'ObservacionesTexto',
-    parent=_NORMAL,
-    fontName='Helvetica',
-    fontSize=8.5,
+    fontName='Helvetica-Bold',
+    fontSize=9,
     leading=11,
-    textColor=GRIS_OSCURO_TEXTO,
+    alignment=TA_CENTER,
+    textColor=NEGRO,
 )
 
-# Cabeceras y celdas de las tablas de conceptos (gris claro + texto oscuro).
-COTIZACION_ENCABEZADO = ParagraphStyle(
-    'CotizacionEncabezado',
-    parent=_NORMAL,
-    fontName='Helvetica-Bold',
-    fontSize=8.5,
-    leading=10.5,
+ITEM_ENCABEZADO_IZQ = ParagraphStyle(
+    'ItemEncabezadoIzq',
+    parent=ITEM_ENCABEZADO,
     alignment=TA_LEFT,
-    textColor=NEGRO,
 )
 
-COTIZACION_ENCABEZADO_DERECHA = ParagraphStyle(
-    'CotizacionEncabezadoDerecha',
-    parent=_NORMAL,
-    fontName='Helvetica-Bold',
-    fontSize=8.5,
-    leading=10.5,
+ITEM_ENCABEZADO_DER = ParagraphStyle(
+    'ItemEncabezadoDer',
+    parent=ITEM_ENCABEZADO,
     alignment=TA_RIGHT,
-    textColor=NEGRO,
 )
 
-CELDA_IZQUIERDA = ParagraphStyle(
-    'CeldaIzquierda',
+# Celdas de datos de la tabla - 8pt
+ITEM_CELDA_IZQ = ParagraphStyle(
+    'ItemCeldaIzq',
     parent=_NORMAL,
     fontName='Helvetica',
-    fontSize=8.5,
-    leading=10.5,
+    fontSize=8,
+    leading=10,
     alignment=TA_LEFT,
     textColor=GRIS_OSCURO_TEXTO,
 )
 
-CELDA_DERECHA = ParagraphStyle(
-    'CeldaDerecha',
+ITEM_CELDA_CENTRO = ParagraphStyle(
+    'ItemCeldaCentro',
     parent=_NORMAL,
     fontName='Helvetica',
-    fontSize=8.5,
-    leading=10.5,
+    fontSize=8,
+    leading=10,
+    alignment=TA_CENTER,
+    textColor=GRIS_OSCURO_TEXTO,
+)
+
+ITEM_CELDA_DER = ParagraphStyle(
+    'ItemCeldaDer',
+    parent=_NORMAL,
+    fontName='Helvetica',
+    fontSize=8,
+    leading=10,
     alignment=TA_RIGHT,
     textColor=GRIS_OSCURO_TEXTO,
 )
 
-# Bloque de totales.
+# Texto de condiciones - 8pt
+CONDICIONES_TEXTO = ParagraphStyle(
+    'CondicionesTexto',
+    parent=_NORMAL,
+    fontName='Helvetica',
+    fontSize=8,
+    leading=10,
+    textColor=GRIS_OSCURO_TEXTO,
+)
+
+CONDICIONES_TITULO = ParagraphStyle(
+    'CondicionesTitulo',
+    parent=_NORMAL,
+    fontName='Helvetica-Bold',
+    fontSize=8,
+    leading=10,
+    textColor=NEGRO,
+)
+
+# Firmas - 8pt
+FIRMA_ETIQUETA = ParagraphStyle(
+    'FirmaEtiqueta',
+    parent=_NORMAL,
+    fontName='Helvetica',
+    fontSize=8,
+    leading=10,
+    alignment=TA_CENTER,
+    textColor=GRIS_OSCURO_TEXTO,
+)
+
+# Totales - etiquetas 9pt, valores 9pt, total destacado 10.5pt bold
 TOTAL_ETIQUETA = ParagraphStyle(
     'TotalEtiqueta',
     parent=_NORMAL,
@@ -191,7 +162,7 @@ TOTAL_ETIQUETA = ParagraphStyle(
     fontSize=9,
     leading=11.5,
     alignment=TA_RIGHT,
-    textColor=GRIS_IDENTIDAD,
+    textColor=colors.HexColor('#555555'),
 )
 
 TOTAL_VALOR = ParagraphStyle(
@@ -218,19 +189,29 @@ TOTAL_VALOR_DESTACADA = ParagraphStyle(
     'TotalDestacadoValor',
     parent=_NORMAL,
     fontName='Helvetica-Bold',
-    fontSize=12.5,
-    leading=16,
+    fontSize=10.5,
+    leading=14,
     alignment=TA_RIGHT,
-    textColor=AZUL_MARINO,  # único acento de marca del documento
+    textColor=NEGRO,
 )
 
+# Nota final
+NOTA_FINAL = ParagraphStyle(
+    'NotaFinal',
+    parent=_NORMAL,
+    fontName='Helvetica',
+    fontSize=7.5,
+    leading=9.5,
+    alignment=TA_CENTER,
+    textColor=colors.HexColor('#888888'),
+)
 
 # ---------------------------------------------------------------------------
-# FORMATO (helpers intactos: el formateo se aplica antes del Paragraph)
+# FORMATO (helpers nativos)
 # ---------------------------------------------------------------------------
 
 def _money(valor) -> str:
-    """``$1,234.56`` (mismo formato que los reportes de listados)."""
+    """$1,234.56"""
     try:
         monto = Decimal(str(valor if valor is not None else 0))
     except (TypeError, ValueError, ArithmeticError):
@@ -247,7 +228,7 @@ def _decimal(valor, decimales=2) -> str:
 
 
 def _porcentaje(valor) -> str:
-    """``0.1500`` → ``15%``."""
+    """0.1500 → 15%"""
     try:
         pct = Decimal(str(valor if valor is not None else 0)) * 100
     except (TypeError, ValueError, ArithmeticError):
@@ -269,10 +250,6 @@ def _nombre_persona(persona) -> str:
     return persona.get_full_name() or getattr(persona, 'username', '') or ''
 
 
-def _nombre_asesor(asesor) -> str:
-    return _nombre_persona(asesor)
-
-
 # ---------------------------------------------------------------------------
 # CONSOLIDACIÓN DE ÍTEMS
 # ---------------------------------------------------------------------------
@@ -286,15 +263,7 @@ def _como_decimal(valor) -> Decimal:
 
 def _consolidar(items, campo_cantidad: str, campo_codigo: str, campo_precio: str) -> list:
     """
-    Agrupa ítems idénticos y SUMA sus cantidades.
-
-    Se consideran idénticos los que comparten código, descripción, precio
-    unitario, IVA y la marca de opcional (un servicio opcional nunca se mezcla
-    con uno obligatorio). El importe del grupo es la suma de los importes de las
-    líneas, por lo que el total del PDF no se altera al consolidar.
-
-    :returns: lista de dicts con ``codigo``, ``descripcion``, ``cantidad``,
-        ``precio``, ``descuento``, ``iva``, ``subtotal`` y ``es_opcional``.
+    Consolida ítems idénticos sumando sus cantidades (compatibilidad con tests).
     """
     grupos: dict = {}
     orden: list = []
@@ -328,350 +297,362 @@ def _consolidar(items, campo_cantidad: str, campo_codigo: str, campo_precio: str
     return [grupos[clave] for clave in orden]
 
 
-# ---------------------------------------------------------------------------
-# TÍTULO: Table invisible de 2 columnas (número y estado NUNCA se enciman)
-# ---------------------------------------------------------------------------
-
-def _bloque_titulo(cotizacion, ancho_util) -> Table:
+def _consolidar_todos(items_servicios, items_repuestos) -> list:
     """
-    Columna 1 alineada a la izquierda con "COTIZACIÓN <numero>"; columna 2
-    alineada a la derecha con el estado. Sin bordes ni fondos.
-
-    El número va en un ``<font>`` con el color oscuro y shares el ``leading``
-    del título, así que ambas columnas comparten línea base.
+    Consolida servicios y repuestos en una sola lista unificada.
+    Servicios usan horas_estimadas como cantidad, repuestos usan cantidad.
     """
-    izquierda = Paragraph(
-        f'<b>COTIZACIÓN</b> <font color="{COLOR_NUMERO}">'
-        f'{_escape_xml(cotizacion.numero_cotizacion or "")}</font>',
-        COTIZACION_TITULO,
-    )
-    derecha = Paragraph(_escape_xml(cotizacion.get_estado_display()), COTIZACION_ESTADO)
+    grupos = {}
+    orden = []
 
-    tabla = Table([[izquierda, derecha]], colWidths=[ancho_util * 0.68, ancho_util * 0.32])
+    # Procesar servicios
+    for item in items_servicios or []:
+        clave = (
+            getattr(item, 'codigo', None) or '',
+            (getattr(item, 'descripcion', '') or '').strip(),
+            _como_decimal(getattr(item, 'precio_unitario', None)),
+            _como_decimal(getattr(item, 'iva_porcentaje', None)),
+            bool(getattr(item, 'es_opcional', False)),
+            'SERVICIO',
+        )
+        if clave not in grupos:
+            grupos[clave] = {
+                'codigo': clave[0],
+                'descripcion': clave[1],
+                'cantidad': Decimal('0'),
+                'precio': clave[2],
+                'descuento': Decimal('0.00'),
+                'iva': clave[3],
+                'subtotal': Decimal('0.00'),
+                'es_opcional': clave[4],
+                'tipo': 'SERVICIO',
+            }
+            orden.append(clave)
+        grupo = grupos[clave]
+        grupo['cantidad'] += _como_decimal(getattr(item, 'horas_estimadas', None))
+        grupo['descuento'] += _como_decimal(getattr(item, 'descuento', None))
+        grupo['subtotal'] += _como_decimal(getattr(item, 'subtotal', None))
+
+    # Procesar repuestos
+    for item in items_repuestos or []:
+        clave = (
+            getattr(item, 'codigo_repuesto', None) or '',
+            (getattr(item, 'descripcion', '') or '').strip(),
+            _como_decimal(getattr(item, 'precio_unitario_referencial', None)),
+            _como_decimal(getattr(item, 'iva_porcentaje', None)),
+            bool(getattr(item, 'es_opcional', False)),
+            'REPUESTO',
+        )
+        if clave not in grupos:
+            grupos[clave] = {
+                'codigo': clave[0],
+                'descripcion': clave[1],
+                'cantidad': Decimal('0'),
+                'precio': clave[2],
+                'descuento': Decimal('0.00'),
+                'iva': clave[3],
+                'subtotal': Decimal('0.00'),
+                'es_opcional': clave[4],
+                'tipo': 'REPUESTO',
+            }
+            orden.append(clave)
+        grupo = grupos[clave]
+        grupo['cantidad'] += _como_decimal(getattr(item, 'cantidad', None))
+        grupo['descuento'] += _como_decimal(getattr(item, 'descuento', None))
+        grupo['subtotal'] += _como_decimal(getattr(item, 'subtotal', None))
+
+    return [grupos[clave] for clave in orden]
+
+
+# ---------------------------------------------------------------------------
+# BLOQUES DEL DOCUMENTO
+# ---------------------------------------------------------------------------
+
+def _bloque_titulo_proforma(cotizacion, ancho_util) -> Table:
+    """
+    Título alineado a la derecha: PROFORMA TALLER I Nº [número]
+    """
+    texto = f'PROFORMA TALLER I Nº {_escape_xml(cotizacion.numero_cotizacion or "")}'
+    titulo = Paragraph(texto, PROFORMA_TITULO)
+
+    tabla = Table([[titulo]], colWidths=[ancho_util])
     tabla.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
     ]))
     return tabla
 
 
-# ---------------------------------------------------------------------------
-# CLIENTE / VEHÍCULO: Table invisible de 3 columnas
-# ---------------------------------------------------------------------------
-
-def _bloque_cliente_vehiculo(cotizacion, ancho_util) -> Table:
+def _bloque_cajas_cliente_fechas(cotizacion, ancho_util) -> Table:
     """
-    Datos repartidos en 3 pares etiqueta/valor (6 columnas) para no crecer
-    verticalmente:
-
-      * Col 1: Cliente, Identificación, Correo
-      * Col 2: Placa, Marca / Modelo, Kilometraje
-      * Col 3: Teléfono, Color
-
-    Cada columna declara su ``colWidths``: etiqueta gris pequeña (0.6-0.8in) y
-    valor oscuro. Sin bordes ni fondos.
+    Dos cajas paralelas con borde perimetral negro 0.5pt:
+    - Izquierda (ancha): Cliente, Dirección, Teléfono, Vendedor
+    - Derecha (angosta): Fecha, Forma de Pago, Vencimiento
     """
     cliente = cotizacion.cliente
     vehiculo = cotizacion.vehiculo
+    asesor = getattr(cotizacion, 'asesor', None)
 
-    columnas = [
-        [
-            ('Cliente', getattr(cliente, 'nombre', '') or ''),
-            ('Identificación', getattr(cliente, 'identificacion', '') or ''),
-            ('Correo', getattr(cliente, 'email', '') or ''),
-        ],
-        [
-            ('Placa', getattr(vehiculo, 'placa', '') or ''),
-            ('Marca/Modelo', ' '.join(
-                p for p in [
-                    (getattr(vehiculo, 'marca', '') or '').strip(),
-                    (getattr(vehiculo, 'modelo', '') or '').strip(),
-                ] if p
-            )),
-            ('Kilometraje', (
-                f"{_decimal(getattr(vehiculo, 'kilometraje_actual', None), 0)} km"
-                if getattr(vehiculo, 'kilometraje_actual', None) else ''
-            )),
-        ],
-        [
-            ('Teléfono', getattr(cliente, 'telefono', '') or ''),
-            ('Color', getattr(vehiculo, 'color', '') or ''),
-            ('', ''),
-        ],
+    # Datos cliente
+    cliente_nombre = getattr(cliente, 'nombre', '') or ''
+    cliente_direccion = getattr(cliente, 'direccion', '') or ''
+    cliente_telefono = getattr(cliente, 'telefono', '') or ''
+    asesor_nombre = _nombre_persona(asesor)
+
+    # Datos fechas
+    fecha_emision = _fecha_hora(cotizacion.created_at) if getattr(cotizacion, 'created_at', None) else ''
+    forma_pago = 'Contado'  # Valor por defecto, se puede ajustar según modelo
+    validez_dias = getattr(cotizacion, 'validez_dias', 0) or 0
+    from datetime import timedelta
+    fecha_venc = (cotizacion.created_at + timedelta(days=validez_dias)) if getattr(cotizacion, 'created_at', None) else None
+    fecha_vencimiento = _fecha(fecha_venc)
+
+    # Caja izquierda (Cliente)
+    filas_izq = [
+        [Paragraph('Cliente:', CAJA_ETIQUETA), Paragraph(_escape_xml(cliente_nombre), CAJA_VALOR)],
+        [Paragraph('Dirección:', CAJA_ETIQUETA), Paragraph(_escape_xml(cliente_direccion), CAJA_VALOR)],
+        [Paragraph('Teléfono:', CAJA_ETIQUETA), Paragraph(_escape_xml(cliente_telefono), CAJA_VALOR)],
+        [Paragraph('Vendedor:', CAJA_ETIQUETA), Paragraph(_escape_xml(asesor_nombre), CAJA_VALOR)],
     ]
 
-    # (ancho de etiqueta, ancho de valor) por cada uno de los 3 pares.
-    anchos_pares = [(0.85, 1.60), (0.95, 1.45), (0.70, 1.68)]
-    filas = []
-    for indice in range(max(len(columna) for columna in columnas)):
-        fila = []
-        for columna in columnas:
-            etiqueta, valor = columna[indice] if indice < len(columna) else ('', '')
-            fila.append(Paragraph(_escape_xml(etiqueta), COTIZACION_ETIQUETA))
-            fila.append(Paragraph(_escape_xml(valor), COTIZACION_VALOR))
-        filas.append(fila)
+    anchos_izq = _ajustar_anchos([1.0, 3.5], ancho_util * 0.68)
+    tabla_izq = Table(filas_izq, colWidths=[a * 72 for a in anchos_izq])
+    tabla_izq.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, NEGRO),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.3, NEGRO),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]))
 
-    anchos = _ajustar_anchos(
-        [ancho for par in anchos_pares for ancho in par],
-        ancho_util,
+    # Caja derecha (Fechas)
+    filas_der = [
+        [Paragraph('Fecha:', CAJA_ETIQUETA), Paragraph(_escape_xml(fecha_emision), CAJA_VALOR)],
+        [Paragraph('Forma de Pago:', CAJA_ETIQUETA), Paragraph(_escape_xml(forma_pago), CAJA_VALOR)],
+        [Paragraph('Vencimiento:', CAJA_ETIQUETA), Paragraph(_escape_xml(fecha_vencimiento), CAJA_VALOR)],
+    ]
+
+    anchos_der = _ajustar_anchos([1.2, 2.0], ancho_util * 0.30)
+    tabla_der = Table(filas_der, colWidths=[a * 72 for a in anchos_der])
+    tabla_der.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, NEGRO),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.3, NEGRO),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]))
+
+    # Tabla contenedora de ambas cajas
+    contenedor = Table(
+        [[tabla_izq, tabla_der]],
+        colWidths=[ancho_util * 0.68, ancho_util * 0.30],
     )
-    tabla = Table(filas, colWidths=[a * 72 for a in anchos])
-    tabla.setStyle(TableStyle([
+    contenedor.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-        ('TOPPADDING', (0, 0), (-1, -1), 1),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-        # Separación visual entre el valor de un par y la etiqueta del siguiente.
-        ('RIGHTPADDING', (0, 0), (0, -1), 12),
-        ('RIGHTPADDING', (2, 0), (2, -1), 12),
-        ('RIGHTPADDING', (4, 0), (4, -1), 12),
-        ('LEFTPADDING', (2, 0), (2, -1), 6),
-        ('LEFTPADDING', (4, 0), (4, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
     ]))
-    return tabla
+    return contenedor
 
 
-# ---------------------------------------------------------------------------
-# TABLAS DE CONCEPTOS
-# ---------------------------------------------------------------------------
+def _bloque_items_unificado(cotizacion, ancho_util) -> list:
+    """
+    Tabla única con todos los ítems (servicios + repuestos).
+    Columnas: Cant., Bod, Código, Descripción, Precio, Desc., Total
+    """
+    # Consolidar todo junto
+    grupos = _consolidar_todos(
+        cotizacion.servicios.all(),
+        cotizacion.repuestos.all(),
+    )
 
-def _columnas_detalle():
-    """(título, ancho en pulgadas, alineación) de la tabla de conceptos."""
-    return [
-        ('Código', 0.8, TA_LEFT),
-        ('Descripción', 2.5, TA_LEFT),
-        ('Cant./Horas', 0.85, TA_RIGHT),
-        ('P. Unitario', 0.95, TA_RIGHT),
-        ('Descuento', 0.85, TA_RIGHT),
-        ('IVA', 0.55, TA_RIGHT),
-        ('Importe', 0.95, TA_RIGHT),
+    if not grupos:
+        return [Paragraph('Esta cotización no tiene conceptos registrados.', CONDICIONES_TEXTO)]
+
+    # Definir columnas: (título, ancho_pulgadas, estilo_encabezado, estilo_celda)
+    columnas = [
+        ('Cant.', 0.55, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
+        ('Bod', 0.45, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
+        ('Código', 0.90, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
+        ('Descripción del Producto', 2.60, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
+        ('Precio', 0.85, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('Desc.', 0.65, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('Total', 0.85, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
     ]
 
+    anchos_pulg = [ancho for _, ancho, _, _ in columnas]
+    anchos_ajustados = _ajustar_anchos(anchos_pulg, ancho_util)
+    col_widths = [a * 72 for a in anchos_ajustados]
 
-def _estilo_celda(alineacion):
-    return CELDA_DERECHA if alineacion == TA_RIGHT else CELDA_IZQUIERDA
+    # Encabezado
+    encabezado = [
+        Paragraph(titulo, estilo_enc)
+        for titulo, _, estilo_enc, _ in columnas
+    ]
 
+    filas = [encabezado]
 
-def _estilo_encabezado(alineacion):
-    return COTIZACION_ENCABEZADO_DERECHA if alineacion == TA_RIGHT else COTIZACION_ENCABEZADO
+    for g in grupos:
+        # Bodega vacía por ahora (se puede completar si hay campo en modelo)
+        bod = ''
+        cantidad = _decimal(g['cantidad'], 2)
+        codigo = g['codigo'] or ''
+        desc = g['descripcion']
+        if g['es_opcional']:
+            desc = f'{desc} (opcional)'
+        precio = _money(g['precio'])
+        descuento = _money(g['descuento']) if g['descuento'] > 0 else '$0.00'
+        total = _money(g['subtotal'])
 
+        fila = [
+            Paragraph(cantidad, ITEM_CELDA_CENTRO),
+            Paragraph(bod, ITEM_CELDA_CENTRO),
+            Paragraph(_escape_xml(codigo), ITEM_CELDA_IZQ),
+            Paragraph(_escape_xml(desc), ITEM_CELDA_IZQ),
+            Paragraph(precio, ITEM_CELDA_DER),
+            Paragraph(descuento, ITEM_CELDA_DER),
+            Paragraph(total, ITEM_CELDA_DER),
+        ]
+        filas.append(fila)
 
-def _descripcion_con_opcional(descripcion, es_opcional) -> str:
-    texto = (descripcion or '').strip()
-    return f'{texto} (opcional)' if es_opcional else texto
+    tabla = Table(filas, colWidths=col_widths, repeatRows=1)
 
-
-def _estilo_tabla_detalle() -> TableStyle:
-    """
-    Estilo minimalista original: fondo blanco en los datos, cabecera en gris
-    muy claro (#D7E0E9), texto oscuro en negrita y solo divisorias
-    horizontales de 0.5pt. Sin GRID, sin zebra, sin fondos de color.
-    """
-    return TableStyle(ESTILO_TABLA_INK_FRIENDLY + [
-        # La cabecera de columnas va en negrita y respira un poco más.
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('TOPPADDING', (0, 0), (-1, 0), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-        ('TOPPADDING', (0, 1), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-        # Refuerzo del filete bajo la cabecera.
-        ('LINEBELOW', (0, 0), (-1, 0), 0.5, GRIS_LINEA_FINA),
+    # Estilo de la tabla: líneas negras finas, sin zebra, sin fondos
+    estilo = TableStyle([
+        # Encabezado con líneas arriba y abajo (1pt negro)
+        ('LINEABOVE', (0, 0), (-1, 0), 1, NEGRO),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, NEGRO),
+        # Padding encabezado
+        ('TOPPADDING', (0, 0), (-1, 0), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+        # Padding datos
+        ('TOPPADDING', (0, 1), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        # Divisorias horizontales finas entre filas (0.5pt negro)
+        ('LINEBELOW', (0, 1), (-1, -2), 0.3, NEGRO),
+        # Línea final bajo la última fila
+        ('LINEBELOW', (0, -1), (-1, -1), 0.5, NEGRO),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ])
+    tabla.setStyle(estilo)
+
+    return [tabla]
 
 
-def _tabla_detalle(titulo, grupos, ancho_util) -> list:
-    columnas = _columnas_detalle()
-    anchos = _ajustar_anchos([ancho for _, ancho, _ in columnas], ancho_util)
-
-    filas = [[
-        Paragraph(_escape_xml(titulo_columna), _estilo_encabezado(alineacion))
-        for titulo_columna, _, alineacion in columnas
-    ]]
-
-    for grupo in grupos:
-        filas.append([
-            Paragraph(_escape_xml(valor), _estilo_celda(alineacion))
-            for valor, (_, _, alineacion) in zip(
-                [
-                    grupo['codigo'],
-                    _descripcion_con_opcional(grupo['descripcion'], grupo['es_opcional']),
-                    _decimal(grupo['cantidad']),
-                    _money(grupo['precio']),
-                    _money(grupo['descuento']),
-                    _porcentaje(grupo['iva']),
-                    _money(grupo['subtotal']),
-                ],
-                columnas,
-            )
-        ])
-
-    tabla = Table(filas, colWidths=[a * 72 for a in anchos], repeatRows=1)
-    tabla.setStyle(_estilo_tabla_detalle())
-
-    return [Paragraph(_escape_xml(titulo), COTIZACION_SECCION), tabla]
-
-
-def _bloques_conceptos(cotizacion, ancho_util) -> list:
+def _bloque_condiciones(cotizacion, ancho_util) -> list:
+    """
+    Bloque CONDICIONES + firmas (izquierda) + totales (derecha).
+    """
     story = []
 
-    servicios = _consolidar(
-        cotizacion.servicios.all(),
-        campo_cantidad='horas_estimadas',
-        campo_codigo='codigo',
-        campo_precio='precio_unitario',
+    # Texto de condiciones
+    condiciones_texto = (
+        'CONDICIONES: Los precios son válidos por el período indicado. '
+        'La mano de obra incluye diagnóstico y prueba. '
+        'Los repuestos cuentan con garantía del fabricante. '
+        'El taller no se responsabiliza por objetos dejados en el vehículo. '
+        'Trabajos adicionales requieren autorización previa del cliente.'
     )
-    if servicios:
-        story.extend(_tabla_detalle('Mano de obra / Servicios', servicios, ancho_util))
+    story.append(Paragraph(condiciones_texto, CONDICIONES_TEXTO))
+    story.append(Spacer(1, ESPACIO))
 
-    repuestos = _consolidar(
-        cotizacion.repuestos.all(),
-        campo_cantidad='cantidad',
-        campo_codigo='codigo_repuesto',
-        campo_precio='precio_unitario_referencial',
-    )
-    if repuestos:
-        if servicios:
-            story.append(Spacer(1, ESPACIO))
-        story.extend(_tabla_detalle('Repuestos', repuestos, ancho_util))
-
-    if not servicios and not repuestos:
-        story.append(Paragraph(
-            'Esta cotización no tiene conceptos registrados.',
-            OBSERVACIONES_TEXTO,
-        ))
-
-    return story
-
-
-# ---------------------------------------------------------------------------
-# TOTALES
-# ---------------------------------------------------------------------------
-
-def _bloque_totales(cotizacion, ancho_util) -> Table:
-    """Tabla compacta alineada a la derecha; el TOTAL se apoya en un filete."""
-    filas_datos = [
-        ('Subtotal mano de obra', _money(cotizacion.subtotal_servicios), False),
-        ('Subtotal repuestos', _money(cotizacion.subtotal_repuestos), False),
-    ]
-    if cotizacion.descuento > Decimal('0.00'):
-        filas_datos.append(('Descuentos aplicados', f'-{_money(cotizacion.descuento)}', False))
-    # Las bases solo aparecen cuando hay monto en ellas (evita ruido con $0.00).
-    if cotizacion.subtotal_base_0 > Decimal('0.00'):
-        filas_datos.append(('Base 0%', _money(cotizacion.subtotal_base_0), False))
-    if cotizacion.subtotal_base_gravada > Decimal('0.00'):
-        filas_datos.append(('Base gravada', _money(cotizacion.subtotal_base_gravada), False))
-
-    filas_datos.append(('Base imponible', _money(cotizacion.subtotal_neto), False))
-    filas_datos.append(('IVA', _money(cotizacion.total_iva), False))
-    filas_datos.append(('TOTAL', _money(cotizacion.total), True))
-
-    filas = [
+    # Tabla de firmas (izquierda) y totales (derecha)
+    # Firmas
+    filas_firmas = [
         [
-            Paragraph(
-                _escape_xml(etiqueta),
-                TOTAL_ETIQUETA_DESTACADA if es_total else TOTAL_ETIQUETA,
-            ),
-            Paragraph(
-                _escape_xml(valor),
-                TOTAL_VALOR_DESTACADA if es_total else TOTAL_VALOR,
-            ),
-        ]
-        for etiqueta, valor, es_total in filas_datos
+            Paragraph('____________________________', FIRMA_ETIQUETA),
+            Paragraph('____________________________', FIRMA_ETIQUETA),
+        ],
+        [
+            Paragraph('Aprobado por Cliente', FIRMA_ETIQUETA),
+            Paragraph('Elaborado Por', FIRMA_ETIQUETA),
+        ],
     ]
+    tabla_firmas = Table(filas_firmas, colWidths=[ancho_util * 0.35, ancho_util * 0.35])
+    tabla_firmas.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
 
-    ancho_tabla = min(ancho_util, 3.2 * 72)
-    tabla = Table(
-        filas,
-        colWidths=[ancho_tabla - 1.35 * 72, 1.35 * 72],
+    # Totales alineados a la derecha
+    subtotal_neto = getattr(cotizacion, 'subtotal_neto', Decimal('0'))
+    descuento_total = getattr(cotizacion, 'descuento', Decimal('0'))
+    total_iva = getattr(cotizacion, 'total_iva', Decimal('0'))
+    total = getattr(cotizacion, 'total', Decimal('0'))
+
+    filas_totales = [
+        ('Subtotal', _money(subtotal_neto), False),
+        ('Descuento', f'-{_money(descuento_total)}', False) if descuento_total > 0 else None,
+        ('Impuesto 15%', _money(total_iva), False),
+        ('VALOR TOTAL', _money(total), True),
+    ]
+    filas_totales = [f for f in filas_totales if f]
+
+    filas_t = []
+    for etiqueta, valor, es_total in filas_totales:
+        filas_t.append([
+            Paragraph(_escape_xml(etiqueta), TOTAL_ETIQUETA_DESTACADA if es_total else TOTAL_ETIQUETA),
+            Paragraph(_escape_xml(valor), TOTAL_VALOR_DESTACADA if es_total else TOTAL_VALOR),
+        ])
+
+    ancho_totales = min(ancho_util * 0.45, 3.2 * 72)
+    tabla_totales = Table(
+        filas_t,
+        colWidths=[ancho_totales - 1.35 * 72, 1.35 * 72],
         hAlign='RIGHT',
     )
-    tabla.setStyle(TableStyle([
+    tabla_totales.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('LEFTPADDING', (0, 0), (-1, -1), 4),
         ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('TOPPADDING', (0, 0), (-1, -1), 2.5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.5, GRIS_LINEA_FINA),
-        # Filete oscuro bajo el TOTAL: cierra el documento sin recargarlo.
-        ('LINEABOVE', (0, -1), (-1, -1), 0.8, NEGRO),
+        # Líneas horizontales en totales
+        ('LINEBELOW', (0, 0), (-1, -2), 0.5, NEGRO),
+        ('LINEABOVE', (0, -1), (-1, -1), 1, NEGRO),
         ('TOPPADDING', (0, -1), (-1, -1), 4),
         ('BOTTOMPADDING', (0, -1), (-1, -1), 4),
     ]))
-    return tabla
 
-
-# ---------------------------------------------------------------------------
-# OBSERVACIONES Y ACEPTACIÓN
-# ---------------------------------------------------------------------------
-
-def _bloque_aceptacion(cotizacion, ancho_util) -> list:
-    detalles = [('Fecha', _fecha_hora(cotizacion.fecha_aceptacion))]
-    if cotizacion.aceptada_por_id:
-        detalles.append(('Aceptada por', _nombre_persona(cotizacion.aceptada_por)))
-    if cotizacion.metodo_aceptacion:
-        detalles.append(('Método', cotizacion.get_metodo_aceptacion_display()))
-
-    filas = [
-        [
-            Paragraph(_escape_xml(etiqueta), COTIZACION_ETIQUETA),
-            Paragraph(_escape_xml(valor), OBSERVACIONES_TEXTO),
-        ]
-        for etiqueta, valor in detalles
-        if valor
-    ]
-
-    anchos = _ajustar_anchos([0.9, 3.2], ancho_util)
-    tabla = Table(filas, colWidths=[a * 72 for a in anchos])
-    tabla.setStyle(TableStyle([
+    # Contenedor: firmas a la izquierda, totales a la derecha
+    contenedor = Table(
+        [[tabla_firmas, tabla_totales]],
+        colWidths=[ancho_util * 0.55, ancho_util * 0.45],
+    )
+    contenedor.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 1),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-        ('LINEBELOW', (0, -1), (-1, -1), 0.5, GRIS_LINEA_FINA),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
     ]))
-    return tabla
+
+    story.append(contenedor)
+    story.append(Spacer(1, ESPACIO_COMPACTO))
+
+    # Nota final
+    story.append(Paragraph(
+        _escape_xml('Precios en dólares de los Estados Unidos de América (USD), sujeta a validación del taller.'),
+        NOTA_FINAL,
+    ))
+
+    return story
 
 
 # ---------------------------------------------------------------------------
 # API PÚBLICA
 # ---------------------------------------------------------------------------
-
-def _metadatos_cotizacion(cotizacion) -> str:
-    """Línea de metadatos: emisión, validez, taller y asesor."""
-    emission = cotizacion.created_at
-    validez = (emission + timedelta(days=cotizacion.validez_dias or 0)) if emission else None
-
-    partes = [f'Emitida el {_fecha_hora(emission)}']
-    if validez:
-        partes.append(f'Válida hasta el {_fecha(validez)}')
-    if cotizacion.sucursal_id and cotizacion.sucursal:
-        partes.append(f"Taller: {cotizacion.sucursal.nombre}")
-    asesor = _nombre_asesor(getattr(cotizacion, 'asesor', None))
-    if asesor:
-        partes.append(f'Asesor: {asesor}')
-
-    return '  ·  '.join(partes)
-
-
-def _linea_origenes(cotizacion) -> str:
-    """Trazabilidad: de dónde salió la cotización (si tiene origen)."""
-    partes = []
-    if cotizacion.recepcion_origen_id:
-        partes.append(f"Recepción {cotizacion.recepcion_origen.numero_recepcion}")
-    if cotizacion.inspeccion_origen_id:
-        partes.append(f"Inspección {cotizacion.inspeccion_origen.numero_inspeccion}")
-    if cotizacion.orden_trabajo_origen_id:
-        partes.append(f"Orden {cotizacion.orden_trabajo_origen.numero_orden}")
-    return 'Origen: ' + ' · '.join(partes) if partes else ''
-
 
 def exportar_cotizacion_pdf(
     buffer: BytesIO,
@@ -683,57 +664,24 @@ def exportar_cotizacion_pdf(
     logo=None,
 ) -> None:
     """
-    Escribe en ``buffer`` el PDF de UNA cotización (una sola hoja A4 en el
-    caso habitual).
-
-    ``empresa``/``taller``/``logo`` son opcionales: si no se pasan, la cabecera
-    compartida resuelve el logo a partir de la identidad indicada.
+    Genera el PDF de UNA cotización en formato PROFORMA tradicional.
     """
-    titulo = f'Cotización {cotizacion.numero_cotizacion}'
+    titulo = f'Proforma {cotizacion.numero_cotizacion}'
     doc, ancho_util = _crear_documento(buffer, titulo, empresa, taller, usuario, logo)
 
     story = [
         NextPageTemplate('cn'),
-        _bloque_titulo(cotizacion, ancho_util),
-        Paragraph(_escape_xml(_metadatos_cotizacion(cotizacion)), COTIZACION_METADATO),
+        _bloque_titulo_proforma(cotizacion, ancho_util),
+        Spacer(1, ESPACIO),
+        _bloque_cajas_cliente_fechas(cotizacion, ancho_util),
+        Spacer(1, ESPACIO),
     ]
 
-    origenes = _linea_origenes(cotizacion)
-    if origenes:
-        story.append(Paragraph(_escape_xml(origenes), COTIZACION_NOTA))
-
-    # Cliente / vehículo: bloque compacto de 3 columnas, 10pt antes y después.
-    story.append(Spacer(1, ESPACIO))
-    story.append(_bloque_cliente_vehiculo(cotizacion, ancho_util))
+    # Tabla única de ítems
+    story.extend(_bloque_items_unificado(cotizacion, ancho_util))
     story.append(Spacer(1, ESPACIO))
 
-    story.extend(_bloques_conceptos(cotizacion, ancho_util))
-
-    # Totales + observaciones + aceptación viajan juntos: si no cupieran, el
-    # conjunto pasa íntegro a la hoja siguiente en vez de partirse.
-    cierre = [Spacer(1, ESPACIO), _bloque_totales(cotizacion, ancho_util)]
-
-    if cotizacion.observaciones:
-        cierre.extend([
-            Spacer(1, ESPACIO),
-            Paragraph('Observaciones', COTIZACION_SECCION),
-            Paragraph(_escape_xml(cotizacion.observaciones), OBSERVACIONES_TEXTO),
-        ])
-
-    if cotizacion.fecha_aceptacion:
-        cierre.append(Spacer(1, ESPACIO))
-        cierre.append(Paragraph('Aceptación', COTIZACION_SECCION))
-        cierre.append(_bloque_aceptacion(cotizacion, ancho_util))
-
-    cierre.append(Spacer(1, ESPACIO_COMPACTO))
-    cierre.append(Paragraph(
-        _escape_xml(
-            'Precios en dólares de los Estados Unidos de América (USD), sujeta a '
-            'validación del taller.'
-        ),
-        COTIZACION_NOTA,
-    ))
-
-    story.append(KeepTogether(cierre))
+    # Condiciones, firmas y totales
+    story.extend(_bloque_condiciones(cotizacion, ancho_util))
 
     doc.build(story, canvasmaker=NumberedCanvas)
