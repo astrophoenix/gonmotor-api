@@ -19,6 +19,7 @@ from reportlab.platypus import (
 )
 
 from apps.core.utils.pdf_export import (
+    GRIS_CABECERA_TABLA,
     GRIS_LINEA_FINA,
     GRIS_OSCURO_TEXTO,
     NEGRO,
@@ -31,6 +32,7 @@ from apps.core.utils.pdf_export import (
 # Espaciados compactos
 ESPACIO = 8
 ESPACIO_COMPACTO = 3
+COLOR_MARCA = colors.HexColor('#2B4352')
 
 # ---------------------------------------------------------------------------
 # ESTILOS
@@ -38,7 +40,7 @@ ESPACIO_COMPACTO = 3
 
 _NORMAL = getSampleStyleSheet()['Normal']
 
-# Título "PROFORMA TALLER I Nº XXX" - derecha, 14pt, bold, subrayado
+# Título de la cotización - derecha, 14pt, bold
 PROFORMA_TITULO = ParagraphStyle(
     'ProformaTitulo',
     parent=_NORMAL,
@@ -46,8 +48,7 @@ PROFORMA_TITULO = ParagraphStyle(
     fontSize=14,
     leading=17,
     alignment=TA_RIGHT,
-    textColor=NEGRO,
-    underline=True,
+    textColor=COLOR_MARCA,
 )
 
 # Etiquetas dentro de cajas (Cliente, Fecha, etc.) - 7.5pt, gris
@@ -78,7 +79,7 @@ ITEM_ENCABEZADO = ParagraphStyle(
     fontSize=9,
     leading=11,
     alignment=TA_CENTER,
-    textColor=NEGRO,
+    textColor=COLOR_MARCA,
 )
 
 ITEM_ENCABEZADO_IZQ = ParagraphStyle(
@@ -124,6 +125,13 @@ ITEM_CELDA_DER = ParagraphStyle(
     textColor=GRIS_OSCURO_TEXTO,
 )
 
+ITEM_CELDA_TOTAL = ParagraphStyle(
+    'ItemCeldaTotal',
+    parent=ITEM_CELDA_DER,
+    fontName='Helvetica-Bold',
+    textColor=COLOR_MARCA,
+)
+
 # Texto de condiciones - 8pt
 CONDICIONES_TEXTO = ParagraphStyle(
     'CondicionesTexto',
@@ -140,7 +148,16 @@ CONDICIONES_TITULO = ParagraphStyle(
     fontName='Helvetica-Bold',
     fontSize=8,
     leading=10,
-    textColor=NEGRO,
+    textColor=COLOR_MARCA,
+)
+
+SECCION_TITULO = ParagraphStyle(
+    'SeccionTitulo',
+    parent=_NORMAL,
+    fontName='Helvetica-Bold',
+    fontSize=9,
+    leading=11,
+    textColor=COLOR_MARCA,
 )
 
 # Firmas - 8pt
@@ -324,6 +341,7 @@ def _consolidar_todos(items_servicios, items_repuestos) -> list:
                 'descuento': Decimal('0.00'),
                 'iva': clave[3],
                 'subtotal': Decimal('0.00'),
+                'monto_iva': Decimal('0.00'),
                 'es_opcional': clave[4],
                 'tipo': 'SERVICIO',
             }
@@ -332,6 +350,7 @@ def _consolidar_todos(items_servicios, items_repuestos) -> list:
         grupo['cantidad'] += _como_decimal(getattr(item, 'horas_estimadas', None))
         grupo['descuento'] += _como_decimal(getattr(item, 'descuento', None))
         grupo['subtotal'] += _como_decimal(getattr(item, 'subtotal', None))
+        grupo['monto_iva'] += _como_decimal(getattr(item, 'monto_iva', None))
 
     # Procesar repuestos
     for item in items_repuestos or []:
@@ -352,6 +371,7 @@ def _consolidar_todos(items_servicios, items_repuestos) -> list:
                 'descuento': Decimal('0.00'),
                 'iva': clave[3],
                 'subtotal': Decimal('0.00'),
+                'monto_iva': Decimal('0.00'),
                 'es_opcional': clave[4],
                 'tipo': 'REPUESTO',
             }
@@ -360,6 +380,7 @@ def _consolidar_todos(items_servicios, items_repuestos) -> list:
         grupo['cantidad'] += _como_decimal(getattr(item, 'cantidad', None))
         grupo['descuento'] += _como_decimal(getattr(item, 'descuento', None))
         grupo['subtotal'] += _como_decimal(getattr(item, 'subtotal', None))
+        grupo['monto_iva'] += _como_decimal(getattr(item, 'monto_iva', None))
 
     return [grupos[clave] for clave in orden]
 
@@ -372,14 +393,15 @@ def _bloque_titulo_proforma(cotizacion, ancho_util) -> Table:
     """
     Título alineado a la derecha: PROFORMA TALLER I Nº [número]
     """
-    texto = f'PROFORMA TALLER I Nº {_escape_xml(cotizacion.numero_cotizacion or "")}'
+    texto = f'Cotización Nº {_escape_xml(cotizacion.numero_cotizacion or "")}'
     titulo = Paragraph(texto, PROFORMA_TITULO)
 
     tabla = Table([[titulo]], colWidths=[ancho_util])
     tabla.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LINEBELOW', (0, 0), (-1, -1), 1, COLOR_MARCA),
     ]))
     return tabla
 
@@ -419,8 +441,9 @@ def _bloque_cajas_cliente_fechas(cotizacion, ancho_util) -> Table:
     anchos_izq = _ajustar_anchos([1.0, 3.5], ancho_util * 0.68)
     tabla_izq = Table(filas_izq, colWidths=[a * 72 for a in anchos_izq])
     tabla_izq.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 0.5, NEGRO),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.3, NEGRO),
+        ('BACKGROUND', (0, 0), (0, -1), GRIS_CABECERA_TABLA),
+        ('BOX', (0, 0), (-1, -1), 0.5, GRIS_LINEA_FINA),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.3, GRIS_LINEA_FINA),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
@@ -438,8 +461,9 @@ def _bloque_cajas_cliente_fechas(cotizacion, ancho_util) -> Table:
     anchos_der = _ajustar_anchos([1.2, 2.0], ancho_util * 0.30)
     tabla_der = Table(filas_der, colWidths=[a * 72 for a in anchos_der])
     tabla_der.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 0.5, NEGRO),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.3, NEGRO),
+        ('BACKGROUND', (0, 0), (0, -1), GRIS_CABECERA_TABLA),
+        ('BOX', (0, 0), (-1, -1), 0.5, GRIS_LINEA_FINA),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.3, GRIS_LINEA_FINA),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
@@ -465,7 +489,7 @@ def _bloque_cajas_cliente_fechas(cotizacion, ancho_util) -> Table:
 def _bloque_items_unificado(cotizacion, ancho_util) -> list:
     """
     Tabla única con todos los ítems (servicios + repuestos).
-    Columnas: Cant., Bod, Código, Descripción, Precio, Desc., Total
+    Columnas: cantidad, código, descripción, precio unitario, descuento, neto, IVA y total.
     """
     # Consolidar todo junto
     grupos = _consolidar_todos(
@@ -474,17 +498,22 @@ def _bloque_items_unificado(cotizacion, ancho_util) -> list:
     )
 
     if not grupos:
-        return [Paragraph('Esta cotización no tiene conceptos registrados.', CONDICIONES_TEXTO)]
+        return [
+            Paragraph('DETALLE DE SERVICIOS Y REPUESTOS', SECCION_TITULO),
+            Spacer(1, ESPACIO_COMPACTO),
+            Paragraph('Esta cotización no tiene conceptos registrados.', CONDICIONES_TEXTO),
+        ]
 
     # Definir columnas: (título, ancho_pulgadas, estilo_encabezado, estilo_celda)
     columnas = [
-        ('Cant.', 0.55, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
-        ('Bod', 0.45, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
-        ('Código', 0.90, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
-        ('Descripción del Producto', 2.60, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
-        ('Precio', 0.85, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
-        ('Desc.', 0.65, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
-        ('Total', 0.85, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('Cant.', 0.50, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
+        ('Código', 0.75, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
+        ('Descripción', 2.10, ITEM_ENCABEZADO_IZQ, ITEM_CELDA_IZQ),
+        ('P. unitario', 0.75, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('Descuento', 0.68, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('Neto', 0.75, ITEM_ENCABEZADO_DER, ITEM_CELDA_DER),
+        ('IVA % / valor', 0.82, ITEM_ENCABEZADO_DER, ITEM_CELDA_CENTRO),
+        ('Total', 0.82, ITEM_ENCABEZADO_DER, ITEM_CELDA_TOTAL),
     ]
 
     anchos_pulg = [ancho for _, ancho, _, _ in columnas]
@@ -500,8 +529,6 @@ def _bloque_items_unificado(cotizacion, ancho_util) -> list:
     filas = [encabezado]
 
     for g in grupos:
-        # Bodega vacía por ahora (se puede completar si hay campo en modelo)
-        bod = ''
         cantidad = _decimal(g['cantidad'], 2)
         codigo = g['codigo'] or ''
         desc = g['descripcion']
@@ -509,26 +536,27 @@ def _bloque_items_unificado(cotizacion, ancho_util) -> list:
             desc = f'{desc} (opcional)'
         precio = _money(g['precio'])
         descuento = _money(g['descuento']) if g['descuento'] > 0 else '$0.00'
-        total = _money(g['subtotal'])
+        iva = f'{_porcentaje(g["iva"])}<br/>{_money(g["monto_iva"])}'
+        total = _money(g['subtotal'] + g['monto_iva'])
 
         fila = [
             Paragraph(cantidad, ITEM_CELDA_CENTRO),
-            Paragraph(bod, ITEM_CELDA_CENTRO),
             Paragraph(_escape_xml(codigo), ITEM_CELDA_IZQ),
             Paragraph(_escape_xml(desc), ITEM_CELDA_IZQ),
             Paragraph(precio, ITEM_CELDA_DER),
             Paragraph(descuento, ITEM_CELDA_DER),
-            Paragraph(total, ITEM_CELDA_DER),
+            Paragraph(_money(g['subtotal']), ITEM_CELDA_DER),
+            Paragraph(iva, ITEM_CELDA_CENTRO),
+            Paragraph(total, ITEM_CELDA_TOTAL),
         ]
         filas.append(fila)
 
     tabla = Table(filas, colWidths=col_widths, repeatRows=1)
 
-    # Estilo de la tabla: líneas negras finas, sin zebra, sin fondos
+    # Tabla sobria: cabecera gris-azulada y divisorias finas como los reportes.
     estilo = TableStyle([
-        # Encabezado con líneas arriba y abajo (1pt negro)
-        ('LINEABOVE', (0, 0), (-1, 0), 1, NEGRO),
-        ('LINEBELOW', (0, 0), (-1, 0), 1, NEGRO),
+        ('BACKGROUND', (0, 0), (-1, 0), GRIS_CABECERA_TABLA),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.6, GRIS_LINEA_FINA),
         # Padding encabezado
         ('TOPPADDING', (0, 0), (-1, 0), 4),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
@@ -537,15 +565,41 @@ def _bloque_items_unificado(cotizacion, ancho_util) -> list:
         ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
         ('LEFTPADDING', (0, 0), (-1, -1), 3),
         ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-        # Divisorias horizontales finas entre filas (0.5pt negro)
-        ('LINEBELOW', (0, 1), (-1, -2), 0.3, NEGRO),
-        # Línea final bajo la última fila
-        ('LINEBELOW', (0, -1), (-1, -1), 0.5, NEGRO),
+        ('LINEBELOW', (0, 1), (-1, -2), 0.3, GRIS_LINEA_FINA),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.5, GRIS_LINEA_FINA),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ])
     tabla.setStyle(estilo)
 
-    return [tabla]
+    return [
+        Paragraph('DETALLE DE SERVICIOS Y REPUESTOS', SECCION_TITULO),
+        Spacer(1, ESPACIO_COMPACTO),
+        tabla,
+    ]
+
+
+def _bloque_observaciones(cotizacion, ancho_util) -> list:
+    observaciones = (getattr(cotizacion, 'observaciones', None) or '').strip()
+    texto = _escape_xml(observaciones or 'Sin observaciones registradas.')
+    texto = texto.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>')
+    tabla = Table(
+        [
+            [Paragraph('OBSERVACIONES', CONDICIONES_TITULO)],
+            [Paragraph(texto, CONDICIONES_TEXTO)],
+        ],
+        colWidths=[ancho_util],
+    )
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), GRIS_CABECERA_TABLA),
+        ('BOX', (0, 0), (-1, -1), 0.5, GRIS_LINEA_FINA),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.3, GRIS_LINEA_FINA),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    return [tabla, Spacer(1, ESPACIO)]
 
 
 def _bloque_condiciones(cotizacion, ancho_util) -> list:
@@ -554,9 +608,11 @@ def _bloque_condiciones(cotizacion, ancho_util) -> list:
     """
     story = []
 
-    # Texto de condiciones
+    story.append(Paragraph('CONDICIONES', CONDICIONES_TITULO))
+    story.append(Spacer(1, ESPACIO_COMPACTO))
+
     condiciones_texto = (
-        'CONDICIONES: Los precios son válidos por el período indicado. '
+        'Los precios son válidos por el período indicado. '
         'La mano de obra incluye diagnóstico y prueba. '
         'Los repuestos cuentan con garantía del fabricante. '
         'El taller no se responsabiliza por objetos dejados en el vehículo. '
@@ -577,7 +633,11 @@ def _bloque_condiciones(cotizacion, ancho_util) -> list:
             Paragraph('Elaborado Por', FIRMA_ETIQUETA),
         ],
     ]
-    tabla_firmas = Table(filas_firmas, colWidths=[ancho_util * 0.35, ancho_util * 0.35])
+    tabla_firmas = Table(
+        filas_firmas,
+        colWidths=[ancho_util * 0.35, ancho_util * 0.35],
+        hAlign='CENTER',
+    )
     tabla_firmas.setStyle(TableStyle([
         ('TOPPADDING', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
@@ -586,15 +646,19 @@ def _bloque_condiciones(cotizacion, ancho_util) -> list:
     ]))
 
     # Totales alineados a la derecha
-    subtotal_neto = getattr(cotizacion, 'subtotal_neto', Decimal('0'))
-    descuento_total = getattr(cotizacion, 'descuento', Decimal('0'))
-    total_iva = getattr(cotizacion, 'total_iva', Decimal('0'))
-    total = getattr(cotizacion, 'total', Decimal('0'))
+    subtotal_neto = _como_decimal(getattr(cotizacion, 'subtotal_neto', Decimal('0')))
+    descuento_total = _como_decimal(getattr(cotizacion, 'descuento', Decimal('0')))
+    subtotal_base_0 = _como_decimal(getattr(cotizacion, 'subtotal_base_0', Decimal('0')))
+    subtotal_base_gravada = _como_decimal(getattr(cotizacion, 'subtotal_base_gravada', Decimal('0')))
+    total_iva = _como_decimal(getattr(cotizacion, 'total_iva', Decimal('0')))
+    total = _como_decimal(getattr(cotizacion, 'total', Decimal('0')))
 
     filas_totales = [
-        ('Subtotal', _money(subtotal_neto), False),
-        ('Descuento', f'-{_money(descuento_total)}', False) if descuento_total > 0 else None,
-        ('Impuesto 15%', _money(total_iva), False),
+        ('Subtotal antes de descuentos', _money(subtotal_neto + descuento_total), False),
+        ('Descuento aplicado', f'-{_money(descuento_total)}', False) if descuento_total > 0 else None,
+        ('Base imponible 0%', _money(subtotal_base_0), False),
+        ('Base imponible gravada', _money(subtotal_base_gravada), False),
+        ('IVA total', _money(total_iva), False),
         ('VALOR TOTAL', _money(total), True),
     ]
     filas_totales = [f for f in filas_totales if f]
@@ -619,34 +683,20 @@ def _bloque_condiciones(cotizacion, ancho_util) -> list:
         ('TOPPADDING', (0, 0), (-1, -1), 2.5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
         # Líneas horizontales en totales
-        ('LINEBELOW', (0, 0), (-1, -2), 0.5, NEGRO),
-        ('LINEABOVE', (0, -1), (-1, -1), 1, NEGRO),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.4, GRIS_LINEA_FINA),
+        ('BACKGROUND', (0, -1), (-1, -1), GRIS_CABECERA_TABLA),
+        ('LINEABOVE', (0, -1), (-1, -1), 0.8, COLOR_MARCA),
         ('TOPPADDING', (0, -1), (-1, -1), 4),
         ('BOTTOMPADDING', (0, -1), (-1, -1), 4),
     ]))
 
-    # Contenedor: firmas a la izquierda, totales a la derecha
-    contenedor = Table(
-        [[tabla_firmas, tabla_totales]],
-        colWidths=[ancho_util * 0.55, ancho_util * 0.45],
-    )
-    contenedor.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-        ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    story.append(contenedor)
-    story.append(Spacer(1, ESPACIO_COMPACTO))
-
-    # Nota final
-    story.append(Paragraph(
-        _escape_xml('Precios en dólares de los Estados Unidos de América (USD), sujeta a validación del taller.'),
-        NOTA_FINAL,
-    ))
-
+    story.append(tabla_totales)
+    story.append(Spacer(1, ESPACIO))
+    story.append(Spacer(1, ESPACIO))
+    story.append(Spacer(1, ESPACIO))
+    story.append(Spacer(1, ESPACIO))
+    story.append(Spacer(1, ESPACIO))
+    story.append(tabla_firmas)
     return story
 
 
@@ -680,6 +730,9 @@ def exportar_cotizacion_pdf(
     # Tabla única de ítems
     story.extend(_bloque_items_unificado(cotizacion, ancho_util))
     story.append(Spacer(1, ESPACIO))
+
+    # Observaciones del asesor antes de las condiciones de la oferta.
+    story.extend(_bloque_observaciones(cotizacion, ancho_util))
 
     # Condiciones, firmas y totales
     story.extend(_bloque_condiciones(cotizacion, ancho_util))
