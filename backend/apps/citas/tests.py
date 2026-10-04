@@ -606,9 +606,9 @@ class HoraLocalTest(AgendaCitasBase):
         self.assertIn('pasado', resp.json()['fecha_hora_programada'][0])
 
 
-class CitaConversionVinculaCotizacionTests(TestCase):
-    """La cita heredada de una cotización vigente arrastra el vínculo al
-    convertirla en recepción, para que el flujo de WhatsApp no se corte."""
+class CitaConversionSinCotizacionTests(TestCase):
+    """Convertir una cita en recepción no vincula ninguna cotización: el
+    vínculo con el flujo del taller se establece al crear la inspección."""
 
     @classmethod
     def setUpTestData(cls):
@@ -659,14 +659,14 @@ class CitaConversionVinculaCotizacionTests(TestCase):
             estado=estado,
         )
 
-    def test_la_conversion_vincula_la_cotizacion_vigente(self):
+    def test_la_conversion_no_vincula_ninguna_cotizacion(self):
         cotizacion = self._cotizacion()
         cita = self._cita()
 
-        recepcion = cita.convertir_a_recepcion()
+        cita.convertir_a_recepcion()
 
         cotizacion.refresh_from_db()
-        self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
+        self.assertIsNone(cotizacion.recepcion_origen_id)
 
     def test_no_se_vincula_una_cotizacion_vencida(self):
         cotizacion = self._cotizacion(estado='VENCIDA', numero='COT-0101')
@@ -677,7 +677,7 @@ class CitaConversionVinculaCotizacionTests(TestCase):
         cotizacion.refresh_from_db()
         self.assertIsNone(cotizacion.recepcion_origen_id)
 
-    def test_no_pisa_un_vinculo_de_recepcion_ya_asignado(self):
+    def test_no_toca_la_cotizacion_que_ya_tiene_recepcion_de_origen(self):
         from apps.ordenes.models import RecepcionVehiculo
 
         cotizacion = self._cotizacion(numero='COT-0102')

@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.ordenes.relaciones_flujo import responder_relaciones
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
 from .pdf import exportar_cotizacion_pdf
@@ -117,6 +118,11 @@ class CotizacionViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
+
+    @action(detail=True, methods=['get', 'post'])
+    def relaciones(self, request, pk=None):
+        """Vincula o desvincula relaciones de flujo sin borrar entidades."""
+        return responder_relaciones(request, self.get_object(), 'cotizacion')
 
     @action(detail=True, methods=['post'])
     def sincronizar_inspeccion(self, request, pk=None):

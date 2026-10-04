@@ -71,12 +71,35 @@ def conectar_inspeccion(inspeccion, con_siembra=True):
     return cotizacion
 
 
-def sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion):
+def _claves_detalle_inspeccion(codigo, descripcion, catalogo_id):
+    """Claves con las que un ítem de inspección puede equivaler a uno de cotización.
+
+    Se comparan varias señales a la vez porque un mismo trabajo puede llegar
+    con distinto código de catálogo en cada documento: si coincide cualquiera de
+    ellas se considera el mismo ítem y no se duplica.
+    """
+    claves = set()
+    if catalogo_id:
+        claves.add(f'catalogo:{catalogo_id}')
+    if codigo:
+        claves.add(f'codigo:{str(codigo).strip().upper()}')
+    texto = (descripcion or '').strip().lower().replace(' ', '')
+    if texto:
+        claves.add(f'texto:{texto}')
+    return claves
+
+
+def sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion, solo_si_vacia=True):
     """Copia los ítems de la cotización a la inspección. Devuelve cuántos copió.
 
     La inspección guarda precios referenciales sin fijar el precio comercial, por
     eso el precio unitario de la cotización alimenta `precio_referencial`. Los
     ítems opcionales de la cotización se marcan como sugeridos en la inspección.
+
+    Con `solo_si_vacia=True` (comportamiento original) no hace nada si la
+    inspección ya tiene ítems. Con `False` agrega los que falten, lo que permite
+    cargar varias cotizaciones elegidas por el usuario; en ese caso los ítems ya
+    presentes se detectan por catálogo, código o descripción para no repetirlos.
     """
     from apps.inventario.models import Repuesto, Servicio
     from apps.ordenes.models import DetalleRepuestoInspeccion, DetalleServicioInspeccion
@@ -85,8 +108,17 @@ def sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion):
     repuestos_cotizacion = list(cotizacion.repuestos.all())
     if not servicios_cotizacion and not repuestos_cotizacion:
         return 0
-    if inspeccion.servicios_detectados.exists() or inspeccion.repuestos_sugeridos.exists():
+    if solo_si_vacia and (
+        inspeccion.servicios_detectados.exists() or inspeccion.repuestos_sugeridos.exists()
+    ):
         return 0
+
+    servicios_existentes = set()
+    for det in inspeccion.servicios_detectados.all():
+        servicios_existentes |= _claves_detalle_inspeccion(None, det.descripcion, det.servicio_id)
+    repuestos_existentes = set()
+    for det in inspeccion.repuestos_sugeridos.all():
+        repuestos_existentes |= _claves_detalle_inspeccion(None, det.descripcion, det.repuesto_id)
 
     catalogo_servicios = {
         servicio.codigo: servicio
@@ -94,15 +126,22 @@ def sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion):
             codigo__in=[det.codigo for det in servicios_cotizacion if det.codigo]
         )
     }
+    copiados = 0
     for det in servicios_cotizacion:
+        catalogo = catalogo_servicios.get(det.codigo)
+        claves = _claves_detalle_inspeccion(det.codigo, det.descripcion, catalogo.id if catalogo else None)
+        if claves & servicios_existentes:
+            continue
         DetalleServicioInspeccion.objects.create(
             inspeccion=inspeccion,
-            servicio=catalogo_servicios.get(det.codigo),
+            servicio=catalogo,
             descripcion=det.descripcion,
             horas_estimadas=det.horas_estimadas,
             precio_referencial=Decimal(det.precio_unitario or '0.00'),
             es_sugerido=det.es_opcional,
         )
+        servicios_existentes |= claves
+        copiados += 1
 
     catalogo_repuestos = {
         repuesto.codigo: repuesto
@@ -111,13 +150,21 @@ def sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion):
         )
     }
     for det in repuestos_cotizacion:
+        catalogo = catalogo_repuestos.get(det.codigo_repuesto)
+        claves = _claves_detalle_inspeccion(
+            det.codigo_repuesto, det.descripcion, catalogo.id if catalogo else None
+        )
+        if claves & repuestos_existentes:
+            continue
         DetalleRepuestoInspeccion.objects.create(
             inspeccion=inspeccion,
-            repuesto=catalogo_repuestos.get(det.codigo_repuesto),
+            repuesto=catalogo,
             descripcion=det.descripcion,
             cantidad=det.cantidad,
             precio_referencial=Decimal(det.precio_unitario_referencial or '0.00'),
             es_sugerido=det.es_opcional,
         )
+        repuestos_existentes |= claves
+        copiados += 1
 
-    return len(servicios_cotizacion) + len(repuestos_cotizacion)
+    return copiados

@@ -208,11 +208,8 @@ class Cita(BaseModel):
             kilometraje_ingreso=self.kilometraje_aproximado,
         )
 
-        # Si el cliente ya venía con una cotización aprobada (p. ej. la que pidió
-        # por WhatsApp), esta recepción es su origen: queda registrada sola.
-        from apps.cotizaciones.services import conectar_recepcion
-
-        conectar_recepcion(recepcion, empresa=self.empresa)
+        # La conversión NO toca cotizaciones: el vínculo entre la cotización y el
+        # flujo del taller se hace al crear la inspección, no al crear la recepción.
 
         self.recepcion_generada = recepcion
         self.estado = self.EstadoCita.COMPLETADA
