@@ -1,4 +1,5 @@
 from django.core import signing
+from django.db import IntegrityError
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_time
@@ -16,6 +17,9 @@ from .ics import SALT_ENLACE_CITA_ICS, respuesta_ics
 from .models import Cita
 from .serializers import CitaSerializer
 from .services import disponibilidad, resolver_taller_de_cita
+
+# Restricción de unicidad del número de recepción (UNIQUE (empresa, numero_recepcion)).
+CONSTRAINT_RECEPCION = 'recepcion_empresa_sucursal_numero_unico'
 
 
 class CompartirCitaIcs(APIView):
@@ -217,6 +221,15 @@ class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             recepcion = cita.convertir_a_recepcion(usuario=request.user)
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
+        except IntegrityError as exc:
+            # El número de recepción es único por taller: si dos conversiones
+            # se cruzan, se avisa en vez de devolver un 500.
+            if CONSTRAINT_RECEPCION not in str(exc):
+                raise
+            raise serializers.ValidationError(
+                'No se pudo numerar la recepción porque ese número ya fue asignado. '
+                'Intenta convertir la cita de nuevo.'
+            )
         return Response({
             'id': cita.id,
             'estado': cita.estado,

@@ -317,6 +317,8 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
                 'numero': cotizacion.numero_cotizacion or f'#{cotizacion.id}',
                 'estado': cotizacion.estado,
                 'estadoDisplay': cotizacion.get_estado_display(),
+                'created_at': cotizacion.created_at.isoformat() if cotizacion.created_at else None,
+                'total': str(cotizacion.total or 0),
                 'url': f'/crud/cotizaciones/ver/?id={cotizacion.id}',
                 'canDelete': cotizacion.estado != 'CONVERTIDA' and cotizacion.id not in ordenes_generadas,
                 'deleteReason': 'La cotización ya fue convertida a una orden.'
@@ -347,9 +349,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             'puede_agregar': {
                 'cita': True,
                 'inspeccion': not inspeccion_items,
-                'cotizacion': not any(
-                    item['estado'] in Cotizacion.ESTADOS_VIGENTES for item in cotizacion_items
-                ),
+                'cotizacion': True,
                 'orden': not orden_items,
             },
         }
@@ -432,14 +432,6 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         if tipo == 'cotizacion':
             if entidad.estado == 'CONVERTIDA' or OrdenTrabajo.objects.filter(cotizacion_origen=entidad).exists():
                 raise serializers.ValidationError({'detail': 'No se puede relacionar una cotización ya convertida en orden.'})
-            vigente = Cotizacion.objects.filter(
-                recepcion_origen=recepcion,
-                estado__in=Cotizacion.ESTADOS_VIGENTES,
-            ).exclude(pk=entidad.pk).exists()
-            if vigente and entidad.estado in Cotizacion.ESTADOS_VIGENTES:
-                raise serializers.ValidationError(
-                    {'detail': 'La recepción ya tiene otra cotización vigente relacionada.'}
-                )
             if entidad.inspeccion_origen_id and entidad.inspeccion_origen.recepcion_id not in (None, recepcion.pk):
                 raise serializers.ValidationError({'detail': 'La inspección de origen pertenece a otra recepción.'})
         setattr(entidad, campo, recepcion)

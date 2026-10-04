@@ -712,3 +712,97 @@ class CitaSearchSelectFiltersTests(AgendaCitasBase):
         sin_recepcion = self.client.get(LISTADO, {'sin_recepcion': '1'})
         self.assertEqual(sin_recepcion.status_code, 200, sin_recepcion.content)
         self.assertIn(cita_id, [item['id'] for item in sin_recepcion.json()['results']])
+
+
+class CitaConversionNumeracionTests(TestCase):
+    """La conversión a recepción respeta la secuencia del taller de la cita.
+
+    Cada taller numera de forma independiente (`UNIQUE (empresa, sucursal,
+    numero_recepcion)`), así que una cita de la sucursal Norte arranca en
+    `REC-00001` aunque la central ya haya emitido sus tres primeras recepciones.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.ordenes.models import RecepcionVehiculo
+        from apps.vehiculos.models import Vehiculo
+
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Numeración', ruc=_ruc_unico(), email_contacto='num@test.com'
+        )
+        cls.central = Taller.objects.create(
+            empresa=cls.empresa, nombre='Central', direccion='Av. Central 1', codigo_sucursal='001',
+        )
+        cls.norte = Taller.objects.create(
+            empresa=cls.empresa, nombre='Norte', direccion='Av. Norte 2', codigo_sucursal='002',
+        )
+        cls.cliente = Cliente.objects.create(
+            empresa=cls.empresa, tipo_identificacion='C', identificacion='1799999999', nombre='Cliente Norte',
+        )
+        cls.vehiculo = Vehiculo.objects.create(placa='CN-001', marca='Kia', modelo='Rio')
+        cls.vehiculo.empresas.add(cls.empresa)
+        # La central ya emitió las tres primeras recepciones; Norte mantiene su
+        # propia secuencia desde 1.
+        for numero in ('REC-00001', 'REC-00002', 'REC-00003'):
+            RecepcionVehiculo.objects.create(
+                empresa=cls.empresa, sucursal=cls.central, cliente=cls.cliente,
+                vehiculo=cls.vehiculo, numero_recepcion=numero,
+            )
+        cls.manana = timezone.localdate() + timedelta(days=1)
+
+    def _cita_en_norte(self):
+        return Cita.objects.create(
+            empresa=self.empresa,
+            taller=self.norte,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            fecha_cita=self.manana,
+            hora_cita=datetime(2026, 1, 1, 10, 0).time(),
+            motivo='MANTENIMIENTO',
+        )
+
+    def test_la_conversion_usa_la_secuencia_del_taller_de_la_cita(self):
+        cita = self._cita_en_norte()
+
+        recepcion = cita.convertir_a_recepcion()
+
+        self.assertEqual(recepcion.numero_recepcion, 'REC-00001')
+        self.assertEqual(recepcion.sucursal_id, self.norte.pk)
+        cita.refresh_from_db()
+        self.assertEqual(cita.estado, Cita.EstadoCita.COMPLETADA)
+        self.assertEqual(cita.recepcion_generada_id, recepcion.id)
+
+    def test_varias_conversiones_seguidas_avanzan_en_la_sucursal(self):
+        numeros = []
+        for _ in range(3):
+            cita = self._cita_en_norte()
+            numeros.append(cita.convertir_a_recepcion().numero_recepcion)
+
+        self.assertEqual(numeros, ['REC-00001', 'REC-00002', 'REC-00003'])
+        self.assertEqual(len(set(numeros)), 3)
+
+    def test_el_endpoint_no_devuelve_500_si_el_numero_pudo_ocuparse(self):
+        from unittest import mock
+
+        from django.contrib.auth import get_user_model
+        from django.db import IntegrityError
+        from rest_framework.test import APIClient
+
+        user = get_user_model().objects.create_superuser(username='num_admin', password='x')
+        client = APIClient()
+        client.force_authenticate(user=user)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        cita = self._cita_en_norte()
+
+        with mock.patch(
+            'apps.ordenes.models.RecepcionVehiculo.objects.create',
+            side_effect=IntegrityError(
+                'duplicate key value violates unique constraint "recepcion_empresa_sucursal_numero_unico"'
+            ),
+        ):
+            respuesta = client.post(f'/api/citas/{cita.id}/convertir_a_recepcion/', {}, format='json')
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.assertIn('numerar la recepción', str(respuesta.json()))

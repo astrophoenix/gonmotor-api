@@ -192,9 +192,9 @@ class Cita(BaseModel):
         from apps.ordenes.models import RecepcionVehiculo
 
         taller = resolver_taller(self.empresa_id, self.taller)
-        numero_recepcion = None
-        if taller is not None:
-            numero_recepcion = generar_codigo_secuencial(taller, 'recepcion')
+        if taller is None:
+            raise ValueError('La empresa no tiene un taller activo para numerar la recepción.')
+        numero_recepcion = generar_codigo_secuencial(taller, 'recepcion')
 
         recepcion = RecepcionVehiculo.objects.create(
             empresa=self.empresa,

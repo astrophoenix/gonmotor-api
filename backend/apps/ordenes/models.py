@@ -115,8 +115,8 @@ class OrdenTrabajo(BaseModel):
         ordering = ['-created_at']
         constraints = [
             models.UniqueConstraint(
-                fields=['empresa', 'numero_orden'],
-                name='ot_empresa_numero_unico'
+                fields=['empresa', 'sucursal', 'numero_orden'],
+                name='ot_empresa_sucursal_numero_unico'
             )
         ]
 
@@ -486,8 +486,8 @@ class RecepcionVehiculo(BaseModel):
         ordering = ['-created_at']
         constraints = [
             models.UniqueConstraint(
-                fields=['empresa', 'numero_recepcion'],
-                name='recepcion_empresa_numero_unico'
+                fields=['empresa', 'sucursal', 'numero_recepcion'],
+                name='recepcion_empresa_sucursal_numero_unico'
             )
         ]
 
@@ -640,8 +640,8 @@ class InspeccionVehiculo(BaseModel):
                 name='una_inspeccion_por_recepcion'
             ),
             models.UniqueConstraint(
-                fields=['empresa', 'numero_inspeccion'],
-                name='inspeccion_empresa_numero_unico'
+                fields=['empresa', 'sucursal', 'numero_inspeccion'],
+                name='inspeccion_empresa_sucursal_numero_unico'
             )
         ]
 

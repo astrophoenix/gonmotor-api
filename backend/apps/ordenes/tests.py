@@ -654,7 +654,7 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
         self.assertEqual(datos['relaciones']['cotizacion'][0]['id'], self.cotizacion.pk)
         self.assertEqual(datos['relaciones']['orden'][0]['id'], self.orden.pk)
         self.assertTrue(datos['puede_agregar']['inspeccion'])
-        self.assertFalse(datos['puede_agregar']['cotizacion'])
+        self.assertTrue(datos['puede_agregar']['cotizacion'])
 
     def test_vincula_y_desvincula_cita_sin_borrarla(self):
         vincular = self._actualizar('cita', self.cita.pk, 'vincular')
@@ -678,6 +678,27 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
         self.assertEqual(desvincular.status_code, 200, desvincular.content)
         self.cotizacion.refresh_from_db()
         self.assertIsNone(self.cotizacion.recepcion_origen_id)
+
+    def test_vincula_varias_cotizaciones_activas_a_la_misma_recepcion(self):
+        from apps.cotizaciones.models import Cotizacion
+
+        segunda = Cotizacion.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_cotizacion='COT-REL-0002',
+        )
+        primera_resp = self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
+        segunda_resp = self._actualizar('cotizacion', segunda.pk, 'vincular')
+
+        self.assertEqual(primera_resp.status_code, 200, primera_resp.content)
+        self.assertEqual(segunda_resp.status_code, 200, segunda_resp.content)
+        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/').json()
+        self.assertEqual(
+            {item['id'] for item in relaciones['relaciones']['cotizacion']},
+            {self.cotizacion.pk, segunda.pk},
+        )
+        self.assertTrue(relaciones['puede_agregar']['cotizacion'])
 
     def test_desvincula_cotizacion_relacionada_a_traves_de_inspeccion(self):
         from apps.cotizaciones.models import Cotizacion

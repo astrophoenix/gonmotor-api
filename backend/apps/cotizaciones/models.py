@@ -114,21 +114,8 @@ class Cotizacion(BaseModel):
         verbose_name_plural = 'Cotizaciones'
         constraints = [
             models.UniqueConstraint(
-                fields=['empresa', 'numero_cotizacion'],
-                name='cotizacion_empresa_numero_unico'
-            ),
-            # Una sola cotización vigente por inspección y por recepción. Las
-            # columnas son null cuando la cotización se creó de forma directa
-            # (sin origen previo) y Postgres no las considera duplicadas.
-            models.UniqueConstraint(
-                fields=['inspeccion_origen'],
-                condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
-                name='cotizacion_inspeccion_vigente_unica'
-            ),
-            models.UniqueConstraint(
-                fields=['recepcion_origen'],
-                condition=models.Q(estado__in=['PENDIENTE', 'ENVIADA', 'ACEPTADA']),
-                name='cotizacion_recepcion_vigente_unica'
+                fields=['empresa', 'sucursal', 'numero_cotizacion'],
+                name='cotizacion_empresa_sucursal_numero_unico'
             ),
         ]
 

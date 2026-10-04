@@ -1,7 +1,6 @@
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from django.db import IntegrityError
 from django.test import SimpleTestCase
 
 from rest_framework import serializers
@@ -12,7 +11,7 @@ from apps.vehiculos.models import Vehiculo
 from .models import Cotizacion
 from .pdf import _consolidar
 from .serializers import transicion_estado_valida
-from .views import _traducir_integridad, _validar_origen_cotizacion, _validar_origen_inspeccion
+from .views import _validar_origen_cotizacion, _validar_origen_inspeccion
 
 
 class ConsolidarConceptosTests(SimpleTestCase):
@@ -159,83 +158,36 @@ class ValidarOrigenCotizacionTests(SimpleTestCase):
         with self.assertRaises(serializers.ValidationError):
             _validar_origen_cotizacion(inspeccion=inspeccion)
 
-    def test_inspeccion_con_cotizacion_aceptada_rechazada(self):
+    def test_inspeccion_puede_tener_varias_cotizaciones_aceptadas(self):
         inspeccion = self._origen(vigente=self._vigente('COT-00004'))
-        with self.assertRaises(serializers.ValidationError):
-            _validar_origen_cotizacion(inspeccion=inspeccion)
+        self.assertIsNone(_validar_origen_cotizacion(inspeccion=inspeccion))
 
-    def test_inspeccion_con_cotizacion_borrador_rechazada(self):
+    def test_inspeccion_puede_tener_varias_cotizaciones_borrador(self):
         inspeccion = self._origen(vigente=self._vigente())
-        with self.assertRaises(serializers.ValidationError):
-            _validar_origen_cotizacion(inspeccion=inspeccion)
+        self.assertIsNone(_validar_origen_cotizacion(inspeccion=inspeccion))
 
     def test_inspeccion_libre_aprueba(self):
         self.assertIsNone(_validar_origen_cotizacion(inspeccion=self._origen()))
 
-    def test_recepcion_con_cotizacion_vigente_rechazada(self):
+    def test_recepcion_puede_tener_varias_cotizaciones_vigentes(self):
         recepcion = self._origen(vigente=self._vigente('COT-00007'))
-        with self.assertRaises(serializers.ValidationError):
-            _validar_origen_cotizacion(recepcion=recepcion)
+        self.assertIsNone(_validar_origen_cotizacion(recepcion=recepcion))
 
     def test_recepcion_libre_aprueba(self):
         self.assertIsNone(_validar_origen_cotizacion(recepcion=self._origen()))
 
-    def test_mensaje_incluye_numero_de_cotizacion_vigente(self):
+    def test_numero_de_cotizacion_existente_no_impide_nueva(self):
         recepcion = self._origen(vigente=self._vigente('COT-00007'))
-        with self.assertRaises(serializers.ValidationError) as contexto:
-            _validar_origen_cotizacion(recepcion=recepcion)
-        self.assertIn('COT-00007', str(contexto.exception))
+        self.assertIsNone(_validar_origen_cotizacion(recepcion=recepcion))
 
     def test_validar_origen_inspeccion_mantiene_compatibilidad(self):
-        with self.assertRaises(serializers.ValidationError):
-            _validar_origen_inspeccion(self._origen(vigente=self._vigente()))
+        self.assertIsNone(_validar_origen_inspeccion(self._origen(vigente=self._vigente())))
         self.assertIsNone(_validar_origen_inspeccion(None))
-
-
-class TraducirIntegridadTests(SimpleTestCase):
-    def _origen(self, numero_cotizacion='COT-00007', estado_display='Aceptada'):
-        origen = MagicMock()
-        cotizacion = MagicMock()
-        cotizacion.numero_cotizacion = numero_cotizacion
-        cotizacion.get_estado_display.return_value = estado_display
-        filtrado = origen.cotizaciones_generadas.filter.return_value
-        filtrado.exclude.return_value = filtrado
-        filtrado.first.return_value = cotizacion
-        return origen
-
-    def test_constraint_de_recepcion_da_error_de_validacion(self):
-        error = IntegrityError('duplicate key value violates unique constraint "cotizacion_recepcion_vigente_unica"')
-        with self.assertRaises(serializers.ValidationError):
-            _traducir_integridad(error)
-
-    def test_constraint_de_inspeccion_da_error_de_validacion(self):
-        error = IntegrityError('duplicate key value violates unique constraint "cotizacion_inspeccion_vigente_unica"')
-        with self.assertRaises(serializers.ValidationError):
-            _traducir_integridad(error)
-
-    def test_mensaje_identifica_la_cotizacion_en_conflicto(self):
-        error = IntegrityError('duplicate key value violates unique constraint "cotizacion_recepcion_vigente_unica"')
-        with self.assertRaises(serializers.ValidationError) as contexto:
-            _traducir_integridad(error, recepcion=self._origen())
-        mensaje = str(contexto.exception)
-        self.assertIn('COT-00007', mensaje)
-        self.assertIn('Aceptada', mensaje)
-
-    def test_mensaje_sin_origen_no_rompe(self):
-        error = IntegrityError('duplicate key value violates unique constraint "cotizacion_inspeccion_vigente_unica"')
-        with self.assertRaises(serializers.ValidationError) as contexto:
-            _traducir_integridad(error)
-        self.assertIn('inspección', str(contexto.exception))
-
-    def test_otros_errores_se_dejan_pasar(self):
-        error = IntegrityError('duplicate key value violates unique constraint "cotizacion_empresa_numero_unico"')
-        self.assertIs(_traducir_integridad(error), error)
 
 
 class ActualizacionOrigenInmutableTests(SimpleTestCase):
     def test_reapertura_choca_con_la_maquina_de_estados(self):
-        # Reabrir es una transición válida, pero el constraint de la BD impide
-        # que dos cotizaciones del mismo origen queden vigentes a la vez.
+        # La transición conserva las reglas de estado sin limitar cotizaciones por origen.
         self.assertTrue(
             transicion_estado_valida(Cotizacion.EstadoCotizacion.RECHAZADA, Cotizacion.EstadoCotizacion.ENVIADA)
         )
@@ -420,6 +372,45 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
     def _cerrar(self, cotizacion, estado):
         cotizacion.estado = estado
         cotizacion.save(update_fields=['estado', 'updated_at'])
+
+    def test_permite_varias_cotizaciones_vigentes_para_la_misma_recepcion(self):
+        from apps.ordenes.models import RecepcionVehiculo
+
+        recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_recepcion='REC-MULTI-COT',
+        )
+        primera = self._crear(recepcion_origen=recepcion.pk)
+        segunda = self._crear(recepcion_origen=recepcion.pk)
+
+        self.assertEqual(primera.status_code, 201, primera.content)
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+        self.assertEqual(
+            Cotizacion.objects.filter(recepcion_origen=recepcion, estado__in=Cotizacion.ESTADOS_VIGENTES).count(),
+            2,
+        )
+
+    def test_permite_varias_cotizaciones_vigentes_para_la_misma_inspeccion(self):
+        from apps.ordenes.models import InspeccionVehiculo
+
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            motivo_ingreso='Trabajos solicitados por etapas',
+            numero_inspeccion='INS-MULTI-COT',
+        )
+        primera = self._crear(inspeccion_origen=inspeccion.pk)
+        segunda = self._crear(inspeccion_origen=inspeccion.pk)
+
+        self.assertEqual(primera.status_code, 201, primera.content)
+        self.assertEqual(segunda.status_code, 201, segunda.content)
+        self.assertEqual(
+            Cotizacion.objects.filter(inspeccion_origen=inspeccion, estado__in=Cotizacion.ESTADOS_VIGENTES).count(),
+            2,
+        )
 
     def test_permite_varias_cotizaciones_vigentes_para_el_mismo_vehiculo(self):
         primera = self._crear()

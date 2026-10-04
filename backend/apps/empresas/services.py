@@ -1,10 +1,11 @@
 """Servicios de secuencias y numeración de documentos por Taller.
 
-La asignación de códigos es atómica: cada llamada a `generar_codigo_secuencial`
-bloquea la fila del taller con `select_for_update()` dentro de una transacción,
-incrementa el contador y devuelve el código formateado. Esto evita condiciones
-de carrera cuando varios usuarios crean documentos del mismo taller
-simultáneamente.
+Cada taller tiene su propia secuencia (prefijo, contador y dígitos) porque es la
+sucursal desde la que se opera: el número solo debe ser único **dentro del
+taller**, que es lo que garantizan las restricciones
+`UNIQUE (empresa, sucursal, numero_*)` de los documentos. La asignación bloquea
+la fila del taller con `select_for_update()` y siempre devuelve el siguiente
+número **disponible** de esa secuencia.
 """
 
 from django.db import transaction
@@ -78,12 +79,34 @@ def resolver_taller(empresa, sucursal=None):
     ).order_by('id').first()
 
 
+def _siguiente_numero_libre(tipo, campos, taller, prefijo, digitos, contador):
+    """Siguiente número **disponible** del taller para el documento.
+
+    Parte del contador del taller, nunca por detrás del último número emitido en
+    esa sucursal, y avanza mientras el código ya exista. Así se respetan
+    contadores atrasados (taller nuevo, editados a mano) y huecos sin usar.
+    """
+    siguiente = max(int(contador or 1), ultimo_numero_emitido(taller, tipo) + 1, 1)
+    modelo = _modelo_documento(tipo)
+    while modelo.objects.filter(
+        sucursal=taller,
+        **{campos['numero']: f'{prefijo}{siguiente:0{digitos}d}'},
+    ).exists():
+        siguiente += 1
+    return siguiente
+
+
 def generar_codigo_secuencial(taller, tipo):
-    """Asigna atómicamente el siguiente código del taller para el documento.
+    """Asigna el siguiente número disponible del taller para el documento.
 
     Ejemplo: prefijo `OT-`, siguiente `1500`, dígitos `5` -> `OT-01500`.
 
-    Devuelve el código formateado. El contador del taller queda incrementado.
+    La secuencia es **por taller** (la sucursal desde la que se opera): el número
+    solo tiene que ser único dentro de esa sucursal, que es lo que garantizan las
+    restricciones `UNIQUE (empresa, sucursal, numero_*)`. Cada llamada bloquea la
+    fila del taller con `select_for_update()`, calcula el siguiente número libre
+    y avanza el contador, de modo que dos usuarios de la misma sucursal
+    simultáneos no obtengan el mismo número.
     """
     campos = TIPO_A_CAMPOS.get(tipo)
     if not campos:
@@ -93,23 +116,29 @@ def generar_codigo_secuencial(taller, tipo):
 
     with transaction.atomic():
         taller_bloqueado = Taller.objects.select_for_update().get(pk=taller.pk)
-        prefijo = (getattr(taller_bloqueado, campos['prefijo']) or '').strip()
-        siguiente = max(int(getattr(taller_bloqueado, campos['siguiente']) or 1), 1)
-        digitos = max(int(getattr(taller_bloqueado, campos['digitos']) or 5), 1)
 
-        codigo = f'{prefijo}{siguiente:0{digitos}d}'
+        prefijo = (getattr(taller_bloqueado, campos['prefijo']) or '').strip()
+        digitos = max(int(getattr(taller_bloqueado, campos['digitos']) or 5), 1)
+        siguiente = _siguiente_numero_libre(
+            tipo,
+            campos,
+            taller_bloqueado,
+            prefijo,
+            digitos,
+            getattr(taller_bloqueado, campos['siguiente']),
+        )
 
         setattr(taller_bloqueado, campos['siguiente'], siguiente + 1)
         taller_bloqueado.save(update_fields=[campos['siguiente']])
 
-    return codigo
+    return f'{prefijo}{siguiente:0{digitos}d}'
 
 
 def ultimo_numero_emitido(taller, tipo):
-    """Devuelve el número secuencial máximo realmente emitido en el taller.
+    """Número secuencial máximo ya usado por el taller (0 si no hay ninguno).
 
-    Escanea los códigos existentes del documento que usan el prefijo actual
-    del taller y devuelve el mayor valor numérico (0 si no existe ninguno).
+    Escanea los códigos del documento que usan el prefijo vigente del taller,
+    incluidos los de baja lógica: el número también queda reservado para ellos.
     """
     campos = TIPO_A_CAMPOS.get(tipo)
     if not campos or taller is None:
@@ -119,7 +148,6 @@ def ultimo_numero_emitido(taller, tipo):
     prefijo = (getattr(taller, campos['prefijo']) or '').strip()
     codigos = modelo.objects.filter(
         sucursal=taller,
-        is_active=True,
         **{f'{campos["numero"]}__isnull': False},
     ).values_list(campos['numero'], flat=True)
 
