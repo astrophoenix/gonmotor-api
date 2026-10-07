@@ -435,7 +435,8 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError(
                     {'cotizaciones': f'La cotización {cotizacion_id} no pertenece al vehículo de esta recepción.'}
                 )
-            if cotizacion.estado == Cotizacion.EstadoCotizacion.CONVERTIDA:
+            # Una cotización se considera "convertida" si tiene una orden de trabajo asociada
+            if cotizacion.orden_trabajo_origen_id or OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).exists():
                 raise serializers.ValidationError(
                     {'cotizaciones': f'{cotizacion.numero_cotizacion} ya está convertida en orden de trabajo.'}
                 )
@@ -627,7 +628,8 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
                     {'id': f'La cotización {cotizacion_id} no existe para el vehículo de la inspección.'}
                 )
             if accion == 'vincular':
-                if cotizacion.estado == Cotizacion.EstadoCotizacion.CONVERTIDA:
+                # Una cotización se considera "convertida" si tiene una orden de trabajo asociada
+                if cotizacion.orden_trabajo_origen_id or OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).exists():
                     raise serializers.ValidationError(
                         {'detail': f'{cotizacion.numero_cotizacion} ya está convertida en orden de trabajo.'}
                     )

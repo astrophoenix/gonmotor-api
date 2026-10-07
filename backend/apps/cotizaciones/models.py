@@ -13,7 +13,6 @@ class Cotizacion(BaseModel):
         ACEPTADA = 'ACEPTADA', 'Aceptada'
         RECHAZADA = 'RECHAZADA', 'Rechazada'
         VENCIDA = 'VENCIDA', 'Vencida'
-        CONVERTIDA = 'CONVERTIDA', 'Convertida a Orden'
 
     ESTADOS_VIGENTES = (
         EstadoCotizacion.PENDIENTE,
@@ -337,8 +336,7 @@ class Cotizacion(BaseModel):
         self.fecha_aceptacion = self.fecha_aceptacion or timezone.now()
         self.aceptada_por = self.aceptada_por or usuario
         self.metodo_aceptacion = metodo_aceptacion or self.metodo_aceptacion or 'PRESENCIAL'
-        self.estado = self.EstadoCotizacion.CONVERTIDA
-
+        # Se mantiene en ACEPTADA; la existencia de orden_trabajo_origen indica conversión
         self.save()
         return ot
 

@@ -861,8 +861,9 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         self.assertIsNone(otra.recepcion_id)
 
     def test_no_vincula_cotizacion_ya_convertida(self):
-        self.cotizacion.estado = 'CONVERTIDA'
-        self.cotizacion.save(update_fields=['estado'])
+        # Una cotización con orden_trabajo_origen se considera "convertida"
+        self.cotizacion.orden_trabajo_origen = self.orden
+        self.cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
         respuesta = self._post(self._url(), 'cotizacion', self.cotizacion.pk)
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.cotizacion.refresh_from_db()
@@ -958,8 +959,9 @@ class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
     def test_no_quita_el_vinculo_de_una_cotizacion_convertida(self):
         self._post(self._url(), 'orden', self.orden.pk)
-        self.cotizacion.estado = 'CONVERTIDA'
-        self.cotizacion.save(update_fields=['estado'])
+        # La cotización ya generó una orden -> no se puede desvincular
+        self.cotizacion.orden_trabajo_origen = self.orden
+        self.cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
         respuesta = self._post(self._url(), 'orden', self.orden.pk, accion='desvincular')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.orden.refresh_from_db()
@@ -1419,14 +1421,26 @@ class CotizacionesCandidatasInspeccionTests(TestCase):
         self._cotizacion(estado='ENVIADA', numero='COT-7002')
         self._cotizacion(estado='PENDIENTE', numero='COT-7003')
         self._cotizacion(estado='RECHAZADA', numero='COT-7004')
-        self._cotizacion(estado='CONVERTIDA', numero='COT-7005')
+        # "Convertida" = ACEPTADA con orden_trabajo_origen (se mantiene en ACEPTADA)
+        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-7005')
+        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
+        orden_ficticia = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_orden='OT-FICTICIA',
+            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
+        )
+        convertida.orden_trabajo_origen = orden_ficticia
+        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
 
         respuesta = self.api.get(self._url())
 
         numeros = lambda grupo: sorted(c['numero'] for c in respuesta.data[grupo])  # noqa: E731
-        self.assertEqual(numeros('aprobadas'), ['COT-7001'])
+        self.assertEqual(numeros('aprobadas'), ['COT-7001', 'COT-7005'])
         self.assertEqual(numeros('enCurso'), ['COT-7002', 'COT-7003'])
-        self.assertEqual(numeros('historicas'), ['COT-7004', 'COT-7005'])
+        self.assertEqual(numeros('historicas'), ['COT-7004'])
 
     def test_no_muestra_cotizaciones_de_otros_vehiculos_ni_otros_talleres(self):
         from apps.vehiculos.models import Vehiculo
@@ -1496,7 +1510,19 @@ class CotizacionesCandidatasInspeccionTests(TestCase):
             self.assertEqual(cotizacion.inspeccion_origen_id, self.inspeccion.id)
 
     def test_no_permite_vincular_una_cotizacion_convertida(self):
-        convertida = self._cotizacion(estado='CONVERTIDA', numero='COT-7005')
+        # Una cotización con orden_trabajo_origen se considera "convertida"
+        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-7005')
+        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
+        orden_ficticia = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_orden='OT-FICTICIA',
+            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
+        )
+        convertida.orden_trabajo_origen = orden_ficticia
+        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
 
         respuesta = self.api.post(
             self._url(), {'cotizaciones': [convertida.id], 'accion': 'vincular'}, format='json'
@@ -1754,9 +1780,21 @@ class CrearInspeccionCotizacionesElegidasTests(TestCase):
         self.assertEqual(inspeccion.repuestos_sugeridos.count(), 0)
 
     def test_rechaza_cotizacion_convertida(self):
-        self._cotizacion(estado='CONVERTIDA', numero='COT-8005')
+        # Una cotización con orden_trabajo_origen se considera "convertida"
+        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-8005')
+        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
+        orden_ficticia = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_orden='OT-FICTICIA',
+            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
+        )
+        convertida.orden_trabajo_origen = orden_ficticia
+        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
 
-        respuesta = self.api.post(self._url(), {'cotizaciones': [1]}, format='json')
+        respuesta = self.api.post(self._url(), {'cotizaciones': [convertida.id]}, format='json')
 
         # El id no existe para este vehículo: error de validación, no 500.
         self.assertEqual(respuesta.status_code, 400, respuesta.content)

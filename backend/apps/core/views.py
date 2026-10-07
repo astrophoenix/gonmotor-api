@@ -641,7 +641,7 @@ class DashboardV2View(APIView):
         monto_pendientes = cotizaciones_pendientes_qs.aggregate(total=Sum('total'))['total'] or Decimal('0')
         cot_periodo_qs = _periodo(cotizaciones, 'created_at', fecha_desde, fecha_hasta)
         cot_aceptadas = cot_periodo_qs.filter(
-            estado__in=(Cotizacion.EstadoCotizacion.ACEPTADA, Cotizacion.EstadoCotizacion.CONVERTIDA)
+            estado=Cotizacion.EstadoCotizacion.ACEPTADA
         ).count()
         cot_rechazadas = cot_periodo_qs.filter(
             estado=Cotizacion.EstadoCotizacion.RECHAZADA

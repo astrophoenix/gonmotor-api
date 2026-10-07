@@ -110,9 +110,7 @@ class TransicionEstadoTests(SimpleTestCase):
             (Cotizacion.EstadoCotizacion.ENVIADA, Cotizacion.EstadoCotizacion.ACEPTADA, True),
             (Cotizacion.EstadoCotizacion.ENVIADA, Cotizacion.EstadoCotizacion.RECHAZADA, True),
             (Cotizacion.EstadoCotizacion.ACEPTADA, Cotizacion.EstadoCotizacion.ENVIADA, True),
-            (Cotizacion.EstadoCotizacion.ACEPTADA, Cotizacion.EstadoCotizacion.CONVERTIDA, False),
             (Cotizacion.EstadoCotizacion.RECHAZADA, Cotizacion.EstadoCotizacion.ENVIADA, True),
-            (Cotizacion.EstadoCotizacion.CONVERTIDA, Cotizacion.EstadoCotizacion.ENVIADA, False),
         ]
         for actual, nuevo, esperado in casos:
             with self.subTest(actual=actual, nuevo=nuevo):
@@ -255,7 +253,8 @@ class GenerarOrdenTests(SimpleTestCase):
             cotizacion.generar_orden()
 
     def test_ya_convertida_rechazada(self):
-        cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.CONVERTIDA)
+        # Una cotización con orden_trabajo_origen_id se considera "convertida"
+        cotizacion = self._cotizacion(Cotizacion.EstadoCotizacion.ACEPTADA, orden_origen_id=1)
         with self.assertRaises(ValueError):
             cotizacion.generar_orden()
 
@@ -478,7 +477,19 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
     def test_tras_convertir_el_vehiculo_queda_libre(self):
         primera = self._crear()
         numero = primera.json()['numero_cotizacion']
-        self._cerrar(Cotizacion.objects.get(numero_cotizacion=numero), 'CONVERTIDA')
+        cot = Cotizacion.objects.get(numero_cotizacion=numero)
+        cot.estado = Cotizacion.EstadoCotizacion.ACEPTADA
+        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
+        orden_ficticia = OrdenTrabajo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_orden='OT-FICTICIA',
+            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
+        )
+        cot.orden_trabajo_origen = orden_ficticia
+        cot.save(update_fields=['estado', 'orden_trabajo_origen', 'updated_at'])
         segunda = self._crear()
         self.assertEqual(segunda.status_code, 201, segunda.content)
 
@@ -587,7 +598,7 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
             Cotizacion.EstadoCotizacion.ENVIADA,
             Cotizacion.EstadoCotizacion.ACEPTADA,
             Cotizacion.EstadoCotizacion.RECHAZADA,
-            Cotizacion.EstadoCotizacion.CONVERTIDA,
+            Cotizacion.EstadoCotizacion.VENCIDA,
         ):
             with self.subTest(estado=estado):
                 Cotizacion.objects.filter(pk=cotizacion_id).update(estado=estado)

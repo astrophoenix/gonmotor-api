@@ -95,10 +95,8 @@ def _orden_de_cotizacion(cotizacion):
 
 def _item_cotizacion(cotizacion):
     orden = _orden_de_cotizacion(cotizacion)
-    convertida = cotizacion.estado == 'CONVERTIDA'
+    convertida = orden is not None
     if convertida:
-        motivo = 'La cotización ya fue convertida a una orden.'
-    elif orden is not None:
         motivo = 'La cotización ya generó una orden de trabajo.'
     else:
         motivo = ''
@@ -111,7 +109,7 @@ def _item_cotizacion(cotizacion):
         'created_at': cotizacion.created_at.isoformat() if cotizacion.created_at else None,
         'total': str(cotizacion.total or 0),
         'url': f'/crud/cotizaciones/ver/?id={cotizacion.id}',
-        'canDelete': not convertida and orden is None,
+        'canDelete': not convertida,
         'deleteReason': motivo,
     }
 
@@ -294,7 +292,7 @@ def _validar_cita(cita, destino_id):
 
 
 def _validar_cotizacion_libre(cotizacion):
-    if cotizacion.estado == 'CONVERTIDA' or _orden_de_cotizacion(cotizacion) is not None:
+    if _orden_de_cotizacion(cotizacion) is not None:
         raise _error('No se puede relacionar una cotización ya convertida en orden.')
 
 
@@ -516,8 +514,8 @@ def _desvincular_desde_cotizacion(cotizacion, tipo, entidad):
         return
 
     if tipo == 'orden':
-        if cotizacion.estado == 'CONVERTIDA':
-            raise _error('No se puede quitar el vínculo de una cotización convertida.')
+        if _orden_de_cotizacion(cotizacion) is not None:
+            raise _error('No se puede quitar el vínculo de una cotización que ya generó una orden.')
         if cotizacion.orden_trabajo_origen_id != entidad.pk and entidad.cotizacion_origen_id != cotizacion.pk:
             raise _error('La orden no está vinculada a esta cotización.')
         if entidad.cotizacion_origen_id == cotizacion.pk:
@@ -594,8 +592,8 @@ def _desvincular_desde_orden(orden, tipo, entidad):
         return
 
     if tipo == 'cotizacion':
-        if entidad.estado == 'CONVERTIDA':
-            raise _error('No se puede quitar el vínculo de una cotización convertida.')
+        if _orden_de_cotizacion(entidad) is not None:
+            raise _error('No se puede quitar el vínculo de una cotización que ya generó una orden.')
         if entidad.orden_trabajo_origen_id != orden.pk and orden.cotizacion_origen_id != entidad.pk:
             raise _error('La cotización no está vinculada a esta orden.')
         if orden.cotizacion_origen_id == entidad.pk:

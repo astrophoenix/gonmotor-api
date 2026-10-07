@@ -34,7 +34,6 @@ TRANSICIONES_VALIDAS = {
     # Reapertura: una cotización ACEPTADA vuelve a ENVIADA (estado anterior a la
     # aceptación) para ajustarse; el cliente debe aceptarla nuevamente.
     Cotizacion.EstadoCotizacion.ACEPTADA: {Cotizacion.EstadoCotizacion.ENVIADA},
-    Cotizacion.EstadoCotizacion.CONVERTIDA: set(),
 }
 
 
