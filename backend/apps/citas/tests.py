@@ -783,6 +783,31 @@ class CitaConversionNumeracionTests(TestCase):
         self.assertEqual(numeros, ['REC-00001', 'REC-00002', 'REC-00003'])
         self.assertEqual(len(set(numeros)), 3)
 
+    def test_la_conversion_usa_el_asesor_de_la_cita(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        asesor = User.objects.create_user(username='asesor_cita', password='x')
+        quien_convierte = User.objects.create_user(username='convierte_cita', password='x')
+        cita = self._cita_en_norte()
+        cita.asesor = asesor
+        cita.save()
+
+        recepcion = cita.convertir_a_recepcion(usuario=quien_convierte)
+
+        self.assertEqual(recepcion.recibido_por_id, asesor.pk)
+
+    def test_la_conversion_cae_al_usuario_si_la_cita_no_tiene_asesor(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        quien_convierte = User.objects.create_user(username='convierte_sin_asesor', password='x')
+        cita = self._cita_en_norte()
+
+        recepcion = cita.convertir_a_recepcion(usuario=quien_convierte)
+
+        self.assertEqual(recepcion.recibido_por_id, quien_convierte.pk)
+
     def test_el_endpoint_no_devuelve_500_si_el_numero_pudo_ocuparse(self):
         from unittest import mock
 

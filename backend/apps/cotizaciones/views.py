@@ -32,11 +32,21 @@ def _parsear_fecha(valor):
 
 
 def _validar_origen_cotizacion(inspeccion=None, recepcion=None):
-    """Impide crear cotizaciones desde inspecciones ya convertidas en OT."""
+    """Impide crear cotizaciones desde inspecciones ya convertidas en OT o sin ítems."""
     if inspeccion is not None:
         if inspeccion.orden_trabajo_id:
             raise serializers.ValidationError(
                 'La inspección ya se convirtió en orden de trabajo; no se puede cotizar nuevamente.'
+            )
+        if not (
+            inspeccion.servicios_detectados.exists()
+            or inspeccion.repuestos_sugeridos.exists()
+        ):
+            raise serializers.ValidationError(
+                {
+                    'inspeccion_origen': 'La inspección no tiene servicios ni repuestos. '
+                    'Agrega al menos un ítem antes de crear la cotización.'
+                }
             )
 
 

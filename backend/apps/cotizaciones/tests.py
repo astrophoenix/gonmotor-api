@@ -169,6 +169,25 @@ class ValidarOrigenCotizacionTests(SimpleTestCase):
     def test_inspeccion_libre_aprueba(self):
         self.assertIsNone(_validar_origen_cotizacion(inspeccion=self._origen()))
 
+    def test_inspeccion_sin_items_rechazada(self):
+        inspeccion = self._origen()
+        inspeccion.servicios_detectados.exists.return_value = False
+        inspeccion.repuestos_sugeridos.exists.return_value = False
+        with self.assertRaises(serializers.ValidationError):
+            _validar_origen_cotizacion(inspeccion=inspeccion)
+
+    def test_inspeccion_con_solo_servicios_aprueba(self):
+        inspeccion = self._origen()
+        inspeccion.servicios_detectados.exists.return_value = True
+        inspeccion.repuestos_sugeridos.exists.return_value = False
+        self.assertIsNone(_validar_origen_cotizacion(inspeccion=inspeccion))
+
+    def test_inspeccion_con_solo_repuestos_aprueba(self):
+        inspeccion = self._origen()
+        inspeccion.servicios_detectados.exists.return_value = False
+        inspeccion.repuestos_sugeridos.exists.return_value = True
+        self.assertIsNone(_validar_origen_cotizacion(inspeccion=inspeccion))
+
     def test_recepcion_puede_tener_varias_cotizaciones_vigentes(self):
         recepcion = self._origen(vigente=self._vigente('COT-00007'))
         self.assertIsNone(_validar_origen_cotizacion(recepcion=recepcion))
@@ -392,8 +411,22 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
             2,
         )
 
-    def test_permite_varias_cotizaciones_vigentes_para_la_misma_inspeccion(self):
+    def test_no_permite_crear_desde_inspeccion_sin_items(self):
         from apps.ordenes.models import InspeccionVehiculo
+
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            numero_inspeccion='INS-SIN-ITEMS',
+        )
+        respuesta = self._crear(inspeccion_origen=inspeccion.pk)
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.assertEqual(Cotizacion.objects.filter(inspeccion_origen=inspeccion).count(), 0)
+
+    def test_permite_varias_cotizaciones_vigentes_para_la_misma_inspeccion(self):
+        from apps.ordenes.models import DetalleServicioInspeccion, InspeccionVehiculo
 
         inspeccion = InspeccionVehiculo.objects.create(
             empresa=self.empresa,
@@ -402,6 +435,7 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
             motivo_ingreso='Trabajos solicitados por etapas',
             numero_inspeccion='INS-MULTI-COT',
         )
+        DetalleServicioInspeccion.objects.create(inspeccion=inspeccion, descripcion='Cambio de aceite')
         primera = self._crear(inspeccion_origen=inspeccion.pk)
         segunda = self._crear(inspeccion_origen=inspeccion.pk)
 

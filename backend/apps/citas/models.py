@@ -201,7 +201,7 @@ class Cita(BaseModel):
             sucursal=self.taller or taller,
             cliente=self.cliente,
             vehiculo=self.vehiculo,
-            recibido_por=usuario or self.asesor,
+            recibido_por=self.asesor or usuario,
             numero_recepcion=numero_recepcion,
             tipo_recepcion=self._tipo_recepcion_desde_motivo(),
             motivo_ingreso=self.motivo_descripcion or self.get_motivo_display(),
