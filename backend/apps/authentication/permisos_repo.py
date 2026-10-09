@@ -24,7 +24,9 @@ from .matriz_roles import (
 from .models import (
     AccionEspecial,
     Permiso,
+    PermisoEmpresa,
     PermisoEspecial,
+    PermisoEspecialEmpresa,
     Recurso,
     Rol,
     UsuarioEmpresa,
@@ -185,8 +187,36 @@ def roles_otorgables_para(contexto):
     return codigos
 
 
-def permisos_de_rol(codigo):
-    """Permisos generales vigentes de un rol: `{recurso: [acciones]}`."""
+def _acciones_desde_fila(ver, modificar):
+    acciones = []
+    if ver:
+        acciones.append('ver')
+    if modificar:
+        acciones.append('modificar')
+    return acciones
+
+
+def _permisos_empresa_overlay(rol, empresa_id):
+    """Overrides de la empresa como `{recurso_codigo: acciones}`.
+
+    Ausencia de fila = hereda el global; fila presente = reemplaza (la fila
+    con ver/modificar en falso deniega explícitamente ese recurso).
+    """
+    filas = PermisoEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).values(
+        'recurso__codigo', 'ver', 'modificar'
+    )
+    return {
+        fila['recurso__codigo']: _acciones_desde_fila(fila['ver'], fila['modificar'])
+        for fila in filas
+    }
+
+
+def permisos_de_rol(codigo, empresa_id=None):
+    """Permisos generales vigentes de un rol: `{recurso: [acciones]}`.
+
+    Si `empresa_id` viene junto a un rol del sistema, los overrides de esa
+    empresa reemplazan el valor global recurso por recurso.
+    """
     rol = _rol_por_codigo(codigo)
     if not rol:
         return {}
@@ -197,32 +227,44 @@ def permisos_de_rol(codigo):
         .values('recurso__codigo', 'ver', 'modificar')
     )
     for fila in filas:
-        acciones = []
-        if fila['ver']:
-            acciones.append('ver')
-        if fila['modificar']:
-            acciones.append('modificar')
-        resultado[fila['recurso__codigo']] = acciones
+        resultado[fila['recurso__codigo']] = _acciones_desde_fila(
+            fila['ver'], fila['modificar']
+        )
+    if empresa_id and rol.es_sistema:
+        resultado.update(_permisos_empresa_overlay(rol, empresa_id))
     return resultado
 
 
-def acciones_especiales_de_rol(codigo):
+def acciones_especiales_de_rol(codigo, empresa_id=None):
+    """Acciones especiales concedidas a un rol (con overrides por empresa)."""
     rol = _rol_por_codigo(codigo)
     if not rol:
         return []
-    return list(
+    concedidas = set(
         PermisoEspecial.objects.filter(rol=rol).values_list('accion__codigo', flat=True)
     )
+    if empresa_id and rol.es_sistema:
+        overrides = PermisoEspecialEmpresa.objects.filter(
+            rol=rol, empresa_id=empresa_id
+        ).values_list('accion__codigo', 'permitido')
+        for accion_codigo, permitido in overrides:
+            if permitido:
+                concedidas.add(accion_codigo)
+            else:
+                concedidas.discard(accion_codigo)
+    return sorted(concedidas)
 
 
-def permisos_en_request(request, codigo):
+def permisos_en_request(request, codigo, empresa_id=None):
     """Permisos del rol vigente cacheados en el request (evita la query)."""
     cacheado = getattr(request, '_permisos_rol_gonmotor', None)
-    if isinstance(cacheado, dict) and cacheado.get('rol') == codigo:
+    if isinstance(cacheado, dict) and cacheado.get('rol') == codigo and cacheado.get('empresa') == empresa_id:
         return cacheado['permisos']
-    permisos = permisos_de_rol(codigo)
+    permisos = permisos_de_rol(codigo, empresa_id)
     try:
-        request._permisos_rol_gonmotor = {'rol': codigo, 'permisos': permisos}
+        request._permisos_rol_gonmotor = {
+            'rol': codigo, 'empresa': empresa_id, 'permisos': permisos
+        }
     except AttributeError:  # objetos sin soporte de atributos (defensivo)
         return permisos
     return permisos
@@ -306,3 +348,84 @@ def generar_codigo_rol(nombre):
         sufijo = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
         base = f'{base[:26]}-{sufijo}'
     return base
+
+
+# ---------------------------------------------------------------------------
+# Overrides por empresa (roles de sistema ajustables por cada cuenta)
+# ---------------------------------------------------------------------------
+
+def tiene_override_empresa(rol, empresa_id):
+    """¿La empresa ajustó los permisos de este rol (algún override)?"""
+    if not empresa_id or not rol.es_sistema:
+        return False
+    return (
+        PermisoEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).exists()
+        or PermisoEspecialEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).exists()
+    )
+
+
+def guardar_permisos_empresa(rol, empresa_id, items):
+    """Reemplaza los overrides de `rol` en `empresa_id`.
+
+    A diferencia de `guardar_permisos` (que omite las filas sin permiso),
+    aquí se guarda fila por recurso recibido con sus valores explícitos:
+    una fila con ver/modificar en falso significa "denegar en esta empresa".
+    """
+    recursos = {r.codigo: r for r in Recurso.objects.all()}
+    nuevo = {}
+    for item in items or []:
+        recurso_codigo = item.get('recurso')
+        if recurso_codigo not in recursos:
+            raise ValidationError(f'Recurso desconocido: {recurso_codigo!r}.')
+        ver, modificar = _normalizar_permiso(
+            bool(item.get('ver')), bool(item.get('modificar'))
+        )
+        nuevo[recurso_codigo] = (recursos[recurso_codigo], ver, modificar)
+
+    PermisoEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).delete()
+    filas = [
+        PermisoEmpresa(
+            rol=rol, empresa_id=empresa_id, recurso=recurso, ver=ver, modificar=modificar
+        )
+        for recurso, ver, modificar in nuevo.values()
+    ]
+    PermisoEmpresa.objects.bulk_create(filas)
+
+
+def guardar_acciones_empresa(rol, empresa_id, codigos):
+    """Reemplaza los overrides de acciones especiales de `rol` en `empresa_id`.
+
+    Concede lo recibido y añade filas de denegación explícita para lo que el
+    global otorga y la empresa ya no quiere (permitido=False).
+    """
+    todas = {a.codigo: a for a in AccionEspecial.objects.all()}
+    desconocidas = set(codigos or []) - set(todas)
+    if desconocidas:
+        raise ValidationError(
+            f'Acciones desconocidas: {", ".join(sorted(desconocidas))!r}.'
+        )
+    concedidas_globales = set(
+        PermisoEspecial.objects.filter(rol=rol).values_list('accion__codigo', flat=True)
+    )
+    deseadas = set(codigos or [])
+    PermisoEspecialEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).delete()
+    filas = [
+        PermisoEspecialEmpresa(
+            rol=rol, empresa_id=empresa_id, accion=todas[codigo], permitido=True
+        )
+        for codigo in deseadas
+    ]
+    filas += [
+        PermisoEspecialEmpresa(
+            rol=rol, empresa_id=empresa_id, accion=todas[codigo], permitido=False
+        )
+        for codigo in (concedidas_globales - deseadas)
+        if codigo in todas
+    ]
+    PermisoEspecialEmpresa.objects.bulk_create(filas)
+
+
+def restablecer_permisos_empresa(rol, empresa_id):
+    """Borra los overrides de la empresa: vuelve a la matriz global."""
+    PermisoEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).delete()
+    PermisoEspecialEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).delete()

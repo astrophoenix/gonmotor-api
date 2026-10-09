@@ -32,7 +32,7 @@ def TienePermiso(recurso, accion='modificar'):
             contexto = get_contexto_desde_request(request)
             if not contexto.hay_contexto:
                 return False
-            permisos = permisos_en_request(request, contexto.rol)
+            permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
             return accion in permisos.get(recurso, ())
 
     _TienePermiso.__name__ = f'TienePermiso_{recurso}'
@@ -49,7 +49,7 @@ class EsAdminDeEmpresa(permissions.BasePermission):
         contexto = get_contexto_desde_request(request)
         if not contexto.hay_contexto:
             return False
-        permisos = permisos_en_request(request, contexto.rol)
+        permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
         return 'modificar' in permisos.get('empresa', ())
 
 

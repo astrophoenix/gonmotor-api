@@ -337,3 +337,78 @@ class PermisoEspecial(BaseModel):
 
     def __str__(self):
         return f'{self.rol.codigo}: {self.accion.codigo}'
+
+
+class PermisoEmpresa(BaseModel):
+    """Overrides de ver/modificar de un rol de sistema por empresa.
+
+    Si no hay fila para (empresa, rol, recurso) la empresa hereda el valor
+    global de `Permiso`. Si hay fila, ese valor reemplaza al global: permite
+    conceder o denegar recurso por recurso dentro de una sola empresa sin
+    tocar la matriz que comparten las demás. Los roles personalizados no
+    usan esta tabla: sus permisos ya viven por rol.
+    """
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        related_name='permisos_overrides',
+        verbose_name="Empresa"
+    )
+    rol = models.ForeignKey(
+        Rol,
+        on_delete=models.CASCADE,
+        related_name='permisos_empresa',
+        verbose_name="Rol"
+    )
+    recurso = models.ForeignKey(
+        Recurso,
+        on_delete=models.CASCADE,
+        related_name='permisos_empresa',
+        verbose_name="Recurso"
+    )
+    ver = models.BooleanField(default=False, verbose_name="Ver")
+    modificar = models.BooleanField(default=False, verbose_name="Modificar")
+
+    class Meta:
+        verbose_name = "Permiso de rol por empresa"
+        verbose_name_plural = "Permisos de roles por empresa"
+        unique_together = ('empresa', 'rol', 'recurso')
+
+    def __str__(self):
+        return f'{self.empresa_id}:{self.rol.codigo}:{self.recurso.codigo} (ver={self.ver}, modificar={self.modificar})'
+
+
+class PermisoEspecialEmpresa(BaseModel):
+    """Overrides de acciones especiales de un rol de sistema por empresa.
+
+    La fila explicita `permitido` (concede o deniega) sobre la herencia del
+    global `PermisoEspecial`. Ausencia de fila = hereda el global. Así la
+    empresa puede tanto conceder como revocar una acción dentro de su cuenta.
+    """
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        related_name='permisos_especiales_overrides',
+        verbose_name="Empresa"
+    )
+    rol = models.ForeignKey(
+        Rol,
+        on_delete=models.CASCADE,
+        related_name='permisos_especiales_empresa',
+        verbose_name="Rol"
+    )
+    accion = models.ForeignKey(
+        AccionEspecial,
+        on_delete=models.CASCADE,
+        related_name='roles_empresa',
+        verbose_name="Acción especial"
+    )
+    permitido = models.BooleanField(default=True, verbose_name="Permitido")
+
+    class Meta:
+        verbose_name = "Permiso especial de rol por empresa"
+        verbose_name_plural = "Permisos especiales de roles por empresa"
+        unique_together = ('empresa', 'rol', 'accion')
+
+    def __str__(self):
+        return f'{self.empresa_id}:{self.rol.codigo}:{self.accion.codigo} permitido={self.permitido}'

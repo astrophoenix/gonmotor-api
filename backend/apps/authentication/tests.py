@@ -17,9 +17,9 @@ from apps.authentication.matriz_roles import (
     puede,
 )
 from apps.authentication.models import UserProfile, UsuarioEmpresa
-from apps.authentication.models import Rol
+from apps.authentication.models import PermisoEmpresa, PermisoEspecialEmpresa, Rol
 from apps.authentication.permissions import EsAdminDeEmpresa, TienePermiso
-from apps.authentication.permisos_repo import permisos_de_rol
+from apps.authentication.permisos_repo import acciones_especiales_de_rol, permisos_de_rol
 from apps.authentication.serializers import EmpleadoWriteSerializer
 from apps.authentication.utils import (
     contexto_de_usuario,
@@ -837,7 +837,9 @@ class PermisosEndpointTests(EscenarioMixin, APITestCase):
 		self.assertEqual(cliente.get('/api/auth/usuarios/').status_code, 200)
 		resp = cliente.get('/api/auth/roles/')
 		self.assertEqual(resp.status_code, 200, resp.content)
-		self.assertEqual(len(resp.json()), len(UsuarioEmpresa.ROLES))
+		esperados = [c for c, _ in UsuarioEmpresa.ROLES if c != 'ADMIN_SISTEMA']
+		self.assertEqual(len(resp.json()), len(esperados))
+		self.assertNotIn('ADMIN_SISTEMA', [r['codigo'] for r in resp.json()])
 		self.assertTrue(all('codigo' in rol and 'es_sistema' in rol for rol in resp.json()))
 
 	def test_roles_expone_nivel_y_alcance_de_talleres(self):
@@ -890,8 +892,10 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 	def test_solo_roles_de_sistema_en_lista(self):
 		resp = self._cliente(self.dueno).get('/api/auth/roles/')
 		codigos = [r['codigo'] for r in resp.json()]
-		self.assertEqual(sorted(codigos), sorted(c for c, _ in UsuarioEmpresa.ROLES))
-		self.assertTrue(all(r['es_sistema'] and not r['editable'] for r in resp.json()))
+		esperados = sorted(c for c, _ in UsuarioEmpresa.ROLES if c != 'ADMIN_SISTEMA')
+		self.assertEqual(sorted(codigos), esperados)
+		self.assertTrue(all(r['editable'] for r in resp.json()))
+		self.assertTrue(all(r['personalizado'] is False for r in resp.json()))
 
 	def test_crea_rol_personalizado_de_la_empresa(self):
 		resp = self._crear_rol(self._cliente(self.dueno))
@@ -1001,7 +1005,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		self.assertEqual(resp.status_code, 200, resp.content)
 		self.assertFalse(Rol.objects.get(pk=rol['id']).is_active)
 
-	def test_roles_de_sistema_no_editables(self):
+	def test_metadata_de_roles_de_sistema_no_editable(self):
 		cliente = self._cliente(self.superadmin)
 		sistema = Rol.objects.get(codigo='MECANICO')
 		resp = cliente.patch(
@@ -1010,12 +1014,98 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 			format='json',
 		)
 		self.assertEqual(resp.status_code, 403, resp.content)
+
+	def test_superadmin_edita_matriz_global_de_sistema(self):
+		cliente = self._cliente(self.superadmin)
+		sistema = Rol.objects.get(codigo='MECANICO')
 		resp = cliente.put(
 			f'/api/auth/roles/{sistema.pk}/permisos/',
-			{'permisos': [{'recurso': 'clientes', 'ver': True, 'modificar': False}]},
+			{'permisos': [
+				{'recurso': 'clientes', 'ver': True, 'modificar': False},
+				{'recurso': 'facturacion', 'ver': True, 'modificar': True},
+			]},
 			format='json',
 		)
-		self.assertEqual(resp.status_code, 403, resp.content)
+		self.assertEqual(resp.status_code, 200, resp.content)
+		globales = permisos_de_rol('MECANICO')
+		self.assertEqual(globales['clientes'], ['ver'])
+		self.assertEqual(globales['facturacion'], ['ver', 'modificar'])
+		self.assertFalse(PermisoEmpresa.objects.filter(rol=sistema).exists())
+
+	def test_empresa_ajusta_rol_de_sistema_y_aisla_de_otras(self):
+		cliente = self._cliente(self.dueno)
+		mecanico = Rol.objects.get(codigo='MECANICO')
+		globales = permisos_de_rol('MECANICO')
+		self.assertEqual(globales['clientes'], ['ver'])
+		self.assertNotIn('facturacion', globales)
+		resp = cliente.put(
+			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			{'permisos': [
+				{'recurso': 'clientes', 'ver': True, 'modificar': True},
+				{'recurso': 'facturacion', 'ver': True, 'modificar': False},
+			]},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 200, resp.content)
+		efectivo = permisos_de_rol('MECANICO', self.empresa_a.pk)
+		self.assertEqual(efectivo['clientes'], ['ver', 'modificar'])
+		self.assertEqual(efectivo['facturacion'], ['ver'])
+		self.assertEqual(permisos_de_rol('MECANICO'), globales)
+		otra = Empresa.objects.create(nombre_comercial='Lejana S.A.', ruc='1799999999007')
+		self.assertEqual(permisos_de_rol('MECANICO', otra.pk), globales)
+		lista = cliente.get('/api/auth/roles/').json()
+		self.assertTrue(next(r for r in lista if r['codigo'] == 'MECANICO')['personalizado'])
+		detalle = cliente.get(f'/api/auth/roles/{mecanico.pk}/').json()
+		self.assertTrue(detalle['personalizado'])
+
+	def test_restablecer_rol_de_sistema_a_matriz_global(self):
+		cliente = self._cliente(self.dueno)
+		mecanico = Rol.objects.get(codigo='MECANICO')
+		globales = permisos_de_rol('MECANICO')
+		cliente.put(
+			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			{'permisos': [{'recurso': 'clientes', 'ver': True, 'modificar': True}]},
+			format='json',
+		)
+		resp = cliente.delete(f'/api/auth/roles/{mecanico.pk}/permisos/')
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.assertEqual(permisos_de_rol('MECANICO', self.empresa_a.pk), globales)
+		self.assertFalse(
+			PermisoEmpresa.objects.filter(rol=mecanico, empresa_id=self.empresa_a.pk).exists()
+		)
+		lista = cliente.get('/api/auth/roles/').json()
+		self.assertFalse(next(r for r in lista if r['codigo'] == 'MECANICO')['personalizado'])
+
+	def test_override_empresa_afecta_permisos_drf(self):
+		cliente = self._cliente(self.dueno)
+		mecanico = Rol.objects.get(codigo='MECANICO')
+		cliente.put(
+			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			{'permisos': [{'recurso': 'facturacion', 'ver': True, 'modificar': False}]},
+			format='json',
+		)
+		usuario = self._con_rol('MECANICO')
+		request = self._request(user=usuario, empresa=self.empresa_a.pk)
+		self.assertTrue(TienePermiso('facturacion', 'ver')().has_permission(request, None))
+
+	def test_override_acciones_especiales_por_empresa(self):
+		cliente = self._cliente(self.dueno)
+		asesor = Rol.objects.get(codigo='ASESOR')
+		cliente.put(
+			f'/api/auth/roles/{asesor.pk}/acciones/',
+			{'acciones': ['aprobar_descuentos']},
+			format='json',
+		)
+		self.assertEqual(
+			acciones_especiales_de_rol('ASESOR', self.empresa_a.pk),
+			['aprobar_descuentos'],
+		)
+		self.assertEqual(acciones_especiales_de_rol('ASESOR'), [])
+		self.assertTrue(
+			PermisoEspecialEmpresa.objects.filter(
+				rol=asesor, empresa_id=self.empresa_a.pk, permitido=True
+			).exists()
+		)
 
 	def test_rol_personalizado_permisos_afectan_permisos_drf(self):
 		cliente = self._cliente(self.dueno)

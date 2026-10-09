@@ -33,11 +33,16 @@ from .permisos_repo import (
     catalogo_recursos,
     generar_codigo_rol,
     guardar_acciones,
+    guardar_acciones_empresa,
     guardar_permisos,
+    guardar_permisos_empresa,
     nombre_rol,
     permisos_de_rol,
+    puede_otorgar_bd,
+    restablecer_permisos_empresa,
     roles_otorgables_para,
     roles_visible_para,
+    tiene_override_empresa,
 )
 from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
@@ -575,10 +580,12 @@ class RolesView(APIView):
                 'nivel': rol.nivel,
                 'ver_todos_talleres': rol.ver_todos_talleres,
                 'is_active': rol.is_active,
-                'editable': not rol.es_sistema,
+                'editable': True,
+                'personalizado': tiene_override_empresa(rol, contexto.empresa_id),
                 'usuarios_count': conteos.get(rol.codigo, 0),
             }
             for rol in roles
+            if not (rol.es_sistema and rol.codigo == 'ADMIN_SISTEMA')
         ]
         return Response(payload)
 
@@ -613,7 +620,10 @@ def _rol_payload(rol, contexto=None):
         'nivel': rol.nivel,
         'ver_todos_talleres': rol.ver_todos_talleres,
         'is_active': rol.is_active,
-        'editable': not rol.es_sistema,
+        'editable': True,
+        'personalizado': tiene_override_empresa(
+            rol, contexto.empresa_id if contexto else None
+        ),
     }
 
 
@@ -640,19 +650,18 @@ class RolDetailView(APIView):
         rol, contexto = self._rol_contexto(request, pk)
         if not rol:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
-        permisos = {}
-        for fila in Permiso.objects.filter(rol=rol, recurso__tipo='MODULO'):
-            permisos[fila.recurso.codigo] = {
-                'ver': fila.ver,
-                'modificar': fila.modificar,
-            }
+        efectivo = permisos_de_rol(rol.codigo, contexto.empresa_id)
+        permisos = {
+            codigo: {'ver': 'ver' in acciones, 'modificar': 'modificar' in acciones}
+            for codigo, acciones in efectivo.items()
+        }
         usuarios = UsuarioEmpresa.objects.filter(rol=rol.codigo, is_active=True)
         if contexto.empresa_id:
             usuarios = usuarios.filter(empresa_id=contexto.empresa_id)
         return Response({
             **_rol_payload(rol, contexto),
             'permisos': permisos,
-            'acciones': acciones_especiales_de_rol(rol.codigo),
+            'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id),
             'usuarios': [
                 {
                     'id': ue.user_id,
@@ -686,21 +695,42 @@ class RolDetailView(APIView):
         return Response(_rol_payload(rol, contexto))
 
 
-class RolPermisosView(APIView):
-    """Reemplaza los permisos generales (ver/modificar) de un rol personalizado."""
+def _modo_edicion_rol(request, rol):
+    """Modo de escritura de permisos de un rol: ('empresa'|'rol'|'sistema', contexto)
+    o (Response, contexto) cuando no está permitido."""
+    contexto = get_contexto_desde_request(request)
+    if contexto.es_superusuario:
+        return ('sistema' if rol.es_sistema else 'rol'), contexto
+    if rol.es_sistema:
+        if not contexto.hay_contexto or not contexto.empresa_id:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'}, status=403
+            ), contexto
+        if not puede_otorgar_bd(contexto.rol, rol.codigo):
+            return Response({'detail': 'Este rol no se puede editar.'}, status=403), contexto
+        return 'empresa', contexto
+    if rol.empresa_id != contexto.empresa_id:
+        return Response({'detail': 'Este rol no se puede editar.'}, status=403), contexto
+    return 'rol', contexto
 
+
+class RolPermisosView(APIView):
+    """Reemplaza los permisos generales (ver/modificar) de un rol.
+
+    Roles de sistema: un usuario de empresa edita el override de su cuenta
+    (no afecta a las demás); solo un superusuario edita la matriz global.
+    Roles personalizados: se editan sus filas propias como siempre.
+    """
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
 
     def put(self, request, pk):
-        contexto = get_contexto_desde_request(request)
         try:
             rol = Rol.objects.get(pk=pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
-        if rol.es_sistema or (not contexto.es_superusuario and rol.empresa_id != contexto.empresa_id):
-            return Response(
-                {'detail': 'Este rol no se puede editar.'}, status=403
-            )
+        modo, contexto = _modo_edicion_rol(request, rol)
+        if isinstance(modo, Response):
+            return modo
         items = request.data.get('permisos')
         if not isinstance(items, list):
             return Response(
@@ -708,27 +738,56 @@ class RolPermisosView(APIView):
                 status=400,
             )
         try:
-            guardar_permisos(rol, items)
+            if modo == 'empresa':
+                guardar_permisos_empresa(rol, contexto.empresa_id, items)
+            else:
+                guardar_permisos(rol, items)
         except (ValidationError, DjangoValidationError) as error:
             return Response({'detail': '; '.join(error.messages)}, status=400)
-        return Response({'permisos': permisos_de_rol(rol.codigo)})
+        empresa_id = contexto.empresa_id if modo == 'empresa' else None
+        return Response({'permisos': permisos_de_rol(rol.codigo, empresa_id)})
 
-
-class RolAccionesView(APIView):
-    """Reemplaza las acciones especiales concedidas a un rol personalizado."""
-
-    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
-
-    def put(self, request, pk):
-        contexto = get_contexto_desde_request(request)
+    def delete(self, request, pk):
+        """Restablece los overrides de la empresa: el rol vuelve a la matriz global."""
         try:
             rol = Rol.objects.get(pk=pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
-        if rol.es_sistema or (not contexto.es_superusuario and rol.empresa_id != contexto.empresa_id):
+        if not rol.es_sistema:
             return Response(
-                {'detail': 'Este rol no se puede editar.'}, status=403
+                {'detail': 'Este rol no usa configuración por empresa.'}, status=400
             )
+        modo, contexto = _modo_edicion_rol(request, rol)
+        if isinstance(modo, Response):
+            return modo
+        if modo != 'empresa':
+            return Response(
+                {'detail': 'Indica la empresa de la sesión para restablecer su configuración.'},
+                status=400,
+            )
+        restablecer_permisos_empresa(rol, contexto.empresa_id)
+        return Response({
+            'permisos': permisos_de_rol(rol.codigo, contexto.empresa_id),
+            'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id),
+        })
+
+
+class RolAccionesView(APIView):
+    """Reemplaza las acciones especiales concedidas a un rol.
+
+    Roles de sistema: override por empresa (concede o deniega sobre el global).
+    Solo un superusuario edita la matriz global de acciones.
+    """
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+    def put(self, request, pk):
+        try:
+            rol = Rol.objects.get(pk=pk)
+        except Rol.DoesNotExist:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        modo, contexto = _modo_edicion_rol(request, rol)
+        if isinstance(modo, Response):
+            return modo
         codigos = request.data.get('acciones')
         if not isinstance(codigos, list):
             return Response(
@@ -736,10 +795,35 @@ class RolAccionesView(APIView):
                 status=400,
             )
         try:
-            guardar_acciones(rol, codigos)
+            if modo == 'empresa':
+                guardar_acciones_empresa(rol, contexto.empresa_id, codigos)
+            else:
+                guardar_acciones(rol, codigos)
         except (ValidationError, DjangoValidationError) as error:
             return Response({'detail': '; '.join(error.messages)}, status=400)
-        return Response({'acciones': acciones_especiales_de_rol(rol.codigo)})
+        empresa_id = contexto.empresa_id if modo == 'empresa' else None
+        return Response({'acciones': acciones_especiales_de_rol(rol.codigo, empresa_id)})
+
+    def delete(self, request, pk):
+        """Restablece los overrides de acciones de la empresa."""
+        try:
+            rol = Rol.objects.get(pk=pk)
+        except Rol.DoesNotExist:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        if not rol.es_sistema:
+            return Response(
+                {'detail': 'Este rol no usa configuración por empresa.'}, status=400
+            )
+        modo, contexto = _modo_edicion_rol(request, rol)
+        if isinstance(modo, Response):
+            return modo
+        if modo != 'empresa':
+            return Response(
+                {'detail': 'Indica la empresa de la sesión para restablecer su configuración.'},
+                status=400,
+            )
+        restablecer_permisos_empresa(rol, contexto.empresa_id)
+        return Response({'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id)})
 
 
 class RecursosView(APIView):
