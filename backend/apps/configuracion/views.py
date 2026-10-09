@@ -14,10 +14,10 @@ from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permissions import TieneRecurso
 from rest_framework import permissions
 
 from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
-from .permissions import IsEmpresaAdminOrReadOnly
 
 DUPLICATE_CODE_MESSAGE_TALLER = 'El código del taller ya está en uso por un taller activo.'
 
@@ -30,7 +30,7 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
     GET/PUT/PATCH/DELETE /api/configuracion/sucursales/{id}/
     """
     serializer_class = TallerConfigSerializer
-    permission_classes = [IsEmpresaAdminOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('talleres')]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'codigo_sucursal', 'ciudad', 'direccion', 'telefono']
     ordering_fields = ['nombre']
@@ -129,7 +129,7 @@ def _taller_export_queryset(request, empresa_id):
 
 
 class TallerPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('talleres')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -190,7 +190,7 @@ class TallerPdfExportView(APIView):
 
 
 class TallerExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('talleres')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -253,7 +253,7 @@ class EmpresaConfigViewSet(viewsets.ModelViewSet):
     PATCH /api/configuracion/empresa/{id}/ -> Actualiza datos (solo administradores)
     """
     serializer_class = EmpresaConfigSerializer
-    permission_classes = [IsEmpresaAdminOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('empresa')]
 
     def get_empresa_id(self, request):
         return get_empresa_id_desde_request(request)

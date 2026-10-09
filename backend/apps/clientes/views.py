@@ -17,7 +17,9 @@ from apps.vehiculos.models import VehiculoPropietario
 from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import ClienteListSerializer, ClienteSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permissions import TieneRecurso
 from .excel_import import (
+
     CLIENT_COLUMNS,
     importar_clientes_desde_xlsx,
     generar_reporte_errores_xlsx,
@@ -28,7 +30,7 @@ from .excel_import import (
 class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     parser_classes = (MultiPartParser, FormParser)
     serializer_class = ClienteSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
 
     delete_identifier_fields = ['nombre']
     delete_relation_fields = ['ordenes_trabajo', 'vehiculos_asociados', 'cotizaciones']
@@ -149,7 +151,7 @@ def _cliente_export_queryset(request, empresa_id):
 
 
 class ClientePdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -213,7 +215,7 @@ class ClientePdfExportView(APIView):
 
 
 class ClienteExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -316,7 +318,7 @@ class ClienteExcelExportView(APIView):
 
 
 class ClienteImportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
     parser_classes = [MultiPartParser, FormParser]
     renderer_classes = [JSONRenderer]
 
@@ -358,7 +360,7 @@ class ClienteImportView(APIView):
 
 
 class ClienteImportErroresView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
     renderer_classes = [JSONRenderer]
 
     def post(self, request):
@@ -380,7 +382,7 @@ class ClienteImportErroresView(APIView):
 
 
 class ClienteImportTemplateView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):

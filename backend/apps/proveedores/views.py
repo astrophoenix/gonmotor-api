@@ -14,6 +14,8 @@ from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
 from .models import Proveedor
 from .serializers import ProveedorListSerializer, ProveedorSerializer
+from apps.authentication.permissions import TieneRecurso
+
 
 
 def _usuario_nombre(request):
@@ -36,7 +38,7 @@ def _contacto_texto(proveedor):
 
 class ProveedorViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = ProveedorSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('proveedores')]
 
     delete_identifier_fields = ['nombre']
 
@@ -136,7 +138,7 @@ EXPORT_HEADERS = [
 
 
 class ProveedorPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('proveedores')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -197,7 +199,7 @@ class ProveedorPdfExportView(APIView):
 
 
 class ProveedorExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('proveedores')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):

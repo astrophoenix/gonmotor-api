@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
@@ -142,7 +143,7 @@ def _cotizaciones_del_vehiculo(empresa_id, vehiculo_id, recepcion_id=None, inspe
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'numero_orden',
@@ -225,7 +226,7 @@ def parsear_fecha(valor):
 
 class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['numero_recepcion', 'vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
     ordering_fields = ['created_at', 'id', 'fecha_ingreso']
@@ -458,7 +459,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
 
 class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     # La búsqueda alcanza el número de la inspección, el de su recepción y los
     # datos del vehículo/cliente, que pueden venir en la propia inspección o en
@@ -671,7 +672,7 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
 
 class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleServicioInspeccionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['-created_at']
@@ -703,7 +704,7 @@ class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
 
 class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoInspeccionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['-created_at']
@@ -735,7 +736,7 @@ class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
 
 class FotoInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = FotoInspeccionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering = ['created_at', 'id']
 
@@ -773,7 +774,7 @@ def _check_orden_editable(orden):
 
 class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = FotoOrdenTrabajoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering = ['created_at', 'id']
 
@@ -804,7 +805,7 @@ class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
 
 class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleServicioOrdenTrabajoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
@@ -841,7 +842,7 @@ class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
 
 class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoOrdenTrabajoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
@@ -877,7 +878,7 @@ class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
 
 
 class RecepcionPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -952,7 +953,7 @@ class RecepcionPdfExportView(APIView):
 
 
 class RecepcionExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):

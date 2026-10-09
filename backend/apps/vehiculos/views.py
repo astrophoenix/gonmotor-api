@@ -18,6 +18,8 @@ from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
+from apps.authentication.permissions import TieneRecurso
+
 
 
 def formatear_placa(placa):
@@ -65,7 +67,7 @@ class PlacaNormalizableSearchFilter(filters.SearchFilter):
 
 class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = VehiculoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('vehiculos')]
 
     delete_identifier_fields = ['placa']
     delete_relation_fields = ['ordenes_trabajo', 'propietarios']
@@ -228,7 +230,7 @@ def _vehiculo_export_queryset(request, empresa_id):
 
 
 class VehiculoPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('vehiculos')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -304,7 +306,7 @@ class VehiculoPdfExportView(APIView):
 
 
 class VehiculoExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('vehiculos')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):

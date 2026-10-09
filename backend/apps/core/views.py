@@ -11,6 +11,7 @@ from rest_framework import status, permissions
 from rest_framework.renderers import JSONRenderer
 
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
 from apps.core.services.text_improver import TextImproverError, mejorar_texto
 from apps.cotizaciones.models import Cotizacion
@@ -170,7 +171,7 @@ class DashboardView(APIView):
     Todo el contenido se filtra por el `empresa_id` activo de la sesión (tenant).
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('reportes')]
 
     def get(self, request):
         empresa_id = get_empresa_id_desde_request(request)
@@ -542,7 +543,7 @@ class DashboardV2View(APIView):
     Todo se filtra por el `empresa_id` activo de la sesión (tenant).
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('reportes')]
 
     def get(self, request):
         empresa_id = get_empresa_id_desde_request(request)

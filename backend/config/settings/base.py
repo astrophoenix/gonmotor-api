@@ -254,6 +254,7 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'x-empresa-id',
+    'x-taller-id',
 ]
 
 # Tiempo de vida del token de recuperación en segundos (300 segundos = 5 minutos)

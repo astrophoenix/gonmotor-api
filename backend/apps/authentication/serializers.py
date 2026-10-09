@@ -8,20 +8,22 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
 
-from apps.empresas.models import Empresa
+from apps.empresas.models import Empresa, Taller
 from .models import UserProfile
 from .models import UsuarioEmpresa
+
+from .permisos_repo import nombre_rol
 
 
 def _taller_sesion_nombre(user, empresa):
     """Nombre del taller de la sesión actual.
 
-    Usa el taller activo del perfil (`taller_activo`) si pertenece a la empresa
-    activa; si no, resuelve el mismo taller por defecto que asigna el backend al
-    crear documentos (primer taller activo de la empresa).
+    Devuelve el taller activo del perfil solo si está dentro del alcance del
+    usuario para la empresa activa (empresa correcta + rol + talleres asignados)
+    y, si no hay selección, el primer taller permitido. Nunca muestra un taller
+    en el que el usuario no puede operar.
     """
-    profile = getattr(user, 'profile', None)
-    taller = getattr(profile, 'taller_activo', None) if profile else None
+    from .utils import taller_de_usuario
 
     empresa_id = getattr(empresa, 'id', empresa)
     try:
@@ -29,12 +31,10 @@ def _taller_sesion_nombre(user, empresa):
     except (TypeError, ValueError):
         empresa_id = None
 
-    if taller is not None and empresa_id and taller.empresa_id != empresa_id:
-        taller = None
-    if taller is None and empresa_id:
-        from apps.empresas.services import resolver_taller
-        taller = resolver_taller(empresa_id)
-    return getattr(taller, 'nombre', '') or ''
+    taller_id = taller_de_usuario(user, empresa_id)
+    if not taller_id:
+        return ''
+    return Taller.objects.filter(pk=taller_id).values_list('nombre', flat=True).first() or ''
 
 
 def _user_payload(user, empresa, rol, request=None):
@@ -119,6 +119,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         relaciones = UsuarioEmpresa.objects.filter(
             user=user,
             is_active=True,
+            tiene_acceso=True,
             empresa__is_active=True
         ).select_related('empresa')
         
@@ -327,9 +328,36 @@ class UserProfileUpdateSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    """Perfil global.
+
+    `rol`, `empresa` y `talleres` viven en `UsuarioEmpresa`, no en el perfil:
+    declararlos aquí hacía estallar el serializer con `ImproperlyConfigured`.
+    """
+
     class Meta:
         model = UserProfile
-        fields = ['rol', 'telefono', 'empresa', 'talleres', 'taller_activo']
+        fields = ['telefono', 'identificacion', 'direccion', 'avatar', 'taller_activo']
+
+    def validate_taller_activo(self, value):
+        if value is None:
+            return value
+        from .utils import get_contexto_desde_request, talleres_permitidos
+
+        request = self.context.get('request')
+        contexto = get_contexto_desde_request(request) if request else None
+        if not contexto or not contexto.hay_contexto:
+            raise serializers.ValidationError(
+                'No se pudo determinar la empresa activa.'
+            )
+        if value.empresa_id != contexto.empresa_id:
+            raise serializers.ValidationError(
+                'El taller no pertenece a la empresa activa.'
+            )
+        if not talleres_permitidos(request.user, contexto).filter(pk=value.pk).exists():
+            raise serializers.ValidationError(
+                'El usuario no tiene acceso a ese taller.'
+            )
+        return value
 
 
 class UserAdminSerializer(serializers.ModelSerializer):
@@ -360,14 +388,11 @@ class UserAdminSerializer(serializers.ModelSerializer):
             user.set_password(password)
             user.save()
 
-        # Actualizar el perfil que creó el signal automáticamente
-        if profile_data and hasattr(user, 'profile'):
-            talleres = profile_data.pop('talleres', [])
+        if profile_data:
+            perfil, _ = UserProfile.objects.get_or_create(user=user)
             for attr, val in profile_data.items():
-                setattr(user.profile, attr, val)
-            user.profile.save()
-            if talleres:
-                user.profile.talleres.set(talleres)
+                setattr(perfil, attr, val)
+            perfil.save()
 
         return user
 
@@ -383,13 +408,11 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
         instance.save()
 
-        if profile_data and hasattr(instance, 'profile'):
-            talleres = profile_data.pop('talleres', None)
+        if profile_data:
+            perfil, _ = UserProfile.objects.get_or_create(user=instance)
             for attr, val in profile_data.items():
-                setattr(instance.profile, attr, val)
-            instance.profile.save()
-            if talleres is not None:
-                instance.profile.talleres.set(talleres)
+                setattr(perfil, attr, val)
+            perfil.save()
 
         return instance
 
@@ -423,13 +446,66 @@ class EmpleadoWriteSerializer(serializers.Serializer):
     telefono = serializers.CharField(required=False, allow_blank=True, default='')
     identificacion = serializers.CharField(required=False, allow_blank=True, default='', max_length=13)
     direccion = serializers.CharField(required=False, allow_blank=True, default='', max_length=255)
-    rol = serializers.ChoiceField(choices=UsuarioEmpresa.ROLES)
+    rol = serializers.CharField(max_length=50, required=False, allow_null=True)
     talleres = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
         allow_empty=True,
     )
     is_active = serializers.BooleanField(default=True, required=False)
+    tiene_acceso = serializers.BooleanField(default=True, required=False)
+
+    def validate_talleres(self, value):
+        if not value:
+            return value
+        from .utils import get_contexto_desde_request, validar_talleres_asignables
+
+        request = self.context.get('request')
+        contexto = get_contexto_desde_request(request) if request else None
+        if not contexto or not contexto.hay_contexto:
+            raise serializers.ValidationError(
+                'No se pudo determinar la empresa activa.'
+            )
+        _, rechazados = validar_talleres_asignables(request.user, contexto, value)
+        if rechazados:
+            raise serializers.ValidationError(
+                f'Los talleres {rechazados} no pertenecen a la empresa activa.'
+            )
+        return value
+
+    def validate_rol(self, value):
+        from .permisos_repo import _rol_por_codigo, puede_otorgar_bd
+        from .utils import get_contexto_desde_request
+
+        if value is None:
+            return value
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None):
+            return value
+        if request.user.is_authenticated and request.user.is_superuser:
+            return value
+        rol = _rol_por_codigo(value)
+        if rol is None or not rol.is_active:
+            raise serializers.ValidationError('El rol indicado no existe o está inactivo.')
+        contexto = get_contexto_desde_request(request)
+        if contexto.hay_contexto and not puede_otorgar_bd(contexto.rol, value):
+            raise serializers.ValidationError(
+                'No puedes asignar un rol igual o superior al tuyo.'
+            )
+        return value
+
+    def validate(self, attrs):
+        # Persona sin acceso: no lleva rol ni talleres y puede omitirlos.
+        if attrs.get('tiene_acceso') is False:
+            attrs['rol'] = None
+            attrs['talleres'] = []
+            return attrs
+        # Con acceso el rol es obligatorio (alta siempre; baja solo si se
+        # envía explícitamente, para no romper ediciones parciales).
+        if attrs.get('rol') in (None, ''):
+            if self.instance is None or 'rol' in attrs:
+                raise serializers.ValidationError({'rol': 'Indica el rol del usuario.'})
+        return attrs
 
     def to_representation(self, instance):
         user = instance.user
@@ -452,7 +528,8 @@ class EmpleadoWriteSerializer(serializers.Serializer):
                 'nombre': getattr(instance.empresa, 'nombre_comercial', getattr(instance.empresa, 'nombre', '')) if instance.empresa_id else None,
             } if instance.empresa_id else None,
             'rol': instance.rol,
-            'rol_display': instance.get_rol_display(),
+            'rol_display': nombre_rol(instance.rol),
+            'tiene_acceso': instance.tiene_acceso,
             'talleres': [
                 {'id': t.id, 'nombre': t.nombre}
                 for t in instance.talleres.all()
@@ -468,7 +545,7 @@ class EmpleadoReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UsuarioEmpresa
-        fields = ['id', 'user', 'empresa', 'rol', 'rol_display', 'talleres', 'is_active']
+        fields = ['id', 'user', 'empresa', 'rol', 'rol_display', 'talleres', 'is_active', 'tiene_acceso']
 
     def get_user(self, obj):
         profile = getattr(obj.user, 'profile', None)
@@ -485,7 +562,7 @@ class EmpleadoReadSerializer(serializers.ModelSerializer):
         }
 
     def get_rol_display(self, obj):
-        return obj.get_rol_display()
+        return nombre_rol(obj.rol)
 
     def get_talleres(self, obj):
         return [

@@ -1,11 +1,12 @@
 import operator
 from functools import reduce
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions, filters
 from rest_framework.exceptions import ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.renderers import JSONRenderer
@@ -22,10 +23,23 @@ from django.conf import settings
 from django.utils import timezone
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
-from .serializers import UserAdminSerializer, UserProfileUpdateSerializer, ChangePasswordSerializer
+from .serializers import UserProfileUpdateSerializer, ChangePasswordSerializer
 from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
-from .utils import get_empresa_id_desde_request
-from .models import UserProfile, UsuarioEmpresa
+from .utils import get_empresa_id_desde_request, get_contexto_desde_request
+from .permissions import TienePermiso, TieneRecurso
+from .permisos_repo import (
+    acciones_especiales_de_rol,
+    catalogo_acciones,
+    catalogo_recursos,
+    generar_codigo_rol,
+    guardar_acciones,
+    guardar_permisos,
+    nombre_rol,
+    permisos_de_rol,
+    roles_otorgables_para,
+    roles_visible_para,
+)
+from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
@@ -66,6 +80,7 @@ class SelectCompanyView(APIView):
                 user_id=user_id,
                 empresa_id=empresa_id,
                 is_active=True,
+                tiene_acceso=True,
                 empresa__is_active=True
             )
             user = relacion.user
@@ -130,6 +145,19 @@ class RegistrationView(APIView):
         )
 
 
+def _roles_otorgables(contexto):
+    """Códigos de roles que el usuario del `contexto` puede asignar a otros."""
+    return roles_otorgables_para(contexto)
+
+
+def _roles_otorgables_catalogo(contexto):
+    """Código y nombre de cada rol otorgable (incluye los personalizados)."""
+    return [
+        {'codigo': codigo, 'nombre': nombre_rol(codigo)}
+        for codigo in roles_otorgables_para(contexto)
+    ]
+
+
 class UserProfileView(APIView):
     """
     Endpoint para obtener y actualizar los datos del usuario logueado actualmente.
@@ -139,7 +167,8 @@ class UserProfileView(APIView):
 
     def get(self, request):
         user = request.user
-        empresa_id = get_empresa_id_desde_request(request)
+        contexto = get_contexto_desde_request(request)
+        empresa_id = contexto.empresa_id
         profile = getattr(user, 'profile', None)
         telefono = getattr(profile, 'telefono', '') if profile else ''
         avatar = _avatar_absoluta(request, profile.avatar.url if profile and profile.avatar else None)
@@ -153,6 +182,10 @@ class UserProfileView(APIView):
             'telefono': telefono,
             'avatar': avatar,
             'is_staff': user.is_staff,
+            'rol': contexto.rol,
+            'es_superusuario': user.is_superuser,
+            'roles_otorgables': _roles_otorgables(contexto),
+            'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': empresa_id,
             'taller_nombre': _taller_sesion_nombre(user, empresa_id),
         }, status=status.HTTP_200_OK)
@@ -172,6 +205,7 @@ class UserProfileView(APIView):
         telefono = getattr(profile, 'telefono', '') if profile else ''
         avatar = _avatar_absoluta(request, profile.avatar.url if profile and profile.avatar else None)
 
+        contexto = get_contexto_desde_request(request)
         user_data = {
             'id': user.id,
             'username': user.username,
@@ -181,7 +215,12 @@ class UserProfileView(APIView):
             'telefono': telefono,
             'avatar': avatar,
             'is_staff': user.is_staff,
-            'taller_nombre': _taller_sesion_nombre(user, get_empresa_id_desde_request(request)),
+            'rol': contexto.rol,
+            'es_superusuario': user.is_superuser,
+            'roles_otorgables': _roles_otorgables(contexto),
+            'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
+            'empresa_id': contexto.empresa_id,
+            'taller_nombre': _taller_sesion_nombre(user, contexto.empresa_id),
         }
 
         return Response({
@@ -271,30 +310,12 @@ class PasswordResetConfirmView(APIView):
         )
 
 
-class UserManagementViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet para CRUD completo de Usuarios (filtrado por la Empresa del usuario autenticado).
-    """
-    serializer_class = UserAdminSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return User.objects.none()
-        usuario_ids = UsuarioEmpresa.objects.filter(
-            empresa_id=empresa_id,
-            is_active=True
-        ).values_list('user_id', flat=True)
-        return User.objects.filter(id__in=usuario_ids)
-
-
 class EmpleadoViewSet(viewsets.ModelViewSet):
     """
     ViewSet para CRUD de empleados de la empresa actual.
     Trabaja sobre UsuarioEmpresa y expone datos anidados del User.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('empleados')]
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
@@ -337,6 +358,12 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         rol = self.request.query_params.get('rol')
         if rol:
             queryset = queryset.filter(rol=rol)
+
+        acceso = self.request.query_params.get('acceso')
+        if acceso == 'con':
+            queryset = queryset.filter(tiene_acceso=True)
+        elif acceso == 'sin':
+            queryset = queryset.filter(tiene_acceso=False)
 
         taller = self.request.query_params.get('taller')
         if taller:
@@ -405,11 +432,17 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         usuario_empresa = UsuarioEmpresa.objects.create(
             user=user,
             empresa=empresa,
-            rol=validated_data['rol'],
+            rol=validated_data.get('rol'),
             is_active=validated_data.get('is_active', True),
+            tiene_acceso=validated_data.get('tiene_acceso', True),
         )
         usuario_empresa.talleres.set(validated_data.get('talleres', []))
-        
+
+        if not usuario_empresa.tiene_acceso:
+            read_serializer = EmpleadoReadSerializer(usuario_empresa, context={'request': request})
+            headers = self.get_success_headers(read_serializer.data)
+            return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
         token_generator = PasswordResetTokenGenerator()
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = token_generator.make_token(user)
@@ -442,6 +475,16 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         usuario_empresa = serializer.instance
 
         user = usuario_empresa.user
+        es_mi_cuenta = self.request.user.pk == user.pk
+
+        if es_mi_cuenta:
+            if validated_data.get('is_active') is False:
+                raise ValidationError({'is_active': 'No puedes desactivar tu propio acceso.'})
+            if validated_data.get('tiene_acceso') is False:
+                raise ValidationError({'tiene_acceso': 'No puedes quitarte el acceso al sistema.'})
+            if 'rol' in validated_data and validated_data['rol'] != usuario_empresa.rol:
+                raise ValidationError({'rol': 'No puedes cambiar tu propio rol.'})
+
         user.first_name = validated_data.get('first_name', user.first_name)
         user.last_name = validated_data.get('last_name', user.last_name)
         user.email = validated_data.get('email', user.email).lower().strip()
@@ -455,6 +498,7 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         usuario_empresa.rol = validated_data.get('rol', usuario_empresa.rol)
         usuario_empresa.is_active = validated_data.get('is_active', usuario_empresa.is_active)
+        usuario_empresa.tiene_acceso = validated_data.get('tiene_acceso', usuario_empresa.tiene_acceso)
         usuario_empresa.save()
         if 'talleres' in validated_data:
             usuario_empresa.talleres.set(validated_data.get('talleres', []))
@@ -481,9 +525,233 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.user_id == request.user.pk:
+            return Response(
+                {'detail': 'No puedes dar de baja tu propio acceso desde aquí.'},
+                status=400,
+            )
         instance.is_active = False
         instance.save(update_fields=['is_active'])
         return Response({'detail': 'Empleado dado de baja correctamente.'}, status=200)
+
+
+class UserManagementViewSet(EmpleadoViewSet):
+    """CGestion de accesos de la empresa (mismo modelo que empleados).
+
+    Ruta `/api/auth/usuarios/`, reservada al recurso 'usuarios': solo roles
+    de altura (ADMIN_SISTEMA / ADMIN_EMPRESA). La gestión operativa del
+    personal vive en `/api/auth/empleados/` (recurso 'empleados').
+    """
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+
+class RolesView(APIView):
+    """Catálogo de roles: lista de roles y creación de roles personalizados.
+
+    GET  /api/auth/roles/       -> roles (sistema + personalizados de la empresa).
+    POST /api/auth/roles/       -> crea un rol personalizado de la empresa en sesión.
+    """
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+    def get(self, request):
+        contexto = get_contexto_desde_request(request)
+        roles = roles_visible_para(contexto.empresa_id)
+        base_usuarios = UsuarioEmpresa.objects.filter(
+            rol__in=[r.codigo for r in roles], is_active=True
+        )
+        if contexto.empresa_id:
+            base_usuarios = base_usuarios.filter(empresa_id=contexto.empresa_id)
+        conteos = {
+            fila['rol']: fila['n']
+            for fila in base_usuarios.values('rol').annotate(n=Count('id'))
+        }
+        payload = [
+            {
+                'id': rol.id,
+                'codigo': rol.codigo,
+                'nombre': rol.nombre,
+                'descripcion': rol.descripcion,
+                'es_sistema': rol.es_sistema,
+                'nivel': rol.nivel,
+                'ver_todos_talleres': rol.ver_todos_talleres,
+                'is_active': rol.is_active,
+                'editable': not rol.es_sistema,
+                'usuarios_count': conteos.get(rol.codigo, 0),
+            }
+            for rol in roles
+        ]
+        return Response(payload)
+
+    def post(self, request):
+        contexto = get_contexto_desde_request(request)
+        if not contexto.hay_contexto:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'}, status=403
+            )
+        nombre = (request.data.get('nombre') or '').strip()
+        if not nombre:
+            return Response({'detail': 'El nombre del rol es obligatorio.'}, status=400)
+        rol = Rol.objects.create(
+            codigo=generar_codigo_rol(nombre),
+            nombre=nombre,
+            descripcion=(request.data.get('descripcion') or '').strip(),
+            empresa_id=contexto.empresa_id,
+            es_sistema=False,
+            nivel=1,
+            is_active=request.data.get('is_active', True),
+        )
+        return Response(_rol_payload(rol), status=201)
+
+
+def _rol_payload(rol, contexto=None):
+    return {
+        'id': rol.id,
+        'codigo': rol.codigo,
+        'nombre': rol.nombre,
+        'descripcion': rol.descripcion,
+        'es_sistema': rol.es_sistema,
+        'nivel': rol.nivel,
+        'ver_todos_talleres': rol.ver_todos_talleres,
+        'is_active': rol.is_active,
+        'editable': not rol.es_sistema,
+    }
+
+
+class RolDetailView(APIView):
+    """Detalle, actualización y desactivación de un rol."""
+
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+    def _rol_contexto(self, request, pk):
+        """Rol visible para la sesión o None (404 silencioso si no aplica)."""
+        contexto = get_contexto_desde_request(request)
+        try:
+            rol = Rol.objects.get(pk=pk)
+        except Rol.DoesNotExist:
+            return None, contexto
+        visible = (
+            contexto.es_superusuario
+            or rol.es_sistema
+            or (contexto.empresa_id == rol.empresa_id)
+        )
+        return (rol if visible else None), contexto
+
+    def get(self, request, pk):
+        rol, contexto = self._rol_contexto(request, pk)
+        if not rol:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        permisos = {}
+        for fila in Permiso.objects.filter(rol=rol, recurso__tipo='MODULO'):
+            permisos[fila.recurso.codigo] = {
+                'ver': fila.ver,
+                'modificar': fila.modificar,
+            }
+        usuarios = UsuarioEmpresa.objects.filter(rol=rol.codigo, is_active=True)
+        if contexto.empresa_id:
+            usuarios = usuarios.filter(empresa_id=contexto.empresa_id)
+        return Response({
+            **_rol_payload(rol, contexto),
+            'permisos': permisos,
+            'acciones': acciones_especiales_de_rol(rol.codigo),
+            'usuarios': [
+                {
+                    'id': ue.user_id,
+                    'nombre': f'{ue.user.first_name} {ue.user.last_name}'.strip() or ue.user.email,
+                    'email': ue.user.email,
+                    'empresa': getattr(ue.empresa, 'nombre_comercial', ''),
+                    'estado_acceso': ue.tiene_acceso and 'Activo' or 'Sin acceso',
+                }
+                for ue in usuarios.select_related('user', 'empresa')
+            ],
+        })
+
+    def patch(self, request, pk):
+        rol, contexto = self._rol_contexto(request, pk)
+        if not rol:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        if rol.es_sistema:
+            return Response(
+                {'detail': 'Los roles del sistema no se pueden editar.'}, status=403
+            )
+        if 'nombre' in request.data:
+            nombre = (request.data.get('nombre') or '').strip()
+            if not nombre:
+                return Response({'detail': 'El nombre del rol es obligatorio.'}, status=400)
+            rol.nombre = nombre
+        if 'descripcion' in request.data:
+            rol.descripcion = (request.data.get('descripcion') or '').strip()
+        if 'is_active' in request.data:
+            rol.is_active = bool(request.data.get('is_active'))
+        rol.save(update_fields=['nombre', 'descripcion', 'is_active', 'updated_at'])
+        return Response(_rol_payload(rol, contexto))
+
+
+class RolPermisosView(APIView):
+    """Reemplaza los permisos generales (ver/modificar) de un rol personalizado."""
+
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+    def put(self, request, pk):
+        contexto = get_contexto_desde_request(request)
+        try:
+            rol = Rol.objects.get(pk=pk)
+        except Rol.DoesNotExist:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        if rol.es_sistema or (not contexto.es_superusuario and rol.empresa_id != contexto.empresa_id):
+            return Response(
+                {'detail': 'Este rol no se puede editar.'}, status=403
+            )
+        items = request.data.get('permisos')
+        if not isinstance(items, list):
+            return Response(
+                {'detail': "Se requiere el campo 'permisos' con la lista de recursos."},
+                status=400,
+            )
+        try:
+            guardar_permisos(rol, items)
+        except (ValidationError, DjangoValidationError) as error:
+            return Response({'detail': '; '.join(error.messages)}, status=400)
+        return Response({'permisos': permisos_de_rol(rol.codigo)})
+
+
+class RolAccionesView(APIView):
+    """Reemplaza las acciones especiales concedidas a un rol personalizado."""
+
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('usuarios')]
+
+    def put(self, request, pk):
+        contexto = get_contexto_desde_request(request)
+        try:
+            rol = Rol.objects.get(pk=pk)
+        except Rol.DoesNotExist:
+            return Response({'detail': 'Rol no encontrado.'}, status=404)
+        if rol.es_sistema or (not contexto.es_superusuario and rol.empresa_id != contexto.empresa_id):
+            return Response(
+                {'detail': 'Este rol no se puede editar.'}, status=403
+            )
+        codigos = request.data.get('acciones')
+        if not isinstance(codigos, list):
+            return Response(
+                {'detail': "Se requiere el campo 'acciones' con la lista de códigos."},
+                status=400,
+            )
+        try:
+            guardar_acciones(rol, codigos)
+        except (ValidationError, DjangoValidationError) as error:
+            return Response({'detail': '; '.join(error.messages)}, status=400)
+        return Response({'acciones': acciones_especiales_de_rol(rol.codigo)})
+
+
+class RecursosView(APIView):
+    """Catálogo central de recursos y acciones especiales (solo lectura)."""
+
+    permission_classes = [permissions.IsAuthenticated, TienePermiso('usuarios', 'ver')]
+
+    def get(self, request):
+        return Response({
+            'recursos': catalogo_recursos(),
+            'acciones': catalogo_acciones(),
+        })
 
 
 def _empleado_identificacion(ue):
@@ -545,6 +813,12 @@ def _empleado_export_queryset(request, empresa_id):
     if rol:
         queryset = queryset.filter(rol=rol)
 
+    acceso = request.query_params.get('acceso')
+    if acceso == 'con':
+        queryset = queryset.filter(tiene_acceso=True)
+    elif acceso == 'sin':
+        queryset = queryset.filter(tiene_acceso=False)
+
     taller = request.query_params.get('taller')
     if taller:
         queryset = queryset.filter(talleres__id=taller).distinct()
@@ -553,7 +827,7 @@ def _empleado_export_queryset(request, empresa_id):
 
 
 class EmpleadoPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('empleados')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -581,7 +855,7 @@ class EmpleadoPdfExportView(APIView):
                     Paragraph(_empleado_identificacion(ue), cell_style),
                     Paragraph(nombre, cell_style),
                     Paragraph(ue.user.email or '', cell_style),
-                    Paragraph(ue.get_rol_display(), cell_style),
+                    Paragraph(nombre_rol(ue.rol) or 'Sin acceso', cell_style),
                     Paragraph(_empleado_talleres(ue), cell_style),
                     Paragraph('Activo' if ue.is_active else 'Inactivo', cell_style),
                 ]
@@ -613,7 +887,7 @@ class EmpleadoPdfExportView(APIView):
 
 
 class EmpleadoExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('empleados')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -636,7 +910,7 @@ class EmpleadoExcelExportView(APIView):
                     _empleado_identificacion(ue),
                     nombre,
                     ue.user.email or '',
-                    ue.get_rol_display(),
+                    nombre_rol(ue.rol) or 'Sin acceso',
                     _empleado_talleres(ue),
                     'Activo' if ue.is_active else 'Inactivo',
                 ]

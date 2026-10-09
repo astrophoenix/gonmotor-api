@@ -14,7 +14,12 @@ from .views import (
     EmpleadoExcelExportView,
     PasswordResetRequestView,
     PasswordResetConfirmView,
-    ChangePasswordView
+    ChangePasswordView,
+    RolesView,
+    RolDetailView,
+    RolPermisosView,
+    RolAccionesView,
+    RecursosView,
 )
 
 router = DefaultRouter()
@@ -48,5 +53,12 @@ urlpatterns = [
     path('password-reset/', PasswordResetRequestView.as_view(), name='password_reset_request'),
     path('password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     
+    # 📋 Roles y permisos (pantalla de configuración de accesos)
+    path('roles/', RolesView.as_view(), name='roles'),
+    path('roles/<int:pk>/', RolDetailView.as_view(), name='roles-detalle'),
+    path('roles/<int:pk>/permisos/', RolPermisosView.as_view(), name='roles-permisos'),
+    path('roles/<int:pk>/acciones/', RolAccionesView.as_view(), name='roles-acciones'),
+    path('recursos/', RecursosView.as_view(), name='recursos'),
+
     path('', include(router.urls)),
 ]

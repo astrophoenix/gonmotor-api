@@ -451,7 +451,9 @@ class InspeccionKilometrajeDiagnosticoTests(TestCase):
 
 class OrdenTrabajoEstadosTests(TestCase):
     """Estados de la orden de trabajo: pendiente de inicio, en espera, en
-    proceso, completado, entregado y cancelado, con transiciones validadas."""
+    proceso, completado, entregado y cancelado, con cambios libres entre
+    estados (las únicas reglas obligatorias son el motivo en espera y la
+    fecha de entrega al entregar)."""
 
     def setUp(self):
         from apps.clientes.models import Cliente
@@ -514,13 +516,14 @@ class OrdenTrabajoEstadosTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
-    def test_no_se_salta_etapas(self):
+    def test_se_puede_saltar_etapas(self):
         orden = self._orden(estado='PENDIENTE')
 
         serializer = self._serializer(orden, {'estado': 'ENTREGADO'})
 
-        self.assertFalse(serializer.is_valid())
-        self.assertIn('estado', serializer.errors)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        guardada = serializer.save()
+        self.assertEqual(guardada.estado, 'ENTREGADO')
 
     def test_espera_puede_volver_a_proceso_o_cancelarse(self):
         orden = self._orden(estado='EN_ESPERA', motivo_espera='Esperando repuestos')
@@ -538,14 +541,16 @@ class OrdenTrabajoEstadosTests(TestCase):
         self.assertIsNotNone(guardada.fecha_entrega)
         self.assertEqual(guardada.estado, 'ENTREGADO')
 
-    def test_entregado_y_cancelado_son_terminales(self):
+    def test_entregado_y_cancelado_pueden_reabrirse(self):
         entregada = self._orden(estado='ENTREGADO')
         serializer = self._serializer(entregada, {'estado': 'EN_PROCESO'})
-        self.assertFalse(serializer.is_valid())
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['estado'], 'EN_PROCESO')
 
         cancelada = self._orden(estado='CANCELADO')
         serializer2 = self._serializer(cancelada, {'estado': 'PENDIENTE'})
-        self.assertFalse(serializer2.is_valid())
+        self.assertTrue(serializer2.is_valid(), serializer2.errors)
+        self.assertEqual(serializer2.validated_data['estado'], 'PENDIENTE')
 
     def test_completado_puede_reaperturarse_a_proceso(self):
         orden = self._orden(estado='COMPLETADO')

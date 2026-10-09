@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permissions import TieneRecurso
 from apps.ordenes.relaciones_flujo import responder_relaciones
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
@@ -57,7 +58,7 @@ def _validar_origen_inspeccion(inspeccion):
 
 class CotizacionViewSet(viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'numero_cotizacion',
@@ -152,19 +153,6 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['post'])
-    def convertir_a_orden(self, request, pk=None):
-        cotizacion = self.get_object()
-        try:
-            ot = cotizacion.convertir_a_orden(usuario=request.user)
-        except ValueError as exc:
-            raise serializers.ValidationError(str(exc))
-        return Response({
-            'id': ot.id,
-            'numero_orden': ot.numero_orden,
-            'estado': cotizacion.estado,
-        })
-
-    @action(detail=True, methods=['post'])
     def generar_orden(self, request, pk=None):
         cotizacion = self.get_object()
         metodo = request.data.get('metodo_aceptacion')
@@ -222,7 +210,7 @@ def _check_cotizacion_editable(cotizacion):
 
 class DetalleServicioCotizacionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleServicioCotizacionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['created_at', 'id']
@@ -254,7 +242,7 @@ class DetalleServicioCotizacionViewSet(viewsets.ModelViewSet):
 
 class DetalleRepuestoCotizacionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoCotizacionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['created_at', 'id']

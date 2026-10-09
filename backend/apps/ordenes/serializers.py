@@ -4,6 +4,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.authentication.models import UsuarioEmpresa
+from apps.authentication.permisos_repo import nombre_rol
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
@@ -441,7 +442,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             ).first()
             rep['responsable_rol'] = usuario_empresa.rol if usuario_empresa else None
             rep['responsable_rol_display'] = (
-                usuario_empresa.get_rol_display() if usuario_empresa else None
+                nombre_rol(usuario_empresa.rol) if usuario_empresa else None
             )
         else:
             rep['responsable_identificacion'] = None
@@ -626,7 +627,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             usuario_empresa = UsuarioEmpresa.objects.filter(user=instance.recibido_por, empresa=instance.empresa).first()
             if usuario_empresa:
                 rep['recibido_por_rol'] = usuario_empresa.rol
-                rep['recibido_por_rol_display'] = usuario_empresa.get_rol_display()
+                rep['recibido_por_rol_display'] = nombre_rol(usuario_empresa.rol)
             else:
                 rep['recibido_por_rol'] = None
                 rep['recibido_por_rol_display'] = None
@@ -810,23 +811,8 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
-    TRANSICIONES_PERMITIDAS = {
-        'PENDIENTE': {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
-        'EN_ESPERA': {'EN_ESPERA', 'EN_PROCESO', 'CANCELADO'},
-        'EN_PROCESO': {'EN_PROCESO', 'EN_ESPERA', 'COMPLETADO', 'CANCELADO'},
-        'COMPLETADO': {'COMPLETADO', 'ENTREGADO', 'EN_PROCESO'},
-        'ENTREGADO': {'ENTREGADO'},
-        'CANCELADO': {'CANCELADO'},
-    }
-
     def validate(self, attrs):
         estado = attrs.get('estado')
-        if self.instance and estado and estado != self.instance.estado:
-            permitidas = self.TRANSICIONES_PERMITIDAS.get(self.instance.estado, set())
-            if estado not in permitidas:
-                raise serializers.ValidationError(
-                    {'estado': 'No se permite la transición de estado solicitada.'}
-                )
         if estado == 'EN_ESPERA':
             motivo = attrs.get('motivo_espera')
             if self.instance and not motivo:

@@ -17,6 +17,8 @@ from .ics import SALT_ENLACE_CITA_ICS, respuesta_ics
 from .models import Cita
 from .serializers import CitaSerializer
 from .services import disponibilidad, resolver_taller_de_cita
+from apps.authentication.permissions import TieneRecurso
+
 
 # Restricción de unicidad del número de recepción (UNIQUE (empresa, numero_recepcion)).
 CONSTRAINT_RECEPCION = 'recepcion_empresa_sucursal_numero_unico'
@@ -65,7 +67,7 @@ class CitaPagination(PageNumberPagination):
 
 class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = CitaSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('citas')]
     pagination_class = CitaPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [

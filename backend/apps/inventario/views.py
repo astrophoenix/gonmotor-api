@@ -17,11 +17,13 @@ from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
 from .models import Repuesto, Servicio
 from .serializers import RepuestoSerializer, ServicioSerializer
+from apps.authentication.permissions import TieneRecurso
+
 
 
 class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = RepuestoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
     delete_identifier_fields = ['codigo']
     delete_relation_fields = ['detalles_inspeccion']
@@ -77,7 +79,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
 class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = ServicioSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
     delete_identifier_fields = ['codigo']
     delete_relation_fields = ['detalles_inspeccion']
@@ -189,7 +191,7 @@ def _servicio_export_queryset(request, empresa_id):
 
 
 class RepuestoPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -256,7 +258,7 @@ class RepuestoPdfExportView(APIView):
 
 
 class RepuestoExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -321,7 +323,7 @@ class RepuestoExcelExportView(APIView):
 
 
 class ServicioPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
@@ -382,7 +384,7 @@ class ServicioPdfExportView(APIView):
 
 
 class ServicioExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
     renderer_classes = [JSONRenderer]
 
     def get(self, request):
