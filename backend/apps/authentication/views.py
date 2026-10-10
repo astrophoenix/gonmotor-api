@@ -28,6 +28,7 @@ from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
 from .utils import get_empresa_id_desde_request, get_contexto_desde_request
 from .permissions import TienePermiso, TieneRecurso
 from .permisos_repo import (
+    RECURSOS,
     acciones_especiales_de_rol,
     catalogo_acciones,
     catalogo_recursos,
@@ -163,6 +164,17 @@ def _roles_otorgables_catalogo(contexto):
     ]
 
 
+def _permisos_efectivos(contexto):
+    """Permisos del rol vigente en la empresa: `{recurso: [acciones]}`.
+
+    El superusuario ve todos los recursos habilitados; el resto, los permisos
+    efectivos del rol (incluye los overrides de la empresa).
+    """
+    if contexto.es_superusuario:
+        return {recurso: ['ver', 'modificar'] for recurso in RECURSOS}
+    return permisos_de_rol(contexto.rol, contexto.empresa_id)
+
+
 class UserProfileView(APIView):
     """
     Endpoint para obtener y actualizar los datos del usuario logueado actualmente.
@@ -189,6 +201,7 @@ class UserProfileView(APIView):
             'is_staff': user.is_staff,
             'rol': contexto.rol,
             'es_superusuario': user.is_superuser,
+            'permisos': _permisos_efectivos(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': empresa_id,
@@ -222,6 +235,7 @@ class UserProfileView(APIView):
             'is_staff': user.is_staff,
             'rol': contexto.rol,
             'es_superusuario': user.is_superuser,
+            'permisos': _permisos_efectivos(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': contexto.empresa_id,

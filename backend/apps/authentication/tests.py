@@ -695,6 +695,25 @@ class MiPerfilRolesTests(EscenarioMixin, APITestCase):
 		self.assertIn('MECANICO', data['roles_otorgables'])
 		self.assertIn('CAJERO', data['roles_otorgables'])
 
+	def test_me_expone_permisos_efectivos_del_rol(self):
+		mecanico = User.objects.create_user(username='mecanico-me', password='x')
+		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
+		data = self._me(mecanico).json()
+		self.assertEqual(data['permisos']['clientes'], ['ver'])
+		self.assertEqual(data['permisos']['inventario'], ['ver', 'modificar'])
+		self.assertNotIn('usuarios', data['permisos'])
+		self.assertNotIn('facturacion', data['permisos'])
+
+	def test_me_superusuario_ve_todos_los_recursos(self):
+		superadmin = User.objects.create_superuser(username='sys-me', password='x')
+		data = self._me(superadmin).json()
+		self.assertTrue(data['es_superusuario'])
+		self.assertEqual(
+			set(data['permisos']),
+			set(RECURSOS),
+		)
+		self.assertTrue(all(set(a) == {'ver', 'modificar'} for a in data['permisos'].values()))
+
 
 class AccesoEmpresaTests(EscenarioMixin, APITestCase):
 	"""Flag `tiene_acceso`: personas sin acceso existen sin poder loguearse."""
