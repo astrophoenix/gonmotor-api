@@ -6,7 +6,7 @@ Reglas de la línea base de usuarios (F1):
    `rol` del JWT. El token se firma al iniciar sesión y vive 60 minutos: si un
    cajero pasa a solo-lectura, no debe seguir facturando hasta que se vuelva a
    loguear. La claim `rol` queda solo informativa.
-2. El alcance de talleres es una matriz explícita por rol (`matriz_roles`):
+2. El alcance de talleres es una matriz explícita por rol (`permisos_repo`):
    `ADMIN_SISTEMA` y `ADMIN_EMPRESA` ven todos los talleres activos de la
    empresa; el resto solo los asignados en `UsuarioEmpresa.talleres` (lista
    vacía = sin acceso a ningún taller).

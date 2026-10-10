@@ -1,10 +1,9 @@
 """Permisos DRF sobre el catálogo persistido de roles (`Rol`/`Permiso`).
 
-Escritura: antes la matriz vivía solo en `matriz_roles` (código). Ahora la
-fuente de verdad en tiempo de ejecución son las tablas `Permiso` (y
-`PermisoEspecial` para acciones especiales), sembradas desde
-`matriz_roles.MATRIZ_ROLES` tras el migrate y editables en la pantalla de
-roles. `matriz_roles.puede` conserva la semilla y las validaciones de tests.
+Escritura: los roles y permisos viven en tablas (`Rol`/`Permiso`/
+`PermisoEspecial`), sembradas desde `permisos_repo.MATRIZ_ROLES` tras el
+migrate y editables en la pantalla de roles. `permisos_repo.puede` conserva
+la semilla y las validaciones de tests.
 
 Uso en un viewset:
 

@@ -9,17 +9,18 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from apps.authentication.matriz_roles import (
+from apps.authentication.models import UserProfile, UsuarioEmpresa
+from apps.authentication.models import PermisoEmpresa, PermisoEspecialEmpresa, Rol
+from apps.authentication.permissions import EsAdminDeEmpresa, TienePermiso
+from apps.authentication.permisos_repo import (
     ACCIONES,
     MATRIZ_ROLES,
     RECURSOS,
     ROLES_TODOS_TALLERES,
+    acciones_especiales_de_rol,
+    permisos_de_rol,
     puede,
 )
-from apps.authentication.models import UserProfile, UsuarioEmpresa
-from apps.authentication.models import PermisoEmpresa, PermisoEspecialEmpresa, Rol
-from apps.authentication.permissions import EsAdminDeEmpresa, TienePermiso
-from apps.authentication.permisos_repo import acciones_especiales_de_rol, permisos_de_rol
 from apps.authentication.serializers import EmpleadoWriteSerializer
 from apps.authentication.utils import (
     contexto_de_usuario,
@@ -137,7 +138,7 @@ class EmpleadoExportTests(APITestCase):
 			for celda in fila
 		]
 		self.assertIn('empleado1@ejemplo.com', valores)
-		self.assertIn('Asesor de Servicio', valores)
+		self.assertIn('Asesor', valores)
 		self.assertIn('Activo', valores)
 
 	def test_exportar_sin_empresa_rechazado(self):
@@ -641,7 +642,7 @@ class PoderOtorgarTests(TestCase):
 	"""Reglas de niveles: nadie otorga roles iguales o superiores al suyo."""
 
 	def test_niveles_por_jerarquia(self):
-		from apps.authentication.matriz_roles import NIVELES_ROLES, puede_otorgar
+		from apps.authentication.permisos_repo import NIVELES_ROLES, puede_otorgar
 
 		self.assertEqual(NIVELES_ROLES['ADMIN_SISTEMA'], 4)
 		self.assertEqual(NIVELES_ROLES['ADMIN_EMPRESA'], 3)
@@ -879,6 +880,17 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		self.superadmin = User.objects.create_superuser(username='sys-root', password='x')
 		self.dueno = User.objects.create_user(username='dueno-perm', password='x')
 		_asignar(self.dueno, self.empresa_a, 'ADMIN_EMPRESA', [self.a1])
+		# El catálogo de acciones especiales no se siembra: los tests que lo usan
+		# crean su propia acción sobre un recurso existente.
+		from apps.authentication.models import AccionEspecial, Recurso
+		AccionEspecial.objects.get_or_create(
+			codigo='aprobar_descuentos',
+			defaults={
+				'nombre': 'Aprobar descuentos',
+				'descripcion': 'Autoriza cotizaciones y órdenes con descuento.',
+				'recurso': Recurso.objects.get(codigo='cotizaciones'),
+			},
+		)
 
 	def _cliente(self, usuario):
 		cliente = APIClient()

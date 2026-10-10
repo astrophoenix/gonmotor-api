@@ -2,8 +2,8 @@
 
 Roles y recursos viven en sus propias tablas (`Rol`, `Recurso`). Los permisos
 generales (ver/modificar) de un rol sobre un recurso viven en `Permiso`, y las
-acciones especiales concedidas en `PermisoEspecial`. El catálogo de
-`matriz_roles` (base declarativa) sigue siendo la semilla del sistema.
+acciones especiales concedidas en `PermisoEspecial`. La base declarativa
+`MATRIZ_ROLES` sigue siendo la semilla del sistema.
 
 `UsuarioEmpresa.rol` guarda el `codigo` del rol (los de sistema conservan sus
 códigos históricos), por lo que el contexto y el resto del código no cambian.
@@ -14,13 +14,6 @@ import string
 
 from django.core.exceptions import ValidationError
 
-from .matriz_roles import (
-    ACCIONES,
-    MATRIZ_ROLES,
-    NIVELES_ROLES,
-    RECURSOS,
-    ROLES_TODOS_TALLERES,
-)
 from .models import (
     AccionEspecial,
     Permiso,
@@ -31,6 +24,139 @@ from .models import (
     Rol,
     UsuarioEmpresa,
 )
+
+# ---------------------------------------------------------------------------
+# Matriz declarativa de permisos por rol (semilla y consultas estáticas)
+# ---------------------------------------------------------------------------
+# Un permiso es la pareja (recurso, acción). Los roles de sistema viven aquí
+# como datos revisables en un solo lugar: cambiar quién puede facturar es
+# editar este diccionario, y los tests verifican que la matriz cubra todos
+# los roles y recursos. En tiempo de ejecución la fuente de verdad son las
+# tablas `Permiso`/`Rol` (editables por empresa); esta matriz siembra el
+# sistema y da soporte a la jerarquía (`nivel_rol`, `puede_otorgar`).
+
+ACCIONES = ('ver', 'modificar')
+
+SOLO_VER = ('ver',)
+
+RECURSOS = (
+    'empresa',          # datos del tenant (RUC, razón social, logo)
+    'talleres',         # sucursales / configuración de talleres
+    'usuarios',         # cuentas y roles
+    'empleados',        # personal de la empresa
+    'clientes',
+    'vehiculos',
+    'proveedores',
+    'citas',
+    'recepciones',
+    'inspecciones',
+    'cotizaciones',
+    'ordenes',
+    'inventario',       # repuestos y servicios
+    'facturacion',      # cobros y caja
+    'reportes',
+)
+
+# Roles que ven TODOS los talleres activos de la empresa: el M2M
+# `UsuarioEmpresa.talleres` no los restringe. Los demás roles solo operan en
+# los talleres asignados (lista vacía = sin acceso a ningún taller).
+ROLES_TODOS_TALLERES = frozenset({'ADMIN_SISTEMA', 'ADMIN_EMPRESA'})
+
+_TODOS = ACCIONES
+
+MATRIZ_ROLES = {
+    'ADMIN_SISTEMA': {recurso: _TODOS for recurso in RECURSOS},
+    'ADMIN_EMPRESA': {recurso: _TODOS for recurso in RECURSOS},
+    # Gerente de taller: opera su sucursal, no la configuración global de la
+    # empresa ni las cuentas de los usuarios.
+    'ADMIN_TALLER': {
+        recurso: _TODOS
+        for recurso in RECURSOS
+        if recurso not in ('empresa', 'usuarios')
+    },
+    # Asesor de servicio: recibe, cotiza y acompaña la orden. No cobra.
+    'ASESOR': {
+        'talleres': SOLO_VER,
+        'empleados': SOLO_VER,
+        'clientes': _TODOS,
+        'vehiculos': _TODOS,
+        'proveedores': SOLO_VER,
+        'citas': _TODOS,
+        'recepciones': _TODOS,
+        'inspecciones': _TODOS,
+        'cotizaciones': _TODOS,
+        'ordenes': _TODOS,
+        'inventario': SOLO_VER,
+        'reportes': SOLO_VER,
+    },
+    # Técnico: ejecuta el trabajo y consume repuestos. No cotiza ni cobra.
+    'MECANICO': {
+        'talleres': SOLO_VER,
+        'clientes': SOLO_VER,
+        'vehiculos': SOLO_VER,
+        'citas': SOLO_VER,
+        'recepciones': SOLO_VER,
+        'inspecciones': _TODOS,
+        'cotizaciones': SOLO_VER,
+        'ordenes': _TODOS,
+        'inventario': _TODOS,
+    },
+    # Caja: cobra y consulta. No modifica órdenes ni inventario.
+    'CAJERO': {
+        'talleres': SOLO_VER,
+        'clientes': _TODOS,
+        'vehiculos': SOLO_VER,
+        'proveedores': SOLO_VER,
+        'citas': SOLO_VER,
+        'recepciones': SOLO_VER,
+        'inspecciones': SOLO_VER,
+        'cotizaciones': SOLO_VER,
+        'ordenes': SOLO_VER,
+        'inventario': SOLO_VER,
+        'facturacion': _TODOS,
+        'reportes': SOLO_VER,
+    },
+}
+
+
+def acciones_de(rol):
+    """Copia de los recursos y acciones que `rol` tiene habilitados."""
+    return dict(MATRIZ_ROLES.get(rol, {}))
+
+
+# Nivel jerárquico de cada rol, usado para impedir que un usuario otorgue o
+# reciba un rol igual o superior al suyo (no escalación de privilegios).
+NIVELES_ROLES = {
+    'ADMIN_SISTEMA': 4,
+    'ADMIN_EMPRESA': 3,
+    'ADMIN_TALLER': 2,
+    'ASESOR': 1,
+    'MECANICO': 1,
+    'CAJERO': 1,
+}
+
+
+def puede_otorgar(rol_emisor, rol_otorgado):
+    """True si quien tiene `rol_emisor` puede asignar `rol_otorgado`.
+
+    La regla es: solo se otorgan roles de nivel igual o inferior al propio.
+    Un rol desconocido tiene nivel 999 (nadie puede otorgarlo).
+    """
+    return NIVELES_ROLES.get(rol_otorgado, 999) <= NIVELES_ROLES.get(rol_emisor, 0)
+
+
+def puede(rol, recurso, accion='modificar'):
+    """True si `rol` puede ejecutar `accion` sobre `recurso`.
+
+    Rol o recurso desconocido => False (se niega por defecto). Una acción fuera
+    de `ACCIONES` es un error de programación, no un "no permitido".
+    """
+    if accion not in ACCIONES:
+        raise ValueError(
+            f'Acción inválida {accion!r}: se espera una de {ACCIONES}.'
+        )
+    return accion in MATRIZ_ROLES.get(rol, {}).get(recurso, ())
+
 
 NOMBRES_RECURSOS = {
     'empresa': 'Empresa',
@@ -50,22 +176,14 @@ NOMBRES_RECURSOS = {
     'reportes': 'Reportes',
 }
 
-ACCIONES_CATALOGO = [
-    ('anular_cliente', 'Anular cliente', 'Da de baja un cliente sin borrar su historial.', 'clientes'),
-    ('exportar_informacion_sensible', 'Exportar información sensible', 'Permite exportar datos personales completos.', 'clientes'),
-    ('aprobar_descuentos', 'Aprobar descuentos', 'Autoriza cotizaciones y órdenes con descuento.', 'cotizaciones'),
-    ('reabrir_orden', 'Reabrir orden de trabajo', 'Permite volver a abrir una orden cerrada.', 'ordenes'),
-    ('cerrar_orden', 'Cerrar orden de trabajo', 'Permite marcar una orden de trabajo como cerrada.', 'ordenes'),
-]
-
 
 def _nombre_recursos_por_codigo():
     return {r.codigo: r.nombre for r in Recurso.objects.all()}
 
 
 def sembrar_permisos_si_vacio(forzar=False):
-    """Siembra la base de seguridad si falta: roles de sistema, recursos,
-    permisos base (desde `MATRIZ_ROLES`) y catálogo de acciones especiales.
+    """Siembra la base de seguridad si falta: roles de sistema, recursos y
+    permisos base (desde `MATRIZ_ROLES`).
 
     Si ya existen roles no re-puebla nada: los cambios del administrador son
     intencionales y no deben revertirse en despliegues.
@@ -110,17 +228,6 @@ def sembrar_permisos_si_vacio(forzar=False):
             )
         )
     Permiso.objects.bulk_create(permisos)
-
-    acciones = [
-        AccionEspecial(
-            codigo=codigo,
-            nombre=nombre,
-            descripcion=descripcion,
-            recurso=recursos_por_codigo[recurso_codigo],
-        )
-        for codigo, nombre, descripcion, recurso_codigo in ACCIONES_CATALOGO
-    ]
-    AccionEspecial.objects.bulk_create(acciones)
 
 
 def _baseline_permisos():

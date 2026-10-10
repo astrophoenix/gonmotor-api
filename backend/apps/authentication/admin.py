@@ -1,7 +1,46 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from .models import UserProfile, UsuarioEmpresa
+from .models import Rol, UserProfile, UsuarioEmpresa
+
+
+class UsuarioEmpresaAdminForm(forms.ModelForm):
+    """Asignación de rol con desplegable dinámico.
+
+    Las opciones se leen de la tabla `Rol` (los de sistema y los
+    personalizados de todas las empresas) para evitar códigos escritos a
+    mano; un rol personalizado solo puede asignarse a su propia empresa.
+    """
+
+    class Meta:
+        model = UsuarioEmpresa
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        opciones = [] if self.instance and self.instance.rol else [('', '---------')]
+        for rol in Rol.objects.filter(is_active=True):
+            etiqueta = rol.nombre
+            if rol.empresa_id:
+                etiqueta = f'{etiqueta} — {rol.empresa.nombre_comercial}'
+            opciones.append((rol.codigo, etiqueta))
+        if self.instance and self.instance.rol and not any(
+            valor == self.instance.rol for valor, _ in opciones
+        ):
+            opciones.append((self.instance.rol, f'{self.instance.rol} (eliminado)'))
+        self.fields['rol'].widget = forms.Select(choices=opciones)
+        self.fields['rol'].choices = opciones
+
+    def clean(self):
+        cleaned = super().clean()
+        rol_codigo = cleaned.get('rol')
+        empresa = cleaned.get('empresa')
+        if rol_codigo and empresa:
+            rol = Rol.objects.filter(codigo=rol_codigo).first()
+            if rol and rol.empresa_id and rol.empresa_id != empresa.pk:
+                self.add_error('rol', 'Este rol pertenece a otra empresa.')
+        return cleaned
 
 
 class UserProfileInline(admin.StackedInline):
@@ -15,6 +54,7 @@ class UserProfileInline(admin.StackedInline):
 class UsuarioEmpresaInline(admin.TabularInline):
     """Inline para asignar empresas (RUCs), roles y talleres al usuario"""
     model = UsuarioEmpresa
+    form = UsuarioEmpresaAdminForm
     extra = 1
     filter_horizontal = ('talleres',)
     fields = ('empresa', 'rol', 'talleres', 'is_active')
@@ -49,6 +89,7 @@ class UsuarioEmpresaAdmin(admin.ModelAdmin):
     """
     Vista de administración independiente para buscar/filtrar por Empresa o RUC.
     """
+    form = UsuarioEmpresaAdminForm
     list_display = (
         'user',
         'empresa',

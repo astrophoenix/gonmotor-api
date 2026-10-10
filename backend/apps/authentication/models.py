@@ -61,11 +61,11 @@ class UsuarioEmpresa(BaseModel):
     """
     ROLES = [
         ('ADMIN_SISTEMA', 'Superadmin SaaS'),
-        ('ADMIN_EMPRESA', 'Dueño / Admin de Empresa'),
-        ('ADMIN_TALLER', 'Gerente de Taller'),
-        ('ASESOR', 'Asesor de Servicio'),
-        ('MECANICO', 'Técnico / Mecánico'),
-        ('CAJERO', 'Caja / Facturación'),
+        ('ADMIN_EMPRESA', 'Administrador'),
+        ('ADMIN_TALLER', 'Jefe de Taller'),
+        ('ASESOR', 'Asesor'),
+        ('MECANICO', 'Mecánico'),
+        ('CAJERO', 'Cajero'),
     ]
 
     user = models.ForeignKey(
@@ -119,9 +119,9 @@ class UsuarioEmpresa(BaseModel):
 class RolPermiso(models.Model):
     """Permiso concreto (recurso, accion) concedido a un rol.
 
-    Se siembra desde `matriz_roles.MATRIZ_ROLES` tras el migrate y se edita
+    Se siembra desde `permisos_repo.MATRIZ_ROLES` tras el migrate y se edita
     por checkboxes desde la pantalla de roles (solo rol ADMIN_SISTEMA).
-    `matriz_roles` conserva la línea base y los niveles; esta tabla es la
+    `permisos_repo` conserva la línea base y los niveles; esta tabla es la
     fuente de verdad en tiempo de ejecución.
     """
     rol = models.CharField(

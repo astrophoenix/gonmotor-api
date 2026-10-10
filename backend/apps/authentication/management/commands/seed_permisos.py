@@ -4,7 +4,7 @@ from apps.authentication.permisos_repo import sembrar_permisos_si_vacio
 
 
 class Command(BaseCommand):
-    help = 'Siembra la matriz de permisos por rol desde matriz_roles.'
+    help = 'Siembra la matriz de permisos por rol desde la línea base declarativa.'
 
     def add_arguments(self, parser):
         parser.add_argument(
