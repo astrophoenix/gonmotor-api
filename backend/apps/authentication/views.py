@@ -25,7 +25,7 @@ from django.utils import timezone
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 from .serializers import UserProfileUpdateSerializer, ChangePasswordSerializer
 from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
-from .utils import get_empresa_id_desde_request, get_contexto_desde_request
+from .utils import get_empresa_id_desde_request, get_contexto_desde_request, talleres_permitidos
 from .permissions import TienePermiso, TieneRecurso
 from .permisos_repo import (
     RECURSOS,
@@ -246,6 +246,51 @@ class UserProfileView(APIView):
             'user': user_data,
             'detail': 'Perfil actualizado correctamente.'
         }, status=status.HTTP_200_OK)
+
+
+class TalleresDisponiblesView(APIView):
+    """
+    Talleres en los que el usuario puede operar dentro de la empresa activa.
+
+    GET /api/auth/talleres/?search=<texto>
+
+    A diferencia del CRUD de configuración, no exige el permiso 'talleres':
+    devuelve únicamente los talleres permitidos para el rol/asignación del
+    usuario (administración ve todos los activos; el resto, solo los asignados).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    CAMPOS_BUSQUEDA = ['nombre', 'codigo_sucursal', 'ciudad', 'direccion', 'telefono']
+    LIMITE = 50
+
+    def get(self, request):
+        contexto = get_contexto_desde_request(request)
+        if not contexto.hay_contexto:
+            return Response(
+                {'detail': 'No se pudo determinar la empresa activa.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        queryset = talleres_permitidos(request.user, contexto)
+
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            condiciones = [
+                Q(**{f'{campo}__icontains': search}) for campo in self.CAMPOS_BUSQUEDA
+            ]
+            queryset = queryset.filter(reduce(operator.or_, condiciones))
+
+        total = queryset.count()
+        resultados = [
+            {
+                'id': taller.id,
+                'nombre': taller.nombre,
+                'ciudad': taller.ciudad or '',
+                'codigo_sucursal': taller.codigo_sucursal or '',
+            }
+            for taller in queryset[: self.LIMITE]
+        ]
+        return Response({'total': total, 'resultados': resultados})
 
 
 class ChangePasswordView(APIView):

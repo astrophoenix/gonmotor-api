@@ -37,6 +37,44 @@ def _taller_sesion_nombre(user, empresa):
     return Taller.objects.filter(pk=taller_id).values_list('nombre', flat=True).first() or ''
 
 
+def _taller_sesion_id(user, empresa):
+    """Id del taller de sesión validado (perfil > primer permitido), o None."""
+    from .utils import taller_de_usuario
+
+    empresa_id = getattr(empresa, 'id', empresa)
+    try:
+        empresa_id = int(empresa_id) if empresa_id is not None else None
+    except (TypeError, ValueError):
+        empresa_id = None
+    return taller_de_usuario(user, empresa_id)
+
+
+def _talleres_payload(user, empresa):
+    """Talleres permitidos para `user` en `empresa`, con marca de predeterminado.
+
+    Se incluye en la respuesta del login (cuando el usuario debe elegir empresa)
+    para que el selector de taller funcione antes de tener sesión autenticada.
+    """
+    from .utils import contexto_de_usuario, taller_de_usuario, talleres_permitidos
+
+    empresa_id = getattr(empresa, 'id', empresa)
+    contexto = contexto_de_usuario(user, empresa_id)
+    if not contexto.hay_contexto:
+        return []
+
+    predeterminado = taller_de_usuario(user, empresa_id)
+    return [
+        {
+            'id': taller.id,
+            'nombre': taller.nombre,
+            'ciudad': taller.ciudad or '',
+            'codigo_sucursal': taller.codigo_sucursal or '',
+            'predeterminado': taller.id == predeterminado,
+        }
+        for taller in talleres_permitidos(user, contexto)
+    ]
+
+
 def _user_payload(user, empresa, rol, request=None):
     """Payload de usuario incluyendo datos del perfil (teléfono y avatar absoluto)."""
     profile = getattr(user, 'profile', None)
@@ -56,6 +94,7 @@ def _user_payload(user, empresa, rol, request=None):
         "empresa_id": empresa.id,
         "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
         "taller_nombre": _taller_sesion_nombre(user, empresa),
+        "taller_id": _taller_sesion_id(user, empresa),
         "telefono": telefono,
         "avatar": avatar_url,
     }
@@ -96,7 +135,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     "id": emp.id,
                     "nombre_comercial": emp.nombre_comercial,
                     "ruc": emp.ruc,
-                    "rol": 'ADMIN_SISTEMA'
+                    "rol": 'ADMIN_SISTEMA',
+                    "talleres": _talleres_payload(user, emp),
                 }
                 for emp in empresas_qs
             ]
@@ -147,7 +187,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "id": rel.empresa.id,
                 "nombre_comercial": getattr(rel.empresa, 'nombre_comercial', getattr(rel.empresa, 'nombre', '')),
                 "ruc": getattr(rel.empresa, 'ruc', ''),
-                "rol": rel.rol
+                "rol": rel.rol,
+                "talleres": _talleres_payload(user, rel.empresa),
             }
             for rel in relaciones
         ]

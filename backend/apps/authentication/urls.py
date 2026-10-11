@@ -20,6 +20,7 @@ from .views import (
     RolPermisosView,
     RolAccionesView,
     RecursosView,
+    TalleresDisponiblesView,
 )
 
 router = DefaultRouter()
@@ -45,6 +46,9 @@ urlpatterns = [
     
     # Endpoint para obtener datos del usuario autenticado
     path('me/', UserProfileView.as_view(), name='user_profile'),
+
+    # Talleres en los que el usuario puede operar dentro de la empresa activa
+    path('talleres/', TalleresDisponiblesView.as_view(), name='talleres-disponibles'),
 
     # Endpoint para cambiar contraseña del usuario autenticado
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),

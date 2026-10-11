@@ -1354,3 +1354,83 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 			format='json',
 		)
 		self.assertEqual(resp2.status_code, 201, resp2.content)
+
+
+class TalleresDisponiblesEndpointTests(EscenarioMixin, APITestCase):
+	endpoint = '/api/auth/talleres/'
+
+	def _cliente(self, user, empresa):
+		client = APIClient()
+		client.force_authenticate(user=user)
+		if empresa is not None:
+			client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa)
+		return client
+
+	def test_requiere_autenticacion(self):
+		resp = APIClient().get(self.endpoint)
+		self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_sin_empresa_devuelve_403(self):
+		sin_empresa = User.objects.create_user(username='sin-empresa', password='x')
+		resp = self._cliente(sin_empresa, None).get(self.endpoint)
+		self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_asesor_solo_ve_sus_talleres_asignados(self):
+		resp = self._cliente(self.usuario, self.empresa_a.pk).get(self.endpoint)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertEqual([t['id'] for t in resp.data['resultados']], [self.a1.pk])
+		self.assertEqual(resp.data['total'], 1)
+
+	def test_admin_ve_todos_los_de_la_empresa(self):
+		admin = User.objects.create_user(username='dueno-talleres', password='x')
+		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
+		resp = self._cliente(admin, self.empresa_a.pk).get(self.endpoint)
+		ids = sorted(t['id'] for t in resp.data['resultados'])
+		self.assertEqual(ids, [self.a1.pk, self.a2.pk])
+
+	def test_no_mezcla_talleres_de_otra_empresa(self):
+		resp = self._cliente(self.usuario, self.empresa_a.pk).get(self.endpoint)
+		ids = [t['id'] for t in resp.data['resultados']]
+		self.assertNotIn(self.b1.pk, ids)
+
+	def test_filtra_por_search(self):
+		admin = User.objects.create_user(username='dueno-search', password='x')
+		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
+		resp = self._cliente(admin, self.empresa_a.pk).get(
+			self.endpoint, {'search': 'Norte Norte'}
+		)
+		self.assertEqual([t['id'] for t in resp.data['resultados']], [self.a2.pk])
+		self.assertEqual(resp.data['total'], 1)
+
+
+class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
+	def test_login_una_empresa_incluye_taller_id(self):
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'ana', 'password': 'x'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertFalse(resp.data['requires_company_selection'])
+		self.assertEqual(resp.data['user']['taller_id'], self.a1.pk)
+		self.assertEqual(resp.data['user']['taller_nombre'], self.a1.nombre)
+
+	def test_login_multiempresa_incluye_talleres_por_empresa(self):
+		_asignar(self.usuario, self.empresa_b, 'MECANICO', [self.b1])
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'ana', 'password': 'x'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertTrue(resp.data['requires_company_selection'])
+		por_empresa = {e['id']: e for e in resp.data['empresas']}
+		self.assertEqual(
+			[t['id'] for t in por_empresa[self.empresa_a.pk]['talleres']],
+			[self.a1.pk],
+		)
+		self.assertEqual(
+			[t['id'] for t in por_empresa[self.empresa_b.pk]['talleres']],
+			[self.b1.pk],
+		)
+
