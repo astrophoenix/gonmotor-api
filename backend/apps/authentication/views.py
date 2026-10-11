@@ -18,7 +18,9 @@ from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
+from email.mime.text import MIMEText
+import base64
 from django.conf import settings
 from django.utils import timezone
 
@@ -336,7 +338,7 @@ class PasswordResetRequestView(APIView):
             # Enlace que abrirá el frontend (ruta Hugo: /authentication/reset-password/)
             reset_url = f"{settings.FRONTEND_URL}/authentication/reset-password/?uid={uid}&token={token}"
 
-            # Enviar Email como HTML para evitar problemas de quoted-printable con =
+            # Enviar Email con HTML en base64 para evitar corrupción de = en quoted-printable
             subject = "Restablece tu contraseña - Gestor de Taller"
             text_message = (
                 f"Hola {user.first_name or user.username},\n\n"
@@ -351,15 +353,16 @@ class PasswordResetRequestView(APIView):
                 f"<p>Si no solicitaste este cambio, puedes ignorar este mensaje.</p>"
                 f"<hr><small>Gestor de Taller - GonMotor</small>"
             )
+
+            from_email = settings.DEFAULT_FROM_EMAIL if hasattr(settings, 'DEFAULT_FROM_EMAIL') else 'noreply@taller.com'
             
-            send_mail(
-                subject,
-                text_message,
-                settings.DEFAULT_FROM_EMAIL if hasattr(settings, 'DEFAULT_FROM_EMAIL') else 'noreply@taller.com',
-                [user.email],
-                fail_silently=False,
-                html_message=html_message,
-            )
+            email_msg = EmailMultiAlternatives(subject, text_message, from_email, [user.email])
+            # Adjuntar HTML con encoding base64 (evita que = se convierta en 3D)
+            html_part = MIMEText(html_message, 'html', 'utf-8')
+            html_part.set_payload(base64.b64encode(html_message.encode('utf-8')).decode('ascii'))
+            html_part['Content-Transfer-Encoding'] = 'base64'
+            email_msg.attach(html_part)
+            email_msg.send(fail_silently=False)
 
         return Response(
             {"detail": "Si el correo existe en el sistema, se ha enviado un enlace de recuperación."},
@@ -540,14 +543,13 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
             f"<hr><small>Gestor de Taller - GonMotor</small>"
         )
         
-        send_mail(
-            subject,
-            text_message,
-            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@taller.com'),
-            [user.email],
-            fail_silently=False,
-            html_message=html_message,
-        )
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@taller.com')
+        email_msg = EmailMultiAlternatives(subject, text_message, from_email, [user.email])
+        html_part = MIMEText(html_message, 'html', 'utf-8')
+        html_part.set_payload(base64.b64encode(html_message.encode('utf-8')).decode('ascii'))
+        html_part['Content-Transfer-Encoding'] = 'base64'
+        email_msg.attach(html_part)
+        email_msg.send(fail_silently=False)
         
         read_serializer = EmpleadoReadSerializer(usuario_empresa, context={'request': request})
         headers = self.get_success_headers(read_serializer.data)
