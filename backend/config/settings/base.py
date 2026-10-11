@@ -257,8 +257,8 @@ CORS_ALLOW_HEADERS = [
     'x-taller-id',
 ]
 
-# Tiempo de vida del token de recuperación en segundos (300 segundos = 5 minutos)
-PASSWORD_RESET_TIMEOUT = 300  # 5 minutos
+# Tiempo de vida del token de recuperación en segundos (3600 = 1 hora)
+PASSWORD_RESET_TIMEOUT = 3600  # 1 hora
 
 
 # URL base del frontend para construir el enlace del email

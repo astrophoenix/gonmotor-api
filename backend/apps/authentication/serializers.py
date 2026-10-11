@@ -303,7 +303,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         # B. Validar Token de recuperación
         token_generator = PasswordResetTokenGenerator()
         if not token_generator.check_token(user, attrs['token']):
-            raise serializers.ValidationError({"token": "El token es inválido o ha expirado (recuerda que dura 5 minutos)."})
+            raise serializers.ValidationError({"token": "El token es inválido o ha expirado (expira en 1 hora)."})
 
         # C. Validar Contraseña contra los AUTH_PASSWORD_VALIDATORS de settings.py
         new_password = attrs.get('new_password')

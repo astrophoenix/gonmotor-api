@@ -333,24 +333,32 @@ class PasswordResetRequestView(APIView):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = PasswordResetTokenGenerator().make_token(user)
 
-            # Enlace que abrirá el frontend
-            reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+            # Enlace que abrirá el frontend (ruta Hugo: /authentication/reset-password/)
+            reset_url = f"{settings.FRONTEND_URL}/authentication/reset-password/?uid={uid}&token={token}"
 
-            # Enviar Email
+            # Enviar Email como HTML para evitar problemas de quoted-printable con =
             subject = "Restablece tu contraseña - Gestor de Taller"
-            message = (
+            text_message = (
                 f"Hola {user.first_name or user.username},\n\n"
                 f"Has solicitado restablecer tu contraseña. Haz clic en el siguiente enlace:\n\n"
                 f"{reset_url}\n\n"
                 f"Si no solicitaste este cambio, puedes ignorar este mensaje."
             )
+            html_message = (
+                f"<p>Hola {user.first_name or user.username},</p>"
+                f"<p>Has solicitado restablecer tu contraseña. "
+                f'<a href="{reset_url}">Haz clic aquí para restablecerla</a>.</p>'
+                f"<p>Si no solicitaste este cambio, puedes ignorar este mensaje.</p>"
+                f"<hr><small>Gestor de Taller - GonMotor</small>"
+            )
             
             send_mail(
                 subject,
-                message,
+                text_message,
                 settings.DEFAULT_FROM_EMAIL if hasattr(settings, 'DEFAULT_FROM_EMAIL') else 'noreply@taller.com',
                 [user.email],
                 fail_silently=False,
+                html_message=html_message,
             )
 
         return Response(
@@ -512,24 +520,33 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         token_generator = PasswordResetTokenGenerator()
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = token_generator.make_token(user)
-        reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+        reset_url = f"{settings.FRONTEND_URL}/authentication/reset-password/?uid={uid}&token={token}"
         
         subject = "Establece tu contraseña - Gestor de Taller"
-        message = (
+        text_message = (
             f"Hola {validated_data['first_name']},\n\n"
             f"Has sido registrado en el sistema de gestión de taller. "
             f"Para establecer tu contraseña, haz clic en el siguiente enlace:\n\n"
             f"{reset_url}\n\n"
-            f"Este enlace expirará en 5 minutos por seguridad.\n\n"
+            f"Este enlace expirará en 1 hora por seguridad.\n\n"
             f"Si no solicitaste este registro, puedes ignorar este mensaje."
+        )
+        html_message = (
+            f"<p>Hola {validated_data['first_name']},</p>"
+            f"<p>Has sido registrado en el sistema de gestión de taller. "
+            f'<a href="{reset_url}">Haz clic aquí para establecer tu contraseña</a>.</p>'
+            f"<p>Este enlace expirará en 1 hora por seguridad.</p>"
+            f"<p>Si no solicitaste este registro, puedes ignorar este mensaje.</p>"
+            f"<hr><small>Gestor de Taller - GonMotor</small>"
         )
         
         send_mail(
             subject,
-            message,
+            text_message,
             getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@taller.com'),
             [user.email],
             fail_silently=False,
+            html_message=html_message,
         )
         
         read_serializer = EmpleadoReadSerializer(usuario_empresa, context={'request': request})
