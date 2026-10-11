@@ -25,7 +25,7 @@ from django.utils import timezone
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 from .serializers import UserProfileUpdateSerializer, ChangePasswordSerializer
 from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
-from .utils import get_empresa_id_desde_request, get_contexto_desde_request, talleres_permitidos
+from .utils import get_empresa_id_desde_request, get_contexto_desde_request, talleres_permitidos, es_admin_talleres
 from .permissions import TienePermiso, TieneRecurso
 from .permisos_repo import (
     RECURSOS,
@@ -206,6 +206,7 @@ class UserProfileView(APIView):
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': empresa_id,
             'taller_nombre': _taller_sesion_nombre(user, empresa_id),
+            'es_admin_talleres': es_admin_talleres(contexto),
         }, status=status.HTTP_200_OK)
 
     def patch(self, request):
@@ -240,6 +241,7 @@ class UserProfileView(APIView):
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': contexto.empresa_id,
             'taller_nombre': _taller_sesion_nombre(user, contexto.empresa_id),
+            'es_admin_talleres': es_admin_talleres(contexto),
         }
 
         return Response({

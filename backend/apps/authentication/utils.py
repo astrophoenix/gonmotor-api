@@ -20,7 +20,7 @@ otro archivo.
 
 from typing import NamedTuple, Optional
 
-from apps.authentication.permisos_repo import ver_todos_talleres_rol
+from apps.authentication.permisos_repo import ROLES_TODOS_TALLERES, ver_todos_talleres_rol
 from apps.authentication.models import UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
 
@@ -229,3 +229,61 @@ def get_taller_desde_request(request, empresa_id=None):
         return None
     candidato = _normalizar_id(request.headers.get(HEADER_TALLER))
     return _taller_efectivo(getattr(request, 'user', None), contexto, candidato)
+
+
+def taller_id_de_request(request, empresa_id=None):
+    """ID del taller activo **solo si el cliente lo declara** en la cabecera.
+
+    Devuelve None cuando la petición no trae `X-Taller-ID`, para que los
+    listados/dashboards preserven el comportamiento global (sin recorte) en
+    clientes que no seleccionan taller (p. ej. scripts o tests). El frontend
+    siempre envía la cabecera, así que en la UI el recorte por taller aplica.
+    """
+    if not _normalizar_id(request.headers.get(HEADER_TALLER)):
+        return None
+    return get_taller_desde_request(request, empresa_id=empresa_id)
+
+
+def es_admin_talleres(contexto):
+    """True si el contexto puede operar sin taller activo («Todos»).
+
+    Solo los roles de administración de sistema/empresa (o un superusuario)
+    pueden quedar sin recorte por taller. Los roles personalizados con el flag
+    `ver_todos_talleres` ven todos los talleres en sus listados, pero no tienen
+    la opción explícita «Todos» en el selector.
+    """
+    return bool(contexto.es_superusuario) or contexto.rol in ROLES_TODOS_TALLERES
+
+
+def talleres_filtro_de_request(request, empresa_id=None, explicito=None):
+    """IDs de talleres por los que recortar, o None si no corresponde recorte.
+
+    - Roles de administración / superusuario: recortan solo si el cliente
+      declara un taller (cabecera `X-Taller-ID` o `explicito`); sin declararlo
+      devuelven ``None`` para no filtrar («Todos»).
+    - Resto de roles: siempre devuelven su alcance. Si declaran un taller
+      permitido se recortan a ese; si no, al conjunto de talleres permitidos
+      (posiblemente vacío → sin datos). Nunca quedan sin recorte.
+    """
+    contexto = get_contexto_desde_request(request)
+    if empresa_id is not None:
+        contexto = contexto._replace(empresa_id=_normalizar_id(empresa_id))
+    if not contexto.hay_contexto:
+        return None
+
+    permitidos = list(
+        talleres_permitidos(getattr(request, 'user', None), contexto)
+        .values_list('pk', flat=True)
+    )
+
+    if explicito is not None:
+        candidato = _normalizar_id(explicito)
+    else:
+        candidato = _normalizar_id(request.headers.get(HEADER_TALLER))
+
+    if candidato:
+        return [candidato] if candidato in permitidos else []
+
+    if es_admin_talleres(contexto):
+        return None
+    return permitidos

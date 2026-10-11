@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework.renderers import JSONRenderer
 
-from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.utils import get_empresa_id_desde_request, talleres_filtro_de_request
 from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
 from apps.core.services.text_improver import TextImproverError, mejorar_texto
@@ -189,6 +189,11 @@ class DashboardView(APIView):
 
         ordenes = OrdenTrabajo.objects.filter(empresa_id=empresa_id, is_active=True)
         recepciones = RecepcionVehiculo.objects.filter(empresa_id=empresa_id, is_active=True)
+
+        taller_ids = talleres_filtro_de_request(request)
+        if taller_ids is not None:
+            ordenes = ordenes.filter(sucursal_id__in=taller_ids)
+            recepciones = recepciones.filter(sucursal_id__in=taller_ids)
 
         # ── KPIs ────────────────────────────────────────────────────────────
         vehiculos_en_taller = recepciones.filter(
@@ -474,10 +479,11 @@ def _periodo(queryset, campo, desde, hasta):
     })
 
 
-def _con_sucursal(queryset, campo, sucursal):
-    if sucursal is None:
+def _con_sucursales(queryset, campo, talleres):
+    """Recorta por una lista de talleres; ``None`` no filtra, ``[]`` vacía."""
+    if talleres is None:
         return queryset
-    return queryset.filter(**{campo: sucursal.pk})
+    return queryset.filter(**{f'{campo}_id__in': talleres})
 
 
 def _generar_buckets(desde, hasta):
@@ -586,12 +592,18 @@ class DashboardV2View(APIView):
         inspecciones = InspeccionVehiculo.objects.filter(empresa_id=empresa_id, is_active=True)
         repuestos = Repuesto.objects.filter(empresa_id=empresa_id, is_active=True)
 
-        ordenes = _con_sucursal(ordenes, 'sucursal', sucursal)
-        recepciones = _con_sucursal(recepciones, 'sucursal', sucursal)
-        citas = _con_sucursal(citas, 'taller', sucursal)
-        cotizaciones = _con_sucursal(cotizaciones, 'sucursal', sucursal)
-        inspecciones = _con_sucursal(inspecciones, 'sucursal', sucursal)
-        repuestos = _con_sucursal(repuestos, 'sucursal', sucursal)
+        if sucursal is not None:
+            talleres = talleres_filtro_de_request(
+                request, empresa_id=empresa_id, explicito=sucursal.pk
+            )
+        else:
+            talleres = talleres_filtro_de_request(request, empresa_id=empresa_id)
+
+        ordenes = _con_sucursales(ordenes, 'sucursal', talleres)
+        recepciones = _con_sucursales(recepciones, 'sucursal', talleres)
+        citas = _con_sucursales(citas, 'taller', talleres)
+        cotizaciones = _con_sucursales(cotizaciones, 'sucursal', talleres)
+        inspecciones = _con_sucursales(inspecciones, 'sucursal', talleres)
 
         # ── KPIs ───────────────────────────────────────────────────────────
         vehiculos_en_taller = recepciones.filter(

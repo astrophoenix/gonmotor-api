@@ -18,6 +18,7 @@ from rest_framework.test import APIClient
 from apps.citas.models import Cita
 from apps.clientes.models import Cliente
 from apps.empresas.models import Empresa, Taller
+from apps.authentication.models import UsuarioEmpresa
 from apps.ordenes.models import RecepcionVehiculo
 from apps.vehiculos.models import Vehiculo
 
@@ -831,3 +832,90 @@ class CitaConversionNumeracionTests(TestCase):
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertIn('numerar la recepción', str(respuesta.json()))
+
+
+class FiltroTallerCitasTest(AgendaCitasBase):
+    """El listado de citas se acota al taller activo declarado en `X-Taller-ID`.
+
+    El recorte es estricto: solo las citas del taller activo; las citas sin
+    taller (NULL) quedan fuera. La administración sin cabecera no se filtra
+    («Todos»); el resto de roles siempre se acotan a sus talleres permitidos.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.taller_norte = Taller.objects.create(
+            empresa=self.empresa,
+            nombre='Norte',
+            codigo_sucursal='002',
+            direccion='Av. Norte 200',
+            hora_apertura='08:00',
+            hora_cierre='17:00',
+        )
+
+    def _cita(self, taller):
+        return Cita.objects.create(
+            empresa=self.empresa,
+            taller=taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            fecha_cita=self.manana,
+            hora_cita='09:00',
+            duracion_minutos=60,
+            motivo='MANTENIMIENTO',
+        )
+
+    def _cliente_no_admin(self, talleres):
+        user = User.objects.create_user(username=f'meca_{uuid4().hex[:8]}', password='x')
+        relacion = UsuarioEmpresa.objects.create(
+            user=user, empresa=self.empresa, rol='MECANICO'
+        )
+        relacion.talleres.set(talleres)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        return client
+
+    def test_sin_cabecera_no_filtra(self):
+        self._cita(self.taller)
+        self._cita(self.taller_norte)
+        resp = self.client.get(LISTADO)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['count'], 2)
+
+    def test_con_cabecera_solo_devuelve_el_taller_activo(self):
+        central = self._cita(self.taller)
+        self._cita(self.taller_norte)
+        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.pk))
+        data = resp.json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['id'], central.id)
+
+    def test_excluye_citas_sin_taller(self):
+        self._cita(None)
+        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.pk))
+        self.assertEqual(resp.json()['count'], 0)
+
+    def test_no_admin_sin_cabecera_solo_ve_sus_talleres(self):
+        central = self._cita(self.taller)
+        self._cita(self.taller_norte)
+        client = self._cliente_no_admin([self.taller])
+        resp = client.get(LISTADO)
+        data = resp.json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['id'], central.id)
+
+    def test_no_admin_sin_talleres_no_ve_nada(self):
+        self._cita(self.taller)
+        client = self._cliente_no_admin([])
+        resp = client.get(LISTADO)
+        self.assertEqual(resp.json()['count'], 0)
+
+    def test_no_admin_no_puede_ver_otro_taller_por_cabecera(self):
+        self._cita(self.taller)
+        self._cita(self.taller_norte)
+        client = self._cliente_no_admin([self.taller])
+        resp = client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller_norte.pk))
+        self.assertEqual(resp.json()['count'], 0)
+
+

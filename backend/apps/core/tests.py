@@ -15,6 +15,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.citas.models import Cita
+from apps.authentication.models import UsuarioEmpresa
 from apps.clientes.models import Cliente
 from apps.cotizaciones.models import Cotizacion
 from apps.empresas.models import Empresa, Taller
@@ -493,13 +494,13 @@ class DashboardV2EndpointTest(TestCase):
 
         # ── Inventario ──────────────────────────────────────────────────────
         cls.repuesto_bajo = Repuesto.objects.create(
-            empresa=cls.empresa, sucursal=cls.taller,
+            empresa=cls.empresa,
             codigo='V2-F001', nombre='Filtro de aceite',
             categoria='FILTROS',
             stock_actual=Decimal('2.00'), stock_minimo=Decimal('5.00'),
         )
         cls.repuesto_ok = Repuesto.objects.create(
-            empresa=cls.empresa, sucursal=cls.taller,
+            empresa=cls.empresa,
             codigo='V2-F002', nombre='Filtro de aire',
             categoria='FILTROS',
             stock_actual=Decimal('20.00'), stock_minimo=Decimal('5.00'),
@@ -753,3 +754,42 @@ class DashboardV2EndpointTest(TestCase):
         self.assertEqual(data['kpis']['cotizaciones_periodo'], 3)
         self.assertEqual(data['kpis']['cotizaciones_pendientes'], 1)
         self.assertEqual(data['kpis']['citas_hoy'], 3)
+
+    # ── alcance por taller (roles no admin) ─────────────────────────────────
+    def _cliente_no_admin(self, talleres):
+        user = User.objects.create_user(username=f'dashv2_caja_{uuid4().hex[:8]}', password='x')
+        relacion = UsuarioEmpresa.objects.create(
+            user=user, empresa=self.empresa, rol='CAJERO'
+        )
+        relacion.talleres.set(talleres)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        return client
+
+    def test_no_admin_sin_sucursal_ve_solo_sus_talleres(self):
+        client = self._cliente_no_admin([self.taller])
+        resp = client.get(ENDPOINT_V2)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(
+            sorted(fila['numero_recepcion'] for fila in data['recepciones']),
+            ['REC-V2-0001', 'REC-V2-0002', 'REC-V2-0003'],
+        )
+        self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('390.00'))
+
+    def test_no_admin_no_puede_forzar_otra_sucursal(self):
+        client = self._cliente_no_admin([self.taller])
+        resp = client.get(f'{ENDPOINT_V2}?sucursal={self.taller_otro.pk}')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['recepciones'], [])
+        self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('0'))
+
+    def test_no_admin_sin_talleres_no_ve_datos(self):
+        client = self._cliente_no_admin([])
+        resp = client.get(ENDPOINT_V2)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['recepciones'], [])
+        self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('0'))

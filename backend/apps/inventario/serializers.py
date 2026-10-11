@@ -73,7 +73,6 @@ class RepuestoSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
         fields = [
             'id',
             'empresa',
-            'sucursal',
             'codigo',
             'nombre',
             'descripcion',
@@ -108,7 +107,6 @@ class ServicioSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
         fields = [
             'id',
             'empresa',
-            'sucursal',
             'codigo',
             'nombre',
             'descripcion',

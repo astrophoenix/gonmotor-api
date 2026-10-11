@@ -1414,6 +1414,8 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 		self.assertFalse(resp.data['requires_company_selection'])
 		self.assertEqual(resp.data['user']['taller_id'], self.a1.pk)
 		self.assertEqual(resp.data['user']['taller_nombre'], self.a1.nombre)
+		self.assertEqual(resp.data['user']['talleres_count'], 1)
+		self.assertFalse(resp.data['user']['es_admin_talleres'])
 
 	def test_login_multiempresa_incluye_talleres_por_empresa(self):
 		_asignar(self.usuario, self.empresa_b, 'MECANICO', [self.b1])
@@ -1433,4 +1435,38 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 			[t['id'] for t in por_empresa[self.empresa_b.pk]['talleres']],
 			[self.b1.pk],
 		)
+
+	def test_talleres_count_refleja_el_alcance_del_admin(self):
+		admin = User.objects.create_user(username='dueno2', password='x')
+		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'dueno2', 'password': 'x'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertEqual(resp.data['user']['talleres_count'], 2)
+		self.assertTrue(resp.data['user']['es_admin_talleres'])
+		self.assertIsNone(resp.data['user']['taller_id'])
+		self.assertEqual(resp.data['user']['taller_nombre'], '')
+
+	def test_admin_saas_recibe_todas_las_empresas(self):
+		User.objects.create_superuser(
+			username='saas',
+			email='saas@ejemplo.com',
+			password='x',
+		)
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'saas', 'password': 'x'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertTrue(resp.data['requires_company_selection'])
+		ids = {empresa['id'] for empresa in resp.data['empresas']}
+		self.assertEqual(ids, {self.empresa_a.pk, self.empresa_b.pk})
+		for empresa in resp.data['empresas']:
+			self.assertIn('nombre_comercial', empresa)
+			self.assertIn('ruc', empresa)
+			self.assertEqual(empresa['rol'], 'ADMIN_SISTEMA')
 

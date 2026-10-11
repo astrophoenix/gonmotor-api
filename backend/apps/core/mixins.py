@@ -7,6 +7,53 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 
+class FiltroTallerMixin:
+    """Restringe el queryset al taller activo de la sesión.
+
+    El taller se toma de la cabecera ``X-Taller-ID`` (que el frontend envía en
+    toda petición) y se valida contra los talleres permitidos del usuario con
+    ``talleres_filtro_de_request``. También admite un query param explícito que,
+    si viene, tiene prioridad (útil para filtros manuales por taller).
+
+    El filtro es **estricto**: solo se devuelven los registros cuyo campo de
+    taller está entre los talleres aplicables. Los registros sin taller (NULL)
+    quedan fuera.
+
+    Política de alcance (``talleres_filtro_de_request``):
+
+    - Administración (``ADMIN_EMPRESA`` / ``ADMIN_SISTEMA`` o superusuario):
+      sin taller declarado no se filtra («Todos»); con taller, se recorta a ese.
+    - Resto de roles: siempre se recortan a sus talleres permitidos (vacío → sin
+      resultados), aunque no envíen la cabecera. Nunca ven toda la empresa.
+
+    Atributos configurables por ViewSet:
+        taller_filter_field: nombre del campo FK al taller (``'sucursal'`` o
+            ``'taller'``). Si es ``None`` (por defecto) el mixin no hace nada.
+        taller_query_param: query param que, de venir, manda (por defecto
+            ``'sucursal'``).
+    """
+
+    taller_filter_field = None
+    taller_query_param = 'sucursal'
+
+    def filtrar_por_taller(self, queryset):
+        """Aplica el recorte por taller activo si corresponde."""
+        if not self.taller_filter_field:
+            return queryset
+        talleres = self._talleres_para_filtro()
+        if talleres is None:
+            return queryset
+        if not talleres:
+            return queryset.none()
+        return queryset.filter(**{f'{self.taller_filter_field}_id__in': talleres})
+
+    def _talleres_para_filtro(self):
+        from apps.authentication.utils import talleres_filtro_de_request
+
+        explicito = self.request.query_params.get(self.taller_query_param)
+        return talleres_filtro_de_request(self.request, explicito=explicito)
+
+
 class SoftDeleteDestroyMixin:
     """
     Estandariza la eliminación de registros con Soft Delete / Hard Delete.

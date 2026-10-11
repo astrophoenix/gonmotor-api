@@ -10,8 +10,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from apps.authentication.models import UsuarioEmpresa
 from apps.clientes.models import Cliente
-from apps.empresas.models import Empresa
+from apps.empresas.models import Empresa, Taller
+from apps.ordenes.models import OrdenTrabajo
 from apps.vehiculos.models import Vehiculo
 
 User = get_user_model()
@@ -111,3 +113,86 @@ class BusquedaGlobalTest(TestCase):
         ]
         self.assertIn(self.cliente.pk, ids)
         self.assertNotIn(self.cliente_ajeno.pk, ids)
+
+
+class BusquedaGlobalTallerTest(TestCase):
+    """El buscador acota las entidades con taller al taller activo (`X-Taller-ID`)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_superuser(username='busq_taller_admin', password='x')
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Filtro',
+            ruc=_ruc_unico(),
+            email_contacto='filtro@test.com',
+        )
+        cls.central = Taller.objects.create(
+            empresa=cls.empresa, nombre='Central', codigo_sucursal='001', direccion='Av. 1',
+        )
+        cls.norte = Taller.objects.create(
+            empresa=cls.empresa, nombre='Norte', codigo_sucursal='002', direccion='Av. 2',
+        )
+        cls.cliente = Cliente.objects.create(
+            empresa=cls.empresa,
+            tipo_identificacion='C',
+            identificacion='1788888888',
+            nombre='Marta Buscable',
+        )
+        cls.vehiculo = Vehiculo.objects.create(placa='FIL1234', marca='Mazda', modelo='3')
+        cls.vehiculo.empresas.add(cls.empresa)
+        cls.orden_central = OrdenTrabajo.objects.create(
+            empresa=cls.empresa, sucursal=cls.central, cliente=cls.cliente,
+            vehiculo=cls.vehiculo, numero_orden='FIL-C-0001', tipo_trabajo='REPARACION',
+        )
+        cls.orden_norte = OrdenTrabajo.objects.create(
+            empresa=cls.empresa, sucursal=cls.norte, cliente=cls.cliente,
+            vehiculo=cls.vehiculo, numero_orden='FIL-N-0001', tipo_trabajo='REPARACION',
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+
+    def _ids_ordenes(self, respuesta):
+        grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
+        return {fila['id'] for fila in grupos.get('ordenes', {}).get('resultados', [])}
+
+    def test_sin_cabecera_busca_en_todos_los_talleres(self):
+        respuesta = self.client.get(ENDPOINT, {'q': 'Marta'})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(
+            self._ids_ordenes(respuesta),
+            {self.orden_central.pk, self.orden_norte.pk},
+        )
+
+    def test_con_cabecera_solo_del_taller_activo(self):
+        respuesta = self.client.get(
+            ENDPOINT, {'q': 'Marta'}, HTTP_X_TALLER_ID=str(self.central.pk)
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(self._ids_ordenes(respuesta), {self.orden_central.pk})
+
+    def _cliente_no_admin(self, talleres):
+        user = User.objects.create_user(username=f'busq_meca_{uuid4().hex[:8]}', password='x')
+        relacion = UsuarioEmpresa.objects.create(
+            user=user, empresa=self.empresa, rol='MECANICO'
+        )
+        relacion.talleres.set(talleres)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        return client
+
+    def test_no_admin_sin_cabecera_solo_busca_en_sus_talleres(self):
+        client = self._cliente_no_admin([self.central])
+        respuesta = client.get(ENDPOINT, {'q': 'Marta'})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(self._ids_ordenes(respuesta), {self.orden_central.pk})
+
+    def test_no_admin_sin_talleres_no_encuentra_ordenes(self):
+        client = self._cliente_no_admin([])
+        respuesta = client.get(ENDPOINT, {'q': 'Marta'})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(self._ids_ordenes(respuesta), set())
+

@@ -21,15 +21,20 @@ def _taller_sesion_nombre(user, empresa):
     Devuelve el taller activo del perfil solo si está dentro del alcance del
     usuario para la empresa activa (empresa correcta + rol + talleres asignados)
     y, si no hay selección, el primer taller permitido. Nunca muestra un taller
-    en el que el usuario no puede operar.
+    en el que el usuario no puede operar. La administración (que puede operar
+    sin taller, «Todos») no tiene taller de sesión por defecto.
     """
-    from .utils import taller_de_usuario
+    from .utils import contexto_de_usuario, es_admin_talleres, taller_de_usuario
 
     empresa_id = getattr(empresa, 'id', empresa)
     try:
         empresa_id = int(empresa_id) if empresa_id is not None else None
     except (TypeError, ValueError):
         empresa_id = None
+
+    contexto = contexto_de_usuario(user, empresa_id)
+    if es_admin_talleres(contexto):
+        return ''
 
     taller_id = taller_de_usuario(user, empresa_id)
     if not taller_id:
@@ -38,14 +43,22 @@ def _taller_sesion_nombre(user, empresa):
 
 
 def _taller_sesion_id(user, empresa):
-    """Id del taller de sesión validado (perfil > primer permitido), o None."""
-    from .utils import taller_de_usuario
+    """Id del taller de sesión validado (perfil > primer permitido), o None.
+
+    La administración (ADMIN_EMPRESA / ADMIN_SISTEMA o superusuario) no tiene
+    taller por defecto: opera sin recorte («Todos»).
+    """
+    from .utils import contexto_de_usuario, es_admin_talleres, taller_de_usuario
 
     empresa_id = getattr(empresa, 'id', empresa)
     try:
         empresa_id = int(empresa_id) if empresa_id is not None else None
     except (TypeError, ValueError):
         empresa_id = None
+
+    contexto = contexto_de_usuario(user, empresa_id)
+    if es_admin_talleres(contexto):
+        return None
     return taller_de_usuario(user, empresa_id)
 
 
@@ -54,15 +67,16 @@ def _talleres_payload(user, empresa):
 
     Se incluye en la respuesta del login (cuando el usuario debe elegir empresa)
     para que el selector de taller funcione antes de tener sesión autenticada.
+    La administración no marca predeterminado: su opción por defecto es «Todos».
     """
-    from .utils import contexto_de_usuario, taller_de_usuario, talleres_permitidos
+    from .utils import contexto_de_usuario, es_admin_talleres, taller_de_usuario, talleres_permitidos
 
     empresa_id = getattr(empresa, 'id', empresa)
     contexto = contexto_de_usuario(user, empresa_id)
     if not contexto.hay_contexto:
         return []
 
-    predeterminado = taller_de_usuario(user, empresa_id)
+    predeterminado = None if es_admin_talleres(contexto) else taller_de_usuario(user, empresa_id)
     return [
         {
             'id': taller.id,
@@ -77,6 +91,8 @@ def _talleres_payload(user, empresa):
 
 def _user_payload(user, empresa, rol, request=None):
     """Payload de usuario incluyendo datos del perfil (teléfono y avatar absoluto)."""
+    from .utils import contexto_de_usuario, es_admin_talleres, talleres_permitidos
+
     profile = getattr(user, 'profile', None)
     telefono = getattr(profile, 'telefono', '') if profile else ''
     avatar_url = None
@@ -84,6 +100,8 @@ def _user_payload(user, empresa, rol, request=None):
         avatar_url = profile.avatar.url
         if request is not None:
             avatar_url = request.build_absolute_uri(avatar_url)
+    contexto = contexto_de_usuario(user, empresa.id)
+    talleres_count = talleres_permitidos(user, contexto).count() if contexto.hay_contexto else 0
     return {
         "id": user.id,
         "username": user.username,
@@ -95,6 +113,8 @@ def _user_payload(user, empresa, rol, request=None):
         "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
         "taller_nombre": _taller_sesion_nombre(user, empresa),
         "taller_id": _taller_sesion_id(user, empresa),
+        "talleres_count": talleres_count,
+        "es_admin_talleres": es_admin_talleres(contexto),
         "telefono": telefono,
         "avatar": avatar_url,
     }

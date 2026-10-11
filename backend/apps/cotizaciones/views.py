@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
+from apps.core.mixins import FiltroTallerMixin
 from apps.ordenes.relaciones_flujo import responder_relaciones
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
@@ -56,9 +57,10 @@ def _validar_origen_inspeccion(inspeccion):
     _validar_origen_cotizacion(inspeccion=inspeccion)
 
 
-class CotizacionViewSet(viewsets.ModelViewSet):
+class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
+    taller_filter_field = 'sucursal'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'numero_cotizacion',
@@ -86,7 +88,7 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             .select_related('cliente', 'vehiculo', 'sucursal', 'empresa', 'asesor', 'aceptada_por', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
             .prefetch_related('servicios', 'repuestos')
         )
-        return self._filtrar_cotizaciones(queryset)
+        return self.filtrar_por_taller(self._filtrar_cotizaciones(queryset))
 
     def _filtrar_cotizaciones(self, queryset):
         """Aplica los filtros del panel de búsqueda del listado de cotizaciones."""
@@ -96,10 +98,6 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             valor = params.get(parametro)
             if valor:
                 queryset = queryset.filter(**{campo: valor})
-
-        sucursal = params.get('sucursal')
-        if sucursal and sucursal.isdigit():
-            queryset = queryset.filter(sucursal_id=int(sucursal))
 
         # Filtro por vehículo: lo usa la cotización para detectar si el auto ya
         # tiene una cotización vigente antes de crear otra.

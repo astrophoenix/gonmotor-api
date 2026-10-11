@@ -45,6 +45,25 @@ def _combinar(*condiciones):
     return total if total is not None else Q()
 
 
+def _talleres_desde_request(request):
+    """Talleres aplicables al alcance del usuario para acotar la búsqueda.
+
+    Devuelve ``None`` (administración sin taller activo: sin recorte) o la lista
+    de ids de talleres permitidos (posiblemente vacía → sin resultados para las
+    entidades con taller).
+    """
+    from apps.authentication.utils import talleres_filtro_de_request
+
+    return talleres_filtro_de_request(request)
+
+
+def _con_taller(queryset, talleres):
+    """Recorta por taller cuando hay un alcance definido (estricto)."""
+    if talleres is None:
+        return queryset
+    return queryset.filter(sucursal_id__in=talleres)
+
+
 def _nombre_cliente(cliente):
     return cliente.nombre if cliente else None
 
@@ -78,7 +97,7 @@ def _grupo(tipo, etiqueta, resultados, icono=None):
     }
 
 
-def _buscar_clientes(empresa_id, q):
+def _buscar_clientes(empresa_id, q, talleres=None):
     queryset = (
         Cliente.objects.filter(empresa_id=empresa_id, is_active=True)
         .filter(_combinar(
@@ -95,7 +114,7 @@ def _buscar_clientes(empresa_id, q):
     ]
 
 
-def _buscar_vehiculos(empresa_id, q):
+def _buscar_vehiculos(empresa_id, q, talleres=None):
     normalizado = q.replace('-', '').replace(' ', '').upper()
     condiciones = _combinar(
         Q(placa__icontains=q),
@@ -121,9 +140,13 @@ def _buscar_vehiculos(empresa_id, q):
     ]
 
 
-def _buscar_recepciones(empresa_id, q):
+def _buscar_recepciones(empresa_id, q, talleres=None):
+    queryset = _con_taller(
+        RecepcionVehiculo.objects.filter(empresa_id=empresa_id, is_active=True),
+        talleres,
+    )
     queryset = (
-        RecepcionVehiculo.objects.filter(empresa_id=empresa_id, is_active=True)
+        queryset
         .filter(_combinar(
             Q(numero_recepcion__icontains=q),
             Q(vehiculo__placa__icontains=q),
@@ -146,9 +169,13 @@ def _buscar_recepciones(empresa_id, q):
     ]
 
 
-def _buscar_ordenes(empresa_id, q):
+def _buscar_ordenes(empresa_id, q, talleres=None):
+    queryset = _con_taller(
+        OrdenTrabajo.objects.filter(empresa_id=empresa_id, is_active=True),
+        talleres,
+    )
     queryset = (
-        OrdenTrabajo.objects.filter(empresa_id=empresa_id, is_active=True)
+        queryset
         .filter(_combinar(
             Q(numero_orden__icontains=q),
             Q(vehiculo__placa__icontains=q),
@@ -171,9 +198,13 @@ def _buscar_ordenes(empresa_id, q):
     ]
 
 
-def _buscar_cotizaciones(empresa_id, q):
+def _buscar_cotizaciones(empresa_id, q, talleres=None):
+    queryset = _con_taller(
+        Cotizacion.objects.filter(empresa_id=empresa_id, is_active=True),
+        talleres,
+    )
     queryset = (
-        Cotizacion.objects.filter(empresa_id=empresa_id, is_active=True)
+        queryset
         .filter(_combinar(
             Q(numero_cotizacion__icontains=q),
             Q(vehiculo__placa__icontains=q),
@@ -196,12 +227,16 @@ def _buscar_cotizaciones(empresa_id, q):
     ]
 
 
-def _buscar_inspecciones(empresa_id, q):
-    queryset = (
+def _buscar_inspecciones(empresa_id, q, talleres=None):
+    queryset = _con_taller(
         InspeccionVehiculo.objects.filter(
             _combinar(Q(empresa_id=empresa_id), Q(recepcion__empresa_id=empresa_id)),
             is_active=True,
-        )
+        ),
+        talleres,
+    )
+    queryset = (
+        queryset
         .filter(_combinar(
             Q(numero_inspeccion__icontains=q),
             Q(recepcion__numero_recepcion__icontains=q),
@@ -228,7 +263,7 @@ def _buscar_inspecciones(empresa_id, q):
     return resultados
 
 
-def _buscar_proveedores(empresa_id, q):
+def _buscar_proveedores(empresa_id, q, talleres=None):
     queryset = (
         Proveedor.objects.filter(empresa_id=empresa_id, is_active=True)
         .filter(_combinar(
@@ -246,7 +281,7 @@ def _buscar_proveedores(empresa_id, q):
     ]
 
 
-def _buscar_repuestos(empresa_id, q):
+def _buscar_repuestos(empresa_id, q, talleres=None):
     queryset = (
         Repuesto.objects.filter(empresa_id=empresa_id, is_active=True)
         .filter(_combinar(
@@ -263,7 +298,7 @@ def _buscar_repuestos(empresa_id, q):
     ]
 
 
-def _buscar_servicios(empresa_id, q):
+def _buscar_servicios(empresa_id, q, talleres=None):
     queryset = (
         Servicio.objects.filter(empresa_id=empresa_id, is_active=True)
         .filter(_combinar(
@@ -333,8 +368,9 @@ class BusquedaGlobalView(APIView):
         q = q[:LARGO_MAXIMO]
 
         grupos = []
+        talleres = _talleres_desde_request(request)
         for tipo, etiqueta, buscador in BUSCADORES:
-            resultados = buscador(empresa_id, q)
+            resultados = buscador(empresa_id, q, talleres)
             if resultados:
                 grupos.append(_grupo(tipo, etiqueta, resultados))
 

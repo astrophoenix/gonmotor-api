@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
 from apps.empresas.models import Taller
 
 from .ics import SALT_ENLACE_CITA_ICS, respuesta_ics
@@ -65,10 +65,12 @@ class CitaPagination(PageNumberPagination):
     max_page_size = 500
 
 
-class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CitaSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('citas')]
     pagination_class = CitaPagination
+    taller_filter_field = 'taller'
+    taller_query_param = 'taller'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'cliente__nombre',
@@ -132,7 +134,7 @@ class CitaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             except ValueError:
                 pass
 
-        return queryset
+        return self.filtrar_por_taller(queryset)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

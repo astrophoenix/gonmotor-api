@@ -38,15 +38,6 @@ class Repuesto(BaseModel):
         on_delete=models.CASCADE,
         related_name='repuestos',
     )
-    sucursal = models.ForeignKey(
-        'empresas.Taller',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='repuestos',
-        verbose_name='Taller',
-        help_text='Taller donde se almacena o comercializa el repuesto (opcional)',
-    )
     codigo = models.CharField(max_length=50, verbose_name='Código del repuesto')
     nombre = models.CharField(max_length=150, verbose_name='Nombre del repuesto')
     descripcion = models.TextField(blank=True, null=True, verbose_name='Descripción')
@@ -171,15 +162,6 @@ class Servicio(BaseModel):
         'empresas.Empresa',
         on_delete=models.CASCADE,
         related_name='servicios_catalogo',
-    )
-    sucursal = models.ForeignKey(
-        'empresas.Taller',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='servicios_catalogo',
-        verbose_name='Taller',
-        help_text='Taller donde se presta el servicio (opcional)',
     )
     codigo = models.CharField(max_length=50, verbose_name='Código del servicio')
     nombre = models.CharField(max_length=150, verbose_name='Nombre del servicio')

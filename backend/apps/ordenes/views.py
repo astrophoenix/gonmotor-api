@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
+from apps.core.mixins import FiltroTallerMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
@@ -141,9 +142,10 @@ def _cotizaciones_del_vehiculo(empresa_id, vehiculo_id, recepcion_id=None, inspe
     )
 
 
-class OrdenTrabajoViewSet(viewsets.ModelViewSet):
+class OrdenTrabajoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
+    taller_filter_field = 'sucursal'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'numero_orden',
@@ -181,7 +183,7 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
             )
             .prefetch_related('servicios', 'repuestos', 'recepciones', 'fotos', 'recepciones__fotos', 'inspeccion__fotos')
         )
-        return self._filtrar_ordenes(queryset)
+        return self.filtrar_por_taller(self._filtrar_ordenes(queryset))
 
     def _filtrar_ordenes(self, queryset):
         """Aplica los filtros del panel de búsqueda del listado de órdenes."""
@@ -191,10 +193,6 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
             valor = params.get(parametro)
             if valor:
                 queryset = queryset.filter(**{campo: valor})
-
-        sucursal = params.get('sucursal')
-        if sucursal and sucursal.isdigit():
-            queryset = queryset.filter(sucursal_id=int(sucursal))
 
         # Rango de fechas sobre la fecha de creación (comparación por día,
         # ambos extremos incluidos) para que no dependa de la zona horaria.
@@ -224,9 +222,10 @@ def parsear_fecha(valor):
         return None
 
 
-class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
+class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
+    taller_filter_field = 'sucursal'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['numero_recepcion', 'vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
     ordering_fields = ['created_at', 'id', 'fecha_ingreso']
@@ -248,7 +247,7 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal')
             .prefetch_related('inspecciones', 'cotizaciones_generadas')
         )
-        return self._filtrar_recepciones(queryset)
+        return self.filtrar_por_taller(self._filtrar_recepciones(queryset))
 
     def _filtrar_recepciones(self, queryset):
         """Aplica los filtros del panel de búsqueda del listado de recepciones."""
@@ -258,10 +257,6 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
             valor = params.get(parametro)
             if valor:
                 queryset = queryset.filter(**{campo: valor})
-
-        sucursal = params.get('sucursal')
-        if sucursal and sucursal.isdigit():
-            queryset = queryset.filter(sucursal_id=int(sucursal))
 
         # Rango de fechas sobre la fecha de ingreso (comparación por día, ambos
         # extremos incluidos) para que el filtro funcione en cualquier zona horaria.
@@ -457,9 +452,10 @@ class RecepcionVehiculoViewSet(viewsets.ModelViewSet):
         return conectadas
 
 
-class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
+class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
+    taller_filter_field = 'sucursal'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     # La búsqueda alcanza el número de la inspección, el de su recepción y los
     # datos del vehículo/cliente, que pueden venir en la propia inspección o en
@@ -504,7 +500,7 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
             )
             .prefetch_related('servicios_detectados', 'repuestos_sugeridos', 'fotos', 'cotizaciones_generadas')
         )
-        return self._filtrar_inspecciones(queryset)
+        return self.filtrar_por_taller(self._filtrar_inspecciones(queryset))
 
     def _filtrar_inspecciones(self, queryset):
         """Aplica los filtros del panel de búsqueda del listado de inspecciones."""
@@ -517,10 +513,6 @@ class InspeccionVehiculoViewSet(viewsets.ModelViewSet):
 
         if params.get('sin_recepcion') in ('1', 'true', 'True'):
             queryset = queryset.filter(recepcion__isnull=True)
-
-        sucursal = params.get('sucursal')
-        if sucursal and sucursal.isdigit():
-            queryset = queryset.filter(sucursal_id=int(sucursal))
 
         # Rango de fechas sobre la fecha de inspección (comparación por día,
         # ambos extremos incluidos) para que el filtro no dependa de la zona horaria.
