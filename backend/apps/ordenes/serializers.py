@@ -425,6 +425,7 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep = super().to_representation(instance)
         rep['estado_display'] = instance.get_estado_display()
         rep['duracion_inspeccion_minutos'] = instance.duracion_inspeccion
+        rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
         rep['tiene_orden_trabajo'] = instance.orden_trabajo_id is not None
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo.numero_orden if instance.orden_trabajo_id else None
