@@ -1074,17 +1074,13 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
 class VinculoCotizacionFlujoTests(TestCase):
     """La cotización creada sin origen (WhatsApp, teléfono) se ata sola a la
-    recepción y la inspección que nacen después, y la inspección arranca con los
-    ítems de la cotización ya cargados."""
+    recepción que nace después. La inspección ya no hereda ítems de la
+    cotización: se capturan directamente en la inspección."""
 
     @classmethod
     def setUpTestData(cls):
         from apps.clientes.models import Cliente
-        from apps.cotizaciones.models import (
-            Cotizacion,
-            DetalleRepuestoCotizacion,
-            DetalleServicioCotizacion,
-        )
+        from apps.cotizaciones.models import Cotizacion
         from apps.empresas.models import Empresa, Taller
         from apps.vehiculos.models import Vehiculo
 
@@ -1104,8 +1100,6 @@ class VinculoCotizacionFlujoTests(TestCase):
         cls.vehiculo = Vehiculo.objects.create(placa='FLU-001', marca='Toyota', modelo='Corolla')
         cls.vehiculo.empresas.add(cls.empresa)
         cls.Cotizacion = Cotizacion
-        cls.DetalleServicioCotizacion = DetalleServicioCotizacion
-        cls.DetalleRepuestoCotizacion = DetalleRepuestoCotizacion
 
     def setUp(self):
         from rest_framework.test import APIClient
@@ -1127,8 +1121,8 @@ class VinculoCotizacionFlujoTests(TestCase):
             motivo_ingreso='Ruido en el motor',
         )
 
-    def _cotizacion(self, estado='PENDIENTE', numero='COT-0001', con_items=True, es_opcional=False):
-        cotizacion = self.Cotizacion.objects.create(
+    def _cotizacion(self, estado='PENDIENTE', numero='COT-0001'):
+        return self.Cotizacion.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
             cliente=self.cliente,
@@ -1136,24 +1130,6 @@ class VinculoCotizacionFlujoTests(TestCase):
             numero_cotizacion=numero,
             estado=estado,
         )
-        if con_items:
-            self.DetalleServicioCotizacion.objects.create(
-                cotizacion=cotizacion,
-                codigo='SRV-001',
-                descripcion='Cambio de aceite y filtros',
-                horas_estimadas=Decimal('2.00'),
-                precio_unitario=Decimal('45.00'),
-                es_opcional=es_opcional,
-            )
-            self.DetalleRepuestoCotizacion.objects.create(
-                cotizacion=cotizacion,
-                codigo_repuesto='REP-001',
-                descripcion='Filtro de aceite',
-                cantidad=2,
-                precio_unitario_referencial=Decimal('18.50'),
-                es_opcional=es_opcional,
-            )
-        return cotizacion
 
     # --- Recepción ---
 
@@ -1199,135 +1175,24 @@ class VinculoCotizacionFlujoTests(TestCase):
         cotizacion.refresh_from_db()
         self.assertIsNone(cotizacion.recepcion_origen_id)
 
-    # --- Inspección desde la recepción ---
 
-    def test_crear_inspeccion_vincula_y_siembra_los_items(self):
-        from .models import InspeccionVehiculo
-
-        cotizacion = self._cotizacion(estado='ACEPTADA')
-        recepcion = self._recepcion()
-
-        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        # Regresión: la inspección hereda cliente y vehículo de la recepción.
-        self.assertEqual(respuesta.data['cliente']['id'], self.cliente.id)
-        self.assertEqual(respuesta.data['vehiculo']['id'], self.vehiculo.id)
-
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        self.assertEqual(inspeccion.recepcion_id, recepcion.id)
-
-        cotizacion.refresh_from_db()
-        self.assertEqual(cotizacion.recepcion_origen_id, recepcion.id)
-        self.assertEqual(cotizacion.inspeccion_origen_id, inspeccion.id)
-
-        servicio = inspeccion.servicios_detectados.get()
-        self.assertEqual(servicio.descripcion, 'Cambio de aceite y filtros')
-        self.assertEqual(servicio.horas_estimadas, Decimal('2.00'))
-        self.assertEqual(servicio.precio_referencial, Decimal('45.00'))
-        self.assertFalse(servicio.es_sugerido)
-
-        repuesto = inspeccion.repuestos_sugeridos.get()
-        self.assertEqual(repuesto.descripcion, 'Filtro de aceite')
-        self.assertEqual(repuesto.cantidad, 2)
-        self.assertEqual(repuesto.precio_referencial, Decimal('18.50'))
-
-    def test_items_opcionales_de_la_cotizacion_se_marcan_sugeridos(self):
-        from .models import InspeccionVehiculo
-
-        cotizacion = self._cotizacion(estado='ACEPTADA', es_opcional=True)
-        recepcion = self._recepcion()
-
-        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        self.assertTrue(inspeccion.servicios_detectados.get().es_sugerido)
-        self.assertTrue(inspeccion.repuestos_sugeridos.get().es_sugerido)
-        cotizacion.refresh_from_db()
-        self.assertEqual(cotizacion.inspeccion_origen_id, inspeccion.id)
-
-    def test_crear_inspeccion_sin_cotizacion_no_siembra_items(self):
-        from .models import InspeccionVehiculo
-
-        recepcion = self._recepcion()
-
-        respuesta = self.api.post(f'/api/recepciones/{recepcion.id}/crear-inspeccion/', {}, format='json')
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        self.assertEqual(inspeccion.servicios_detectados.count(), 0)
-        self.assertEqual(inspeccion.repuestos_sugeridos.count(), 0)
-
-    def test_la_siembra_no_duplica_items_si_la_inspeccion_ya_tiene(self):
-        from apps.cotizaciones.services import sembrar_inspeccion_desde_cotizacion
-        from .models import DetalleServicioInspeccion, InspeccionVehiculo
-
-        cotizacion = self._cotizacion()
-        inspeccion = InspeccionVehiculo.objects.create(
-            empresa=self.empresa,
-            numero_inspeccion='INS-9001',
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-        )
-        DetalleServicioInspeccion.objects.create(
-            inspeccion=inspeccion, descripcion='Revisión general', horas_estimadas=1
-        )
-
-        copiados = sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion)
-
-        self.assertEqual(copiados, 0)
-        self.assertEqual(inspeccion.servicios_detectados.count(), 1)
-
-    def test_los_items_se_asocian_al_catalogo_por_codigo(self):
-        from apps.inventario.models import Repuesto, Servicio
-        from apps.cotizaciones.services import sembrar_inspeccion_desde_cotizacion
-        from .models import InspeccionVehiculo
-
-        servicio_catalogo = Servicio.objects.create(
-            empresa=self.empresa, codigo='SRV-001', nombre='Cambio de aceite'
-        )
-        repuesto_catalogo = Repuesto.objects.create(
-            empresa=self.empresa, codigo='REP-001', nombre='Filtro de aceite'
-        )
-        cotizacion = self._cotizacion()
-        inspeccion = InspeccionVehiculo.objects.create(
-            empresa=self.empresa,
-            numero_inspeccion='INS-9002',
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-        )
-
-        sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion)
-
-        self.assertEqual(inspeccion.servicios_detectados.get().servicio_id, servicio_catalogo.id)
-        self.assertEqual(inspeccion.repuestos_sugeridos.get().repuesto_id, repuesto_catalogo.id)
-
-
-class CotizacionesCandidatasInspeccionTests(TestCase):
-    """La pantalla de decisión de la inspección debe ver las cotizaciones
-    aceptadas antes de la visita, no solo las ya ligadas a la inspección."""
+class InspeccionReaperturaApiTests(TestCase):
+    """Una inspección FINALIZADA solo se reabre si el trabajo no avanzó: nada de
+    orden de trabajo ni de cotización enviada/aceptada."""
 
     @classmethod
     def setUpTestData(cls):
         from apps.clientes.models import Cliente
-        from apps.cotizaciones.models import (
-            Cotizacion,
-            DetalleRepuestoCotizacion,
-            DetalleServicioCotizacion,
-        )
+        from apps.cotizaciones.models import Cotizacion
         from apps.empresas.models import Empresa, Taller
         from apps.vehiculos.models import Vehiculo
 
         from django.contrib.auth import get_user_model
 
         User = get_user_model()
-        cls.user = User.objects.create_superuser(username='candidatas_admin', password='x')
+        cls.user = User.objects.create_superuser(username='reapertura_admin', password='x')
         cls.empresa = Empresa.objects.create(
-            nombre_comercial='Taller Candidatas', razon_social='CAND SA', ruc='666666666666'
-        )
-        cls.otra_empresa = Empresa.objects.create(
-            nombre_comercial='Taller Otro', razon_social='OTRO SA', ruc='777777777777'
+            nombre_comercial='Taller Reapertura', razon_social='REAP SA', ruc='999999999999'
         )
         cls.taller = Taller.objects.create(
             empresa=cls.empresa, nombre='Central', direccion='Av. Siempre Viva 742'
@@ -1335,515 +1200,110 @@ class CotizacionesCandidatasInspeccionTests(TestCase):
         cls.cliente = Cliente.objects.create(
             empresa=cls.empresa, nombre='Ana Lotus', identificacion='0912345678'
         )
-        cls.vehiculo = Vehiculo.objects.create(placa='CAN-001', marca='Toyota', modelo='Corolla')
+        cls.vehiculo = Vehiculo.objects.create(placa='REA-001', marca='Toyota', modelo='Corolla')
         cls.vehiculo.empresas.add(cls.empresa)
         cls.Cotizacion = Cotizacion
-        cls.DetalleServicioCotizacion = DetalleServicioCotizacion
-        cls.DetalleRepuestoCotizacion = DetalleRepuestoCotizacion
 
     def setUp(self):
-        from apps.ordenes.models import InspeccionVehiculo, RecepcionVehiculo
-
         from rest_framework.test import APIClient
+
+        from .models import InspeccionVehiculo
 
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-
-        self.recepcion = RecepcionVehiculo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_recepcion='REC-7001',
-            estado='ACEPTADA',
-            motivo_ingreso='Mantenimiento',
-        )
         self.inspeccion = InspeccionVehiculo.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
-            numero_inspeccion='INS-7001',
-            recepcion=self.recepcion,
             cliente=self.cliente,
             vehiculo=self.vehiculo,
+            numero_inspeccion='INS-REA-0001',
             estado='FINALIZADA',
         )
 
-    def _cotizacion(self, estado='ACEPTADA', numero='COT-7001', con_items=True, vehiculo=None):
-        cotizacion = self.Cotizacion.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=vehiculo if vehiculo is not None else self.vehiculo,
-            numero_cotizacion=numero,
-            estado=estado,
-            total=Decimal('480.00'),
-        )
-        if con_items:
-            self.DetalleServicioCotizacion.objects.create(
-                cotizacion=cotizacion,
-                codigo='SRV-001',
-                descripcion='Cambio de aceite y filtros',
-                horas_estimadas=Decimal('2.00'),
-                precio_unitario=Decimal('45.00'),
-            )
-            self.DetalleRepuestoCotizacion.objects.create(
-                cotizacion=cotizacion,
-                codigo_repuesto='REP-001',
-                descripcion='Filtro de aceite',
-                cantidad=2,
-                precio_unitario_referencial=Decimal('18.50'),
-            )
-        return cotizacion
-
     def _url(self):
-        return f'/api/ordenes/inspecciones/{self.inspeccion.id}/cotizaciones-candidatas/'
+        return f'/api/ordenes/inspecciones/{self.inspeccion.id}/'
 
-    # --- Listado ---
-
-    def test_lista_cotizaciones_aceptadas_del_vehiculo(self):
-        aceptada = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-
-        respuesta = self.api.get(self._url())
-
-        self.assertEqual(respuesta.status_code, 200, respuesta.content)
-        self.assertEqual(len(respuesta.data['aprobadas']), 1)
-        registro = respuesta.data['aprobadas'][0]
-        self.assertEqual(registro['id'], aceptada.id)
-        self.assertEqual(registro['numero'], 'COT-7001')
-        self.assertEqual(registro['estadoDisplay'], 'Aceptada')
-        # El total lo recalculan los signals al crear los ítems.
-        self.assertGreater(float(registro['total']), 0)
-        # Llega el detalle de ítems para poder comparar en pantalla.
-        self.assertEqual(len(registro['servicios']), 1)
-        self.assertEqual(len(registro['repuestos']), 1)
-        self.assertEqual(registro['repuestos'][0]['descripcion'], 'Filtro de aceite')
-        # Aún no está vinculada a esta visita.
-        self.assertFalse(registro['vinculada'])
-
-    def test_clasifica_por_estado(self):
-        self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-        self._cotizacion(estado='ENVIADA', numero='COT-7002')
-        self._cotizacion(estado='PENDIENTE', numero='COT-7003')
-        self._cotizacion(estado='RECHAZADA', numero='COT-7004')
-        # "Convertida" = ACEPTADA con orden_trabajo_origen (se mantiene en ACEPTADA)
-        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-7005')
-        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
-        orden_ficticia = OrdenTrabajo.objects.create(
+    def _cotizacion(self, estado):
+        return self.Cotizacion.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
             cliente=self.cliente,
             vehiculo=self.vehiculo,
-            numero_orden='OT-FICTICIA',
-            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
-        )
-        convertida.orden_trabajo_origen = orden_ficticia
-        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-
-        respuesta = self.api.get(self._url())
-
-        numeros = lambda grupo: sorted(c['numero'] for c in respuesta.data[grupo])  # noqa: E731
-        self.assertEqual(numeros('aprobadas'), ['COT-7001', 'COT-7005'])
-        self.assertEqual(numeros('enCurso'), ['COT-7002', 'COT-7003'])
-        self.assertEqual(numeros('historicas'), ['COT-7004'])
-
-    def test_no_muestra_cotizaciones_de_otros_vehiculos_ni_otros_talleres(self):
-        from apps.vehiculos.models import Vehiculo
-
-        otro_vehiculo = Vehiculo.objects.create(placa='CAN-999', marca='Kia', modelo='Rio')
-        otro_vehiculo.empresas.add(self.empresa)
-        self._cotizacion(estado='ACEPTADA', numero='COT-7001', vehiculo=otro_vehiculo)
-
-        cliente_otro = self.cliente.__class__.objects.create(
-            empresa=self.otra_empresa, nombre='Cliente Otro', identificacion='0999999999'
-        )
-        self.Cotizacion.objects.create(
-            empresa=self.otra_empresa,
-            cliente=cliente_otro,
-            numero_cotizacion='COT-8001',
-            estado='ACEPTADA',
+            inspeccion_origen=self.inspeccion,
+            numero_cotizacion=f'COT-REA-{estado}',
+            estado=estado,
         )
 
-        respuesta = self.api.get(self._url())
-
-        self.assertEqual(respuesta.data['aprobadas'], [])
-        self.assertEqual(respuesta.data['enCurso'], [])
-        self.assertEqual(respuesta.data['historicas'], [])
-
-    def test_marca_como_vinculada_la_cotizacion_de_la_inspeccion(self):
-        cotizacion = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-        cotizacion.inspeccion_origen = self.inspeccion
-        cotizacion.recepcion_origen = self.recepcion
-        cotizacion.save(update_fields=['inspeccion_origen', 'recepcion_origen', 'updated_at'])
-
-        respuesta = self.api.get(self._url())
-
-        self.assertTrue(respuesta.data['aprobadas'][0]['vinculada'])
-        self.assertEqual(respuesta.data['cotizacionActivaId'], cotizacion.id)
-
-    # --- Vínculo ---
-
-    def test_vincular_aceptada_a_inspeccion_y_recepcion(self):
-        aceptada = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [aceptada.id], 'accion': 'vincular'}, format='json'
-        )
+    def test_reabre_sin_bloqueos(self):
+        respuesta = self.api.patch(self._url(), {'estado': 'EN_PROCESO'}, format='json')
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
-        self.assertEqual(respuesta.data['resultados'], [{'id': aceptada.id, 'vinculada': True}])
-        aceptada.refresh_from_db()
-        self.assertEqual(aceptada.inspeccion_origen_id, self.inspeccion.id)
-        self.assertEqual(aceptada.recepcion_origen_id, self.recepcion.id)
-        # Vincular no reescribe lo aprobado por el cliente.
-        self.assertEqual(aceptada.estado, 'ACEPTADA')
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.estado, 'EN_PROCESO')
+        self.assertIsNone(self.inspeccion.fecha_finalizacion)
 
-    def test_vincular_varias_aceptadas_de_una_vez(self):
-        primera = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-        segunda = self._cotizacion(estado='ACEPTADA', numero='COT-7002')
+    def test_no_reabre_con_orden_de_trabajo(self):
+        from .models import OrdenTrabajo
 
-        respuesta = self.api.post(
-            self._url(),
-            {'cotizaciones': [primera.id, segunda.id], 'accion': 'vincular'},
-            format='json',
-        )
-
-        self.assertEqual(respuesta.status_code, 200, respuesta.content)
-        self.assertEqual(len(respuesta.data['resultados']), 2)
-        for cotizacion in (primera, segunda):
-            cotizacion.refresh_from_db()
-            self.assertEqual(cotizacion.inspeccion_origen_id, self.inspeccion.id)
-
-    def test_no_permite_vincular_una_cotizacion_convertida(self):
-        # Una cotización con orden_trabajo_origen se considera "convertida"
-        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-7005')
-        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
-        orden_ficticia = OrdenTrabajo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_orden='OT-FICTICIA',
-            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
-        )
-        convertida.orden_trabajo_origen = orden_ficticia
-        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [convertida.id], 'accion': 'vincular'}, format='json'
-        )
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('convertida', str(respuesta.data['detail']).lower())
-        convertida.refresh_from_db()
-        self.assertIsNone(convertida.inspeccion_origen_id)
-
-    def test_no_permite_vincular_cotizacion_de_otra_recepcion(self):
-        from apps.ordenes.models import RecepcionVehiculo
-
-        otra_recepcion = RecepcionVehiculo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_recepcion='REC-7002',
-            estado='ACEPTADA',
-            motivo_ingreso='Otro ingreso',
-        )
-        cotizacion = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
-        cotizacion.recepcion_origen = otra_recepcion
-        cotizacion.save(update_fields=['recepcion_origen', 'updated_at'])
-
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [cotizacion.id], 'accion': 'vincular'}, format='json'
-        )
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('otra recepción', str(respuesta.data['detail']).lower())
-
-    def test_no_permite_vincular_si_la_inspeccion_ya_es_orden(self):
-        from apps.ordenes.models import OrdenTrabajo
-
-        cotizacion = self._cotizacion(estado='ACEPTADA', numero='COT-7001')
         orden = OrdenTrabajo.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
             cliente=self.cliente,
             vehiculo=self.vehiculo,
-            numero_orden='OT-7001',
-            estado='EN_PROCESO',
+            numero_orden='OT-REA-0001',
         )
         self.inspeccion.orden_trabajo = orden
         self.inspeccion.save(update_fields=['orden_trabajo', 'updated_at'])
 
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [cotizacion.id], 'accion': 'vincular'}, format='json'
-        )
+        respuesta = self.api.patch(self._url(), {'estado': 'EN_PROCESO'}, format='json')
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('orden de trabajo', str(respuesta.data['detail']).lower())
+        self.assertIn('orden de trabajo', str(respuesta.data).lower())
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.estado, 'FINALIZADA')
 
-    def test_desvincular_limpia_inspeccion_y_recepcion(self):
-        cotizacion = self._cotizacion(estado='ENVIADA', numero='COT-7001')
-        cotizacion.inspeccion_origen = self.inspeccion
-        cotizacion.recepcion_origen = self.recepcion
-        cotizacion.save(update_fields=['inspeccion_origen', 'recepcion_origen', 'updated_at'])
+    def test_no_reabre_con_cotizacion_enviada(self):
+        self._cotizacion('ENVIADA')
 
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [cotizacion.id], 'accion': 'desvincular'}, format='json'
-        )
+        respuesta = self.api.patch(self._url(), {'estado': 'EN_PROCESO'}, format='json')
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.estado, 'FINALIZADA')
+
+    def test_no_reabre_con_cotizacion_aceptada(self):
+        self._cotizacion('ACEPTADA')
+
+        respuesta = self.api.patch(self._url(), {'estado': 'EN_PROCESO'}, format='json')
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.estado, 'FINALIZADA')
+
+    def test_reabre_con_cotizacion_pendiente(self):
+        self._cotizacion('PENDIENTE')
+
+        respuesta = self.api.patch(self._url(), {'estado': 'EN_PROCESO'}, format='json')
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
-        cotizacion.refresh_from_db()
-        self.assertIsNone(cotizacion.inspeccion_origen_id)
-        self.assertIsNone(cotizacion.recepcion_origen_id)
+        self.inspeccion.refresh_from_db()
+        self.assertEqual(self.inspeccion.estado, 'EN_PROCESO')
 
-    def test_exige_lista_de_cotizaciones(self):
-        respuesta = self.api.post(self._url(), {'accion': 'vincular'}, format='json')
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('cotizaciones', respuesta.data)
-
-    def test_rechaza_accion_desconocida(self):
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [1], 'accion': 'fusionar'}, format='json'
-        )
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('accion', respuesta.data)
-
-
-class CrearInspeccionCotizacionesElegidasTests(TestCase):
-    """Al crear la inspección el usuario elige qué cotizaciones se cargan."""
-
-    @classmethod
-    def setUpTestData(cls):
-        from apps.clientes.models import Cliente
-        from apps.cotizaciones.models import (
-            Cotizacion,
-            DetalleRepuestoCotizacion,
-            DetalleServicioCotizacion,
-        )
-        from apps.empresas.models import Empresa, Taller
-        from apps.vehiculos.models import Vehiculo
-
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
-        cls.user = User.objects.create_superuser(username='elegir_admin', password='x')
-        cls.empresa = Empresa.objects.create(
-            nombre_comercial='Taller Elegir', razon_social='ELEG SA', ruc='888888888888'
-        )
-        cls.taller = Taller.objects.create(
-            empresa=cls.empresa, nombre='Central', direccion='Av. Siempre Viva 742'
-        )
-        cls.cliente = Cliente.objects.create(
-            empresa=cls.empresa, nombre='Ana Lotus', identificacion='0912345678'
-        )
-        cls.vehiculo = Vehiculo.objects.create(placa='ELE-001', marca='Toyota', modelo='Corolla')
-        cls.vehiculo.empresas.add(cls.empresa)
-        cls.Cotizacion = Cotizacion
-        cls.DetalleServicioCotizacion = DetalleServicioCotizacion
-        cls.DetalleRepuestoCotizacion = DetalleRepuestoCotizacion
-
-    def setUp(self):
-        from apps.ordenes.models import RecepcionVehiculo
-
-        from rest_framework.test import APIClient
-
-        self.api = APIClient()
-        self.api.force_authenticate(user=self.user)
-        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-        self.recepcion = RecepcionVehiculo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_recepcion='REC-8001',
-            estado='ACEPTADA',
-            motivo_ingreso='Mantenimiento',
-        )
-
-    def _cotizacion(self, estado='ACEPTADA', numero='COT-8001', servicio='Cambio de aceite', repuesto='Filtro'):
-        cotizacion = self.Cotizacion.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_cotizacion=numero,
-            estado=estado,
-        )
-        self.DetalleServicioCotizacion.objects.create(
-            cotizacion=cotizacion,
-            codigo=f'SRV-{numero[-2:]}',
-            descripcion=servicio,
-            horas_estimadas=Decimal('2.00'),
-            precio_unitario=Decimal('45.00'),
-        )
-        self.DetalleRepuestoCotizacion.objects.create(
-            cotizacion=cotizacion,
-            codigo_repuesto=f'REPL-{numero[-2:]}',
-            descripcion=repuesto,
-            cantidad=1,
-            precio_unitario_referencial=Decimal('18.50'),
-        )
-        return cotizacion
-
-    def _url(self):
-        return f'/api/recepciones/{self.recepcion.id}/crear-inspeccion/'
-
-    def _candidatas(self):
-        return self.api.get(
-            f'/api/recepciones/{self.recepcion.id}/cotizaciones-candidatas/'
-        )
-
-    # --- Listado para el modal ---
-
-    def test_lista_las_cotizaciones_del_vehiculo_para_el_modal(self):
-        self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-        self._cotizacion(estado='ENVIADA', numero='COT-8002', servicio='Balanceo', repuesto='Buje')
-
-        respuesta = self._candidatas()
+    def test_detalle_marca_puede_reabrir(self):
+        respuesta = self.api.get(self._url())
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
-        self.assertFalse(respuesta.data['tieneInspeccion'])
-        self.assertEqual([c['numero'] for c in respuesta.data['aprobadas']], ['COT-8001'])
-        self.assertEqual([c['numero'] for c in respuesta.data['enCurso']], ['COT-8002'])
-        # El modal necesita el detalle para mostrar qué se va a cargar.
-        self.assertEqual(len(respuesta.data['aprobadas'][0]['servicios']), 1)
-        self.assertEqual(len(respuesta.data['aprobadas'][0]['repuestos']), 1)
+        self.assertTrue(respuesta.data['puede_reabrir'])
+        self.assertFalse(respuesta.data['tiene_cotizacion_bloqueante'])
 
-    # --- Creación con selección ---
+    def test_detalle_bloquea_reapertura_con_cotizacion_enviada(self):
+        self._cotizacion('ENVIADA')
 
-    def test_sin_seleccion_mantiene_el_comportamiento_anterior(self):
-        from apps.ordenes.models import InspeccionVehiculo
+        respuesta = self.api.get(self._url())
 
-        vigente = self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-
-        respuesta = self.api.post(self._url(), {}, format='json')
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        vigente.refresh_from_db()
-        self.assertEqual(vigente.inspeccion_origen_id, inspeccion.id)
-        self.assertEqual(inspeccion.servicios_detectados.count(), 1)
-
-    def test_crea_solo_con_la_cotizacion_elegida(self):
-        from apps.ordenes.models import InspeccionVehiculo
-
-        elegida = self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-        otra = self._cotizacion(estado='ACEPTADA', numero='COT-8002', servicio='Balanceo', repuesto='Buje')
-
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [elegida.id]}, format='json'
-        )
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        elegida.refresh_from_db()
-        otra.refresh_from_db()
-        self.assertEqual(elegida.inspeccion_origen_id, inspeccion.id)
-        self.assertEqual(elegida.recepcion_origen_id, self.recepcion.id)
-        self.assertIsNone(otra.inspeccion_origen_id)
-        # No se siembra lo que el usuario no marcó.
-        self.assertEqual(inspeccion.servicios_detectados.count(), 1)
-        self.assertEqual(inspeccion.servicios_detectados.get().descripcion, 'Cambio de aceite')
-
-    def test_crea_con_varias_cotizaciones_y_no_duplica_items(self):
-        from apps.ordenes.models import InspeccionVehiculo
-
-        primera = self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-        segunda = self._cotizacion(
-            estado='ACEPTADA', numero='COT-8002', servicio='Cambio de aceite', repuesto='Buje'
-        )
-
-        respuesta = self.api.post(
-            self._url(), {'cotizaciones': [primera.id, segunda.id]}, format='json'
-        )
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        # "Cambio de aceite" viene en las dos cotizaciones y se carga una sola vez.
-        servicios = list(inspeccion.servicios_detectados.values_list('descripcion', flat=True))
-        repuestos = list(inspeccion.repuestos_sugeridos.values_list('descripcion', flat=True))
-        self.assertEqual(servicios.count('Cambio de aceite'), 1)
-        self.assertEqual(sorted(repuestos), ['Buje', 'Filtro'])
-        for cotizacion in (primera, segunda):
-            cotizacion.refresh_from_db()
-            self.assertEqual(cotizacion.inspeccion_origen_id, inspeccion.id)
-
-    def test_sin_eleccion_explicita_no_carga_items(self):
-        from apps.ordenes.models import InspeccionVehiculo
-
-        self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-
-        respuesta = self.api.post(self._url(), {'cotizaciones': []}, format='json')
-
-        self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        inspeccion = InspeccionVehiculo.objects.get(pk=respuesta.data['id'])
-        self.assertEqual(inspeccion.servicios_detectados.count(), 0)
-        self.assertEqual(inspeccion.repuestos_sugeridos.count(), 0)
-
-    def test_rechaza_cotizacion_convertida(self):
-        # Una cotización con orden_trabajo_origen se considera "convertida"
-        convertida = self._cotizacion(estado='ACEPTADA', numero='COT-8005')
-        from apps.ordenes.models import OrdenTrabajo, TipoTrabajo
-        orden_ficticia = OrdenTrabajo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_orden='OT-FICTICIA',
-            tipo_trabajo=TipoTrabajo.MANTENIMIENTO,
-        )
-        convertida.orden_trabajo_origen = orden_ficticia
-        convertida.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-
-        respuesta = self.api.post(self._url(), {'cotizaciones': [convertida.id]}, format='json')
-
-        # El id no existe para este vehículo: error de validación, no 500.
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('cotizaciones', respuesta.data)
-
-    def test_rechaza_cotizacion_de_otro_vehiculo(self):
-        from apps.vehiculos.models import Vehiculo
-
-        otro = Vehiculo.objects.create(placa='ELE-999', marca='Kia', modelo='Rio')
-        otro.empresas.add(self.empresa)
-        ajena = self.Cotizacion.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=otro,
-            numero_cotizacion='COT-8500',
-            estado='ACEPTADA',
-        )
-
-        respuesta = self.api.post(self._url(), {'cotizaciones': [ajena.id]}, format='json')
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('no pertenece al vehículo', str(respuesta.data['cotizaciones']).lower())
-
-    def test_rechaza_cotizacion_ya_ligada_a_otra_recepcion(self):
-        from apps.ordenes.models import RecepcionVehiculo
-
-        otra_recepcion = RecepcionVehiculo.objects.create(
-            empresa=self.empresa,
-            sucursal=self.taller,
-            cliente=self.cliente,
-            vehiculo=self.vehiculo,
-            numero_recepcion='REC-8002',
-            estado='ACEPTADA',
-            motivo_ingreso='Otro',
-        )
-        cotizacion = self._cotizacion(estado='ACEPTADA', numero='COT-8001')
-        cotizacion.recepcion_origen = otra_recepcion
-        cotizacion.save(update_fields=['recepcion_origen', 'updated_at'])
-
-        respuesta = self.api.post(self._url(), {'cotizaciones': [cotizacion.id]}, format='json')
-
-        self.assertEqual(respuesta.status_code, 400, respuesta.content)
-        self.assertIn('otra recepción', str(respuesta.data['cotizaciones']).lower())
+        self.assertFalse(respuesta.data['puede_reabrir'])
+        self.assertTrue(respuesta.data['tiene_cotizacion_bloqueante'])
 
 
 class RecepcionCreadaConTallerActivoTests(TestCase):

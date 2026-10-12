@@ -379,9 +379,34 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'detail': 'La inspección está finalizada; reábrela para poder modificarla.'}
                 )
+            self._validar_reapertura(self.instance)
 
         self._validar_kilometraje_diagnostico(attrs)
         return attrs
+
+    def _validar_reapertura(self, inspeccion):
+        """Bloquea la reapertura cuando el trabajo ya avanzó.
+
+        No se reabre una inspección que generó una orden de trabajo ni la que
+        tiene una cotización enviada o aceptada, porque su diagnóstico ya fue
+        comunicado y aceptado por el cliente.
+        """
+        if inspeccion.orden_trabajo_id:
+            raise serializers.ValidationError(
+                {'estado': 'La inspección ya generó una orden de trabajo y no puede reabrirse.'}
+            )
+        from apps.cotizaciones.models import Cotizacion
+
+        bloquea = inspeccion.cotizaciones_generadas.filter(
+            estado__in=(
+                Cotizacion.EstadoCotizacion.ENVIADA,
+                Cotizacion.EstadoCotizacion.ACEPTADA,
+            )
+        ).exists()
+        if bloquea:
+            raise serializers.ValidationError(
+                {'estado': 'No se puede reabrir: la inspección tiene una cotización enviada o aceptada.'}
+            )
 
     def _vehiculo_de(self, attrs):
         vehiculo = attrs.get('vehiculo')
@@ -462,8 +487,9 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         ).exists()
         cotizacion_activa = instance.cotizaciones_generadas.filter(
             estado__in=Cotizacion.ESTADOS_VIGENTES
-        ).only('id', 'numero_cotizacion').first()
+        ).only('id', 'numero_cotizacion', 'estado').order_by('-created_at', '-id').first()
         rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
+        rep['cotizacion_activa_estado'] = cotizacion_activa.estado if cotizacion_activa else None
         rep['numero_cotizacion'] = (
             cotizacion_activa.numero_cotizacion if cotizacion_activa else None
         )
@@ -475,6 +501,20 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
         rep['cotizacion_id'] = ultima_cotizacion.id if ultima_cotizacion else None
         rep['cotizacion_numero'] = (
             ultima_cotizacion.numero_cotizacion if ultima_cotizacion else None
+        )
+        # La reapertura se bloquea si la inspección ya generó una orden de trabajo
+        # o si tiene una cotización enviada/aceptada que el cliente ya conoció.
+        bloquea_cotizacion = instance.cotizaciones_generadas.filter(
+            estado__in=(
+                Cotizacion.EstadoCotizacion.ENVIADA,
+                Cotizacion.EstadoCotizacion.ACEPTADA,
+            )
+        ).exists()
+        rep['tiene_cotizacion_bloqueante'] = bloquea_cotizacion
+        rep['puede_reabrir'] = (
+            instance.estado == 'FINALIZADA'
+            and instance.orden_trabajo_id is None
+            and not bloquea_cotizacion
         )
         if instance.recepcion_id:
             rec = instance.recepcion

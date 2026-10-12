@@ -1,6 +1,5 @@
 import datetime
 
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -57,89 +56,6 @@ def tipo_inspeccion_desde_recepcion(tipo_recepcion):
     if tipo_recepcion in TipoTrabajo.values:
         return tipo_recepcion
     return TipoTrabajo.DIAGNOSTICO
-
-
-def _serializar_cotizacion_candidata(cotizacion, inspeccion=None, recepcion=None):
-    """Vista de una cotización del vehículo para las pantallas de decisión."""
-    vinculada = False
-    if inspeccion is not None and cotizacion.inspeccion_origen_id == inspeccion.id:
-        vinculada = True
-    if recepcion is not None and cotizacion.recepcion_origen_id == recepcion.id:
-        vinculada = True
-    return {
-        'id': cotizacion.id,
-        'numero': cotizacion.numero_cotizacion,
-        'estado': cotizacion.estado,
-        'estadoDisplay': cotizacion.get_estado_display(),
-        'total': str(cotizacion.total),
-        'createdAt': cotizacion.created_at.isoformat(),
-        'fechaAceptacion': (
-            cotizacion.fecha_aceptacion.isoformat() if cotizacion.fecha_aceptacion else None
-        ),
-        'vinculada': vinculada,
-        'servicios': [
-            {
-                'codigo': item.codigo or '',
-                'descripcion': item.descripcion,
-                'cantidad': str(item.horas_estimadas),
-                'precio': str(item.precio_unitario),
-            }
-            for item in cotizacion.servicios.all()
-        ],
-        'repuestos': [
-            {
-                'codigo': item.codigo_repuesto or '',
-                'descripcion': item.descripcion,
-                'cantidad': str(item.cantidad),
-                'precio': str(item.precio_unitario_referencial),
-            }
-            for item in cotizacion.repuestos.all()
-        ],
-    }
-
-
-def _clasificar_cotizaciones_candidatas(cotizaciones, inspeccion=None, recepcion=None):
-    """Agrupa las cotizaciones del vehículo por lo que el usuario puede hacer."""
-    from apps.cotizaciones.models import Cotizacion
-
-    vigente_pediente = (Cotizacion.EstadoCotizacion.PENDIENTE, Cotizacion.EstadoCotizacion.ENVIADA)
-    return {
-        'aprobadas': [
-            _serializar_cotizacion_candidata(c, inspeccion=inspeccion, recepcion=recepcion)
-            for c in cotizaciones
-            if c.estado == Cotizacion.EstadoCotizacion.ACEPTADA
-        ],
-        'enCurso': [
-            _serializar_cotizacion_candidata(c, inspeccion=inspeccion, recepcion=recepcion)
-            for c in cotizaciones
-            if c.estado in vigente_pediente
-        ],
-        'historicas': [
-            _serializar_cotizacion_candidata(c, inspeccion=inspeccion, recepcion=recepcion)
-            for c in cotizaciones
-            if c.estado != Cotizacion.EstadoCotizacion.ACEPTADA and c.estado not in vigente_pediente
-        ],
-    }
-
-
-def _cotizaciones_del_vehiculo(empresa_id, vehiculo_id, recepcion_id=None, inspeccion=None):
-    """Cotizaciones de la empresa para el vehículo, con sus ítems cargados."""
-    from apps.cotizaciones.models import Cotizacion
-
-    queryset = Cotizacion.objects.filter(empresa_id=empresa_id)
-    if vehiculo_id:
-        queryset = queryset.filter(vehiculo_id=vehiculo_id)
-    elif recepcion_id:
-        queryset = queryset.filter(
-            Q(inspeccion_origen=inspeccion) | Q(recepcion_origen=recepcion_id)
-        )
-    else:
-        queryset = queryset.none()
-    return list(
-        queryset.select_related('cliente')
-        .prefetch_related('servicios', 'repuestos')
-        .order_by('-created_at', '-id')
-    )
 
 
 class OrdenTrabajoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
@@ -365,35 +281,6 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'recepcion')
 
-    @action(detail=True, methods=['get'], url_path='cotizaciones-candidatas')
-    def cotizaciones_candidatas(self, request, pk=None):
-        """Cotizaciones del vehículo antes de crear la inspección.
-
-        La pantalla de creación necesita mostrarlas para que el usuario elija
-        cuáles se cargan como trabajo acordado, en lugar de atar sola la
-        cotización vigente más reciente.
-        """
-        recepcion = self.get_object()
-        cotizaciones = _cotizaciones_del_vehiculo(
-            recepcion.empresa_id, recepcion.vehiculo_id, recepcion_id=recepcion.id
-        )
-        grupos = _clasificar_cotizaciones_candidatas(cotizaciones, recepcion=recepcion)
-        return Response(
-            {
-                'recepcion': {
-                    'id': recepcion.id,
-                    'numero': recepcion.numero_recepcion,
-                    'estado': recepcion.estado,
-                },
-                'vehiculo': {
-                    'id': recepcion.vehiculo_id,
-                    'placa': getattr(recepcion.vehiculo, 'placa', '') if recepcion.vehiculo_id else '',
-                },
-                'tieneInspeccion': recepcion.inspecciones.exists(),
-                **grupos,
-            }
-        )
-
     @action(detail=True, methods=['post'], url_path='crear-inspeccion')
     def crear_inspeccion(self, request, pk=None):
         recepcion = self.get_object()
@@ -425,70 +312,10 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         serializer = InspeccionVehiculoSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         inspeccion = serializer.save()
-        # La inspección hereda cliente/vehículo del serializer; además se ata a las
-        # cotizaciones que el usuario eligió y arranca con sus ítems copiados,
-        # para que el técnico solo tenga que agregar lo que encuentre. Sin
-        # selección explícita se conserva la cotización vigente más reciente.
-        self._conectar_cotizaciones_seleccionadas(request, recepcion, inspeccion)
         return Response(
             InspeccionVehiculoSerializer(inspeccion, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
-
-    @staticmethod
-    def _conectar_cotizaciones_seleccionadas(request, recepcion, inspeccion):
-        """Ata las cotizaciones marcadas por el usuario y siembra sus ítems."""
-        from apps.cotizaciones.models import Cotizacion
-        from apps.cotizaciones.services import conectar_inspeccion, sembrar_inspeccion_desde_cotizacion, vincular_cotizacion
-
-        ids = request.data.get('cotizaciones')
-        # Sin el parámetro se conserva el vínculo automático histórico; una lista
-        # vacía significa que el usuario revisó las cotizaciones y no eligió
-        # ninguna, así que la inspección nace sin ítems cotizados.
-        if ids is None or ids == '':
-            conectar_inspeccion(inspeccion)
-            return []
-
-        if not isinstance(ids, list):
-            raise serializers.ValidationError(
-                {'cotizaciones': 'Envía la lista de ids de cotizaciones a relacionar.'}
-            )
-
-        candidatas = _cotizaciones_del_vehiculo(
-            recepcion.empresa_id, recepcion.vehiculo_id, recepcion_id=recepcion.id
-        )
-        por_id = {cotizacion.id: cotizacion for cotizacion in candidatas}
-
-        conectadas = []
-        for valor in ids:
-            try:
-                cotizacion_id = int(valor)
-            except (TypeError, ValueError):
-                raise serializers.ValidationError({'cotizaciones': f'Id de cotización inválido: {valor!r}.'})
-            cotizacion = por_id.get(cotizacion_id)
-            if cotizacion is None:
-                raise serializers.ValidationError(
-                    {'cotizaciones': f'La cotización {cotizacion_id} no pertenece al vehículo de esta recepción.'}
-                )
-            # Una cotización se considera "convertida" si tiene una orden de trabajo asociada
-            if cotizacion.orden_trabajo_origen_id or OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).exists():
-                raise serializers.ValidationError(
-                    {'cotizaciones': f'{cotizacion.numero_cotizacion} ya está convertida en orden de trabajo.'}
-                )
-            if cotizacion.inspeccion_origen_id and cotizacion.inspeccion_origen_id != inspeccion.id:
-                raise serializers.ValidationError(
-                    {'cotizaciones': f'{cotizacion.numero_cotizacion} ya está ligada a otra inspección.'}
-                )
-            if cotizacion.recepcion_origen_id and cotizacion.recepcion_origen_id != recepcion.id:
-                raise serializers.ValidationError(
-                    {'cotizaciones': f'{cotizacion.numero_cotizacion} está ligada a otra recepción.'}
-                )
-            vincular_cotizacion(cotizacion, recepcion=recepcion, inspeccion=inspeccion)
-            # Se siembran todas las seleccionadas, no solo la primera, por eso
-            # la siembra no se limita a una inspección vacía.
-            sembrar_inspeccion_desde_cotizacion(cotizacion, inspeccion, solo_si_vacia=False)
-            conectadas.append(cotizacion)
-        return conectadas
 
 
 class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
@@ -580,126 +407,6 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     def relaciones(self, request, pk=None):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'inspeccion')
-
-    @staticmethod
-    def _vincular_cotizacion_inspeccion(cotizacion, inspeccion):
-        """Liga la cotización con la inspección y con su recepción de origen."""
-        campos = []
-        if cotizacion.inspeccion_origen_id != inspeccion.id:
-            cotizacion.inspeccion_origen = inspeccion
-            campos.append('inspeccion_origen')
-        if inspeccion.recepcion_id and cotizacion.recepcion_origen_id != inspeccion.recepcion_id:
-            cotizacion.recepcion_origen_id = inspeccion.recepcion_id
-            campos.append('recepcion_origen')
-        if campos:
-            cotizacion.save(update_fields=[*campos, 'updated_at'])
-
-    @action(detail=True, methods=['get', 'post'], url_path='cotizaciones-candidatas')
-    def cotizaciones_candidatas(self, request, pk=None):
-        """Cotizaciones del vehículo para decidir el flujo de la inspección.
-
-        No se limita a las cotizaciones ya ligadas a la inspección: también
-        expone las aceptadas antes de la visita, que de otro modo el usuario
-        no vería al momento de cotizar.
-        """
-        from apps.cotizaciones.models import Cotizacion
-
-        inspeccion = self.get_object()
-        vehiculo_id = inspeccion.vehiculo_id or (
-            inspeccion.recepcion.vehiculo_id if inspeccion.recepcion_id else None
-        )
-        cotizaciones = _cotizaciones_del_vehiculo(
-            inspeccion.empresa_id,
-            vehiculo_id,
-            recepcion_id=inspeccion.recepcion_id,
-            inspeccion=inspeccion,
-        )
-
-        if request.method == 'GET':
-            existentes = [c for c in cotizaciones if c.inspeccion_origen_id == inspeccion.id]
-            grupos = _clasificar_cotizaciones_candidatas(cotizaciones, inspeccion=inspeccion)
-            return Response(
-                {
-                    'inspeccion': {
-                        'id': inspeccion.id,
-                        'numero': inspeccion.numero_inspeccion,
-                        'estado': inspeccion.estado,
-                        'tieneRecepcion': bool(inspeccion.recepcion_id),
-                    },
-                    'vehiculo': {
-                        'id': vehiculo_id,
-                        'placa': getattr(inspeccion.vehiculo, 'placa', '') if inspeccion.vehiculo_id else '',
-                    },
-                    'cotizacionActivaId': existentes[0].id if existentes else None,
-                    **grupos,
-                }
-            )
-
-        accion = (request.data.get('accion') or 'vincular').strip().lower()
-        if accion not in ('vincular', 'desvincular'):
-            raise serializers.ValidationError({'accion': 'Usa "vincular" o "desvincular".'})
-        ids = request.data.get('cotizaciones')
-        if not isinstance(ids, list) or not ids:
-            raise serializers.ValidationError(
-                {'cotizaciones': 'Envía la lista de ids de cotizaciones a relacionar.'}
-            )
-        if inspeccion.orden_trabajo_id:
-            raise serializers.ValidationError(
-                {'detail': 'La inspección ya se convirtió en orden de trabajo.'}
-            )
-
-        resultados = []
-        for valor in ids:
-            try:
-                cotizacion_id = int(valor)
-            except (TypeError, ValueError):
-                raise serializers.ValidationError({'cotizaciones': f'Id de cotización inválido: {valor!r}.'})
-            cotizacion = next((c for c in cotizaciones if c.id == cotizacion_id), None)
-            if cotizacion is None:
-                raise serializers.ValidationError(
-                    {'id': f'La cotización {cotizacion_id} no existe para el vehículo de la inspección.'}
-                )
-            if accion == 'vincular':
-                # Una cotización se considera "convertida" si tiene una orden de trabajo asociada
-                if cotizacion.orden_trabajo_origen_id or OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).exists():
-                    raise serializers.ValidationError(
-                        {'detail': f'{cotizacion.numero_cotizacion} ya está convertida en orden de trabajo.'}
-                    )
-                if (
-                    cotizacion.recepcion_origen_id
-                    and cotizacion.recepcion_origen_id != inspeccion.recepcion_id
-                ):
-                    raise serializers.ValidationError(
-                        {
-                            'detail': (
-                                f'{cotizacion.numero_cotizacion} está ligada a otra recepción. '
-                                'Desvincúlala primero.'
-                            )
-                        }
-                    )
-                if cotizacion.inspeccion_origen_id and cotizacion.inspeccion_origen_id != inspeccion.id:
-                    raise serializers.ValidationError(
-                        {'detail': f'{cotizacion.numero_cotizacion} ya está ligada a otra inspección.'}
-                    )
-                self._vincular_cotizacion_inspeccion(cotizacion, inspeccion)
-                resultados.append({'id': cotizacion.id, 'vinculada': True})
-            else:
-                campos = []
-                if cotizacion.inspeccion_origen_id == inspeccion.id:
-                    cotizacion.inspeccion_origen = None
-                    campos.append('inspeccion_origen')
-                if inspeccion.recepcion_id and cotizacion.recepcion_origen_id == inspeccion.recepcion_id:
-                    cotizacion.recepcion_origen = None
-                    campos.append('recepcion_origen')
-                if not campos:
-                    raise serializers.ValidationError(
-                        {'detail': f'{cotizacion.numero_cotizacion} no está relacionada con esta inspección.'}
-                    )
-                cotizacion.save(update_fields=[*campos, 'updated_at'])
-                resultados.append({'id': cotizacion.id, 'vinculada': False})
-
-        return Response({'ok': True, 'accion': accion, 'resultados': resultados})
-
 
 class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
     serializer_class = DetalleServicioInspeccionSerializer
