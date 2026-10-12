@@ -594,6 +594,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         rep['estado_display'] = instance.get_estado_display()
+        rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
         if instance.orden_trabajo_id:
             rep['orden_trabajo_estado'] = instance.orden_trabajo.estado
             rep['orden_trabajo_estado_display'] = instance.orden_trabajo.get_estado_display()
