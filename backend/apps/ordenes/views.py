@@ -321,6 +321,45 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
             instance.estado = 'PENDIENTE'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
 
+    @action(detail=True, methods=['post'], url_path='firmar')
+    def firmar(self, request, pk=None):
+        """Registra la firma del cliente y deja la recepción como ACEPTADA.
+
+        Cubre dos casos: una recepción PENDIENTE sin firma y una NO_ACEPTADA
+        cuando el cliente cambia de opinión. La transición es directa a
+        ACEPTADA (nunca pasa por PENDIENTE) y es atómica.
+        """
+        recepcion = self.get_object()
+        if recepcion.estado not in ('PENDIENTE', 'NO_ACEPTADA'):
+            return Response(
+                {'detail': 'Solo se puede firmar una recepción pendiente o no aceptada.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        firma = request.data.get('firma_cliente')
+        if not firma or not str(firma).startswith('data:image'):
+            return Response(
+                {'firma_cliente': 'La firma del cliente es obligatoria.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        recepcion.firma_cliente = firma
+        recepcion.aceptacion_condiciones = True
+        recepcion.fecha_firma_cliente = timezone.now()
+        recepcion.estado = 'ACEPTADA'
+        recepcion.motivo_no_recepcion = ''
+        recepcion.save(update_fields=[
+            'firma_cliente',
+            'aceptacion_condiciones',
+            'fecha_firma_cliente',
+            'estado',
+            'motivo_no_recepcion',
+            'updated_at',
+        ])
+        self._sincronizar_kilometraje_vehiculo(recepcion)
+
+        return Response(self.get_serializer(recepcion).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['get', 'post'], url_path='relaciones')
     def relaciones(self, request, pk=None):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""

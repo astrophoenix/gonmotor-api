@@ -1917,6 +1917,89 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         self.assertEqual(detalle.status_code, 200, detalle.content)
 
 
+class RecepcionFirmarApiTests(TestCase):
+    """Re-firma de una recepción NO_ACEPTADA: el cliente cambia de opinión y la
+    firma la deja directamente como ACEPTADA (nunca pasa por PENDIENTE)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+        from .models import RecepcionVehiculo, TipoTrabajo
+
+        self.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Firma', ruc='555555555555'
+        )
+        self.taller = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Firma',
+            codigo_sucursal='001', prefijo_recepcion='REC-',
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Cliente Firma', identificacion='1799999999'
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            placa='FIR-1234', marca='Chevrolet', modelo='Spark'
+        )
+        self.vehiculo.empresas.add(self.empresa)
+
+        self.recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa,
+            sucursal=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            tipo_recepcion=TipoTrabajo.MANTENIMIENTO,
+            estado='NO_ACEPTADA',
+            motivo_no_recepcion='El cliente no firmó',
+        )
+
+        usuario = get_user_model().objects.create_superuser(
+            username='firma-test', email='firma-test@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.pk)
+
+    def _url(self, pk=None):
+        return f'/api/recepciones/{pk or self.recepcion.pk}/firmar/'
+
+    def test_firma_no_aceptada_pasa_directo_a_aceptada(self):
+        respuesta = self.client.post(
+            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+        )
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.estado, 'ACEPTADA')
+        self.assertTrue(self.recepcion.aceptacion_condiciones)
+        self.assertIsNotNone(self.recepcion.fecha_firma_cliente)
+        self.assertEqual(self.recepcion.firma_cliente, 'data:image/png;base64,AAAA')
+        self.assertFalse(self.recepcion.motivo_no_recepcion)
+        self.assertEqual(respuesta.data['estado'], 'ACEPTADA')
+
+    def test_no_permite_firmar_sin_firma(self):
+        respuesta = self.client.post(self._url(), {}, format='json')
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.estado, 'NO_ACEPTADA')
+
+    def test_no_permite_firmar_una_recepcion_ya_aceptada(self):
+        self.recepcion.estado = 'ACEPTADA'
+        self.recepcion.aceptacion_condiciones = True
+        self.recepcion.save(update_fields=['estado', 'aceptacion_condiciones'])
+
+        respuesta = self.client.post(
+            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+        )
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+
+
 class BackfillSucursalDocumentosTests(TestCase):
     """La migración de backfill asigna taller a los documentos huérfanos
     (creados cuando el API no persistía la sucursal)."""
