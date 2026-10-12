@@ -5,7 +5,10 @@ from rest_framework import serializers
 
 from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.permisos_repo import nombre_rol
-from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.utils import (
+    get_empresa_id_desde_request,
+    get_taller_desde_request,
+)
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import (
@@ -320,9 +323,11 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
             sucursal = validated_data.get('sucursal')
             if sucursal is None and recepcion is not None and recepcion.sucursal_id:
                 sucursal = recepcion.sucursal
+            if sucursal is None:
+                sucursal = get_taller_desde_request(request, empresa_id=empresa_id)
             taller = resolver_taller(empresa_id, sucursal)
             if taller is not None:
-                validated_data.setdefault('sucursal', taller)
+                validated_data['sucursal'] = taller
                 validated_data['numero_inspeccion'] = generar_codigo_secuencial(taller, 'inspeccion')
             if recepcion is not None:
                 if validated_data.get('cliente') is None and recepcion.cliente_id:
@@ -718,9 +723,11 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             if not validated_data.get('recibido_por') and request.user.is_authenticated:
                 validated_data['recibido_por'] = request.user
             sucursal = validated_data.get('sucursal')
+            if sucursal is None:
+                sucursal = get_taller_desde_request(request, empresa_id=empresa_id)
             taller = resolver_taller(empresa_id, sucursal)
             if taller is not None:
-                validated_data.setdefault('sucursal', taller)
+                validated_data['sucursal'] = taller
                 validated_data['numero_recepcion'] = generar_codigo_secuencial(taller, 'recepcion')
             fotos = self._recolectar_fotos(request)
         if validated_data.get('estado') != 'NO_ACEPTADA':
@@ -945,8 +952,10 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             if empresa_id:
                 validated_data['empresa_id'] = empresa_id
             sucursal = validated_data.get('sucursal')
+            if sucursal is None:
+                sucursal = get_taller_desde_request(request, empresa_id=empresa_id)
             taller = resolver_taller(empresa_id, sucursal)
             if taller is not None:
-                validated_data.setdefault('sucursal', taller)
+                validated_data['sucursal'] = taller
                 validated_data['numero_orden'] = generar_codigo_secuencial(taller, 'ot')
         return super().create(validated_data)

@@ -4,7 +4,10 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from rest_framework import serializers
 
-from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.utils import (
+    get_empresa_id_desde_request,
+    get_taller_desde_request,
+)
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
@@ -243,9 +246,11 @@ class CotizacionSerializer(serializers.ModelSerializer):
                 orden = validated_data.get('orden_trabajo_origen')
                 if orden is not None and orden.sucursal_id:
                     sucursal = orden.sucursal
+            if sucursal is None:
+                sucursal = get_taller_desde_request(request, empresa_id=empresa_id)
             taller = resolver_taller(empresa_id, sucursal)
             if taller is not None:
-                validated_data.setdefault('sucursal', taller)
+                validated_data['sucursal'] = taller
                 validated_data['numero_cotizacion'] = generar_codigo_secuencial(taller, 'cotizacion')
         cotizacion = super().create(validated_data)
         inspeccion = validated_data.get('inspeccion_origen')

@@ -1844,3 +1844,159 @@ class CrearInspeccionCotizacionesElegidasTests(TestCase):
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertIn('otra recepción', str(respuesta.data['cotizaciones']).lower())
+
+
+class RecepcionCreadaConTallerActivoTests(TestCase):
+    """Al crear una recepción, la sucursal debe ser el taller activo de la sesión
+    (``X-Taller-ID``), no el primer taller de la empresa. Si se guarda con otro
+    taller, el filtro estricto por taller la excluye y el detalle recién creado
+    devuelve 404 ("No RecepcionVehiculo matches the given query")."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+        from .models import RecepcionVehiculo, TipoTrabajo
+
+        self.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Activo', ruc='444444444444'
+        )
+        # El primer taller (por id) NO es el activo: reproduce el bug original.
+        self.taller_primero = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Uno',
+            codigo_sucursal='001', prefijo_recepcion='REC-',
+        )
+        self.taller_activo = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Dos',
+            codigo_sucursal='002', prefijo_recepcion='REC-',
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Cliente Activo', identificacion='1712345678'
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            placa='ACT-1234', marca='Chevrolet', modelo='Aveo'
+        )
+        self.vehiculo.empresas.add(self.empresa)
+
+        usuario = get_user_model().objects.create_superuser(
+            username='taller-activo', email='taller-activo@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.pk)
+        self.tipo = TipoTrabajo.MANTENIMIENTO
+
+    def _payload(self):
+        return {
+            'cliente': self.cliente.id,
+            'vehiculo': self.vehiculo.id,
+            'tipo_recepcion': self.tipo,
+            'estado': 'NO_ACEPTADA',
+            'motivo_no_recepcion': 'El cliente no desea firmar',
+        }
+
+    def test_crea_con_el_taller_activo(self):
+        from .models import RecepcionVehiculo
+
+        respuesta = self.client.post('/api/recepciones/', self._payload(), format='json')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        creada = RecepcionVehiculo.objects.get(pk=respuesta.data['id'])
+        self.assertEqual(creada.sucursal_id, self.taller_activo.pk)
+        self.assertNotEqual(creada.sucursal_id, self.taller_primero.pk)
+
+    def test_el_detalle_del_registro_creado_es_visible_en_el_taller_activo(self):
+        creada = self.client.post('/api/recepciones/', self._payload(), format='json').data
+
+        detalle = self.client.get(f"/api/recepciones/{creada['id']}/")
+
+        self.assertEqual(detalle.status_code, 200, detalle.content)
+
+
+class BackfillSucursalDocumentosTests(TestCase):
+    """La migración de backfill asigna taller a los documentos huérfanos
+    (creados cuando el API no persistía la sucursal)."""
+
+    def _run_migration(self, modulo, nombre):
+        import importlib
+
+        from django.apps import apps as django_apps
+
+        migracion = importlib.import_module(modulo)
+        getattr(migracion, nombre)(django_apps, None)
+
+    def setUp(self):
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+        from .models import InspeccionVehiculo, OrdenTrabajo, RecepcionVehiculo
+
+        self.empresa = Empresa.objects.create(
+            nombre_comercial='Backfill', ruc='333333333333'
+        )
+        self.taller_a = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller A', codigo_sucursal='001',
+        )
+        self.taller_b = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller B', codigo_sucursal='002',
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Cliente Huérfano'
+        )
+        self.vehiculo = Vehiculo.objects.create(placa='ORF-0001', marca='Kia', modelo='Rio')
+
+        self.recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=None, cliente=self.cliente,
+            vehiculo=self.vehiculo, numero_recepcion='REC-00001',
+        )
+        self.inspeccion_con_recepcion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=None, cliente=self.cliente,
+            vehiculo=self.vehiculo, recepcion=self.recepcion,
+            numero_inspeccion='INS-00001',
+        )
+        self.inspeccion_suelta = InspeccionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=None, cliente=self.cliente,
+            vehiculo=self.vehiculo, recepcion=None, numero_inspeccion='INS-00002',
+        )
+        self.orden = OrdenTrabajo.objects.create(
+            empresa=self.empresa, sucursal=None, cliente=self.cliente,
+            vehiculo=self.vehiculo, numero_orden='OT-00001',
+        )
+
+    def test_backfill_ordenes_asigna_taller_por_defecto_y_hereda_recepcion(self):
+        from .models import RecepcionVehiculo
+
+        self._run_migration(
+            'apps.ordenes.migrations.0046_backfill_sucursal_documentos',
+            'asignar_sucursal',
+        )
+
+        for documento in (self.recepcion, self.inspeccion_suelta, self.orden):
+            documento.refresh_from_db()
+            self.assertEqual(documento.sucursal_id, self.taller_a.pk)
+        self.inspeccion_con_recepcion.refresh_from_db()
+        self.assertEqual(self.inspeccion_con_recepcion.sucursal_id, self.taller_a.pk)
+
+    def test_backfill_cotizacion_hereda_del_origen(self):
+        from apps.cotizaciones.models import Cotizacion
+
+        # El origen ya tiene taller B: la cotización debe heredarlo, no el default.
+        self.recepcion.sucursal = self.taller_b
+        self.recepcion.save(update_fields=['sucursal'])
+        cotizacion = Cotizacion.objects.create(
+            empresa=self.empresa, sucursal=None, cliente=self.cliente,
+            vehiculo=self.vehiculo, recepcion_origen=self.recepcion,
+            numero_cotizacion='COT-00001',
+        )
+
+        self._run_migration(
+            'apps.cotizaciones.migrations.0019_backfill_sucursal_desde_origen',
+            'asignar_sucursal',
+        )
+
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.sucursal_id, self.taller_b.pk)
