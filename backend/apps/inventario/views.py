@@ -15,8 +15,12 @@ from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
-from .models import Repuesto, Servicio
-from .serializers import RepuestoSerializer, ServicioSerializer
+from .models import Repuesto, RepuestoImagen, Servicio
+from .serializers import (
+    RepuestoImagenSerializer,
+    RepuestoSerializer,
+    ServicioSerializer,
+)
 from apps.authentication.permissions import TieneRecurso
 
 
@@ -56,7 +60,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         if self.request.query_params.get('stock_bajo', 'false').lower() == 'true':
             queryset = queryset.filter(stock_actual__lte=F('stock_minimo'))
 
-        return queryset
+        return queryset.prefetch_related('imagenes')
 
     @action(detail=False, methods=['get'])
     def opciones(self, request):
@@ -75,6 +79,34 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             'iva_porcentaje_defecto': str(item.iva_porcentaje_defecto),
         } for item in items]
         return Response({'results': data})
+
+
+class RepuestoImagenViewSet(viewsets.ModelViewSet):
+    serializer_class = RepuestoImagenSerializer
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
+
+    filter_backends = [filters.OrderingFilter]
+    ordering = ['-es_principal', 'created_at', 'id']
+
+    def get_queryset(self):
+        empresa_id = get_empresa_id_desde_request(self.request)
+        if not empresa_id:
+            return RepuestoImagen.objects.none()
+
+        queryset = RepuestoImagen.objects.filter(
+            repuesto__empresa_id=empresa_id
+        ).select_related('repuesto')
+
+        repuesto_id = self.request.query_params.get('repuesto')
+        if repuesto_id:
+            queryset = queryset.filter(repuesto_id=repuesto_id)
+
+        return queryset
+
+    def perform_destroy(self, instance):
+        repuesto_id = instance.repuesto_id
+        instance.delete()
+        RepuestoImagen.asegurar_principal(repuesto_id)
 
 
 class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):

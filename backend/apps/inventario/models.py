@@ -143,6 +143,76 @@ class Repuesto(BaseModel):
         super().save(*args, **kwargs)
 
 
+class RepuestoImagen(models.Model):
+    """Imagen asociada a un repuesto (mínimo 1, máximo 3 por repuesto).
+
+    Una y solo una imagen por repuesto es la principal (`es_principal`); es la
+    que se muestra como foto representativa del repuesto en el listado.
+    """
+
+    MAX_IMAGENES = 3
+    TIPOS_PERMITIDOS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+
+    repuesto = models.ForeignKey(
+        Repuesto,
+        on_delete=models.CASCADE,
+        related_name='imagenes',
+        verbose_name='Repuesto',
+    )
+    imagen = models.ImageField(
+        upload_to='repuestos/imagenes/',
+        verbose_name='Imagen',
+        help_text='JPG, PNG o WebP. Máximo 5MB.',
+    )
+    es_principal = models.BooleanField(
+        default=False,
+        verbose_name='Imagen principal',
+        help_text='Solo una imagen por repuesto puede ser la principal.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de creación')
+
+    class Meta:
+        verbose_name = 'Imagen de Repuesto'
+        verbose_name_plural = 'Imágenes de Repuestos'
+        ordering = ['-es_principal', 'created_at', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['repuesto'],
+                condition=models.Q(es_principal=True),
+                name='una_imagen_principal_por_repuesto',
+            )
+        ]
+
+    def __str__(self):
+        return f'Repuesto #{self.repuesto_id} - imagen {self.pk}'
+
+    def save(self, *args, **kwargs):
+        # Garantiza una única imagen principal por repuesto y que siempre
+        # exista una principal cuando el repuesto tiene imágenes.
+        if self.es_principal and self.repuesto_id:
+            RepuestoImagen.objects.filter(
+                repuesto_id=self.repuesto_id, es_principal=True
+            ).exclude(pk=self.pk).update(es_principal=False)
+        super().save(*args, **kwargs)
+        if self.repuesto_id and not RepuestoImagen.objects.filter(
+            repuesto_id=self.repuesto_id, es_principal=True
+        ).exists():
+            RepuestoImagen.objects.filter(pk=self.pk).update(es_principal=True)
+            self.es_principal = True
+
+    @classmethod
+    def asegurar_principal(cls, repuesto_id):
+        """Promueve la imagen más antigua como principal si quedó sin ninguna."""
+        if not repuesto_id:
+            return
+        if cls.objects.filter(repuesto_id=repuesto_id, es_principal=True).exists():
+            return
+        primera = cls.objects.filter(repuesto_id=repuesto_id).order_by('created_at', 'id').first()
+        if primera:
+            primera.es_principal = True
+            primera.save(update_fields=['es_principal'])
+
+
 class Servicio(BaseModel):
     """Servicio / mano de obra del taller (catálogo de tareas estándar).
 

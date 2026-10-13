@@ -2,7 +2,59 @@ from rest_framework import serializers
 
 from apps.authentication.utils import get_empresa_id_desde_request
 
-from .models import Repuesto, Servicio
+from .models import Repuesto, RepuestoImagen, Servicio
+
+
+def url_imagen_absoluta(request, url):
+    """Convierte una URL relativa de archivo en absoluta (basada en el Host de la API)."""
+    if not url:
+        return None
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
+class RepuestoImagenSerializer(serializers.ModelSerializer):
+    MAX_BYTES = 5 * 1024 * 1024
+
+    class Meta:
+        model = RepuestoImagen
+        fields = ['id', 'repuesto', 'imagen', 'es_principal', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def validate_imagen(self, imagen):
+        if imagen is None:
+            raise serializers.ValidationError('La imagen es obligatoria.')
+        if imagen.size > self.MAX_BYTES:
+            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
+        if imagen.content_type not in RepuestoImagen.TIPOS_PERMITIDOS:
+            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
+        return imagen
+
+    def validate(self, attrs):
+        repuesto = attrs.get('repuesto') or getattr(self.instance, 'repuesto', None)
+        if repuesto is None:
+            return attrs
+
+        request = self.context.get('request')
+        empresa_id = get_empresa_id_desde_request(request)
+        if empresa_id and repuesto.empresa_id != empresa_id:
+            raise serializers.ValidationError(
+                {'repuesto': 'El repuesto no pertenece a tu empresa.'}
+            )
+
+        if self.instance is None or self.instance.repuesto_id != repuesto.id:
+            if repuesto.imagenes.count() >= RepuestoImagen.MAX_IMAGENES:
+                raise serializers.ValidationError(
+                    {'repuesto': f'Solo se permiten hasta {RepuestoImagen.MAX_IMAGENES} imágenes por repuesto.'}
+                )
+        return attrs
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        request = self.context.get('request')
+        rep['imagen'] = url_imagen_absoluta(request, rep.get('imagen'))
+        return rep
 
 
 class _CatalogoUnicoMixin:
@@ -67,6 +119,8 @@ class _CatalogoUnicoMixin:
 
 class RepuestoSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
     stock_bajo = serializers.BooleanField(read_only=True)
+    imagenes = RepuestoImagenSerializer(many=True, read_only=True)
+    imagen_principal = serializers.SerializerMethodField()
 
     class Meta:
         model = Repuesto
@@ -90,11 +144,22 @@ class RepuestoSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
             'proveedor',
             'contifico_producto_id',
             'contifico_cuenta_contable',
+            'imagenes',
+            'imagen_principal',
             'is_active',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'empresa', 'stock_bajo', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'empresa', 'stock_bajo', 'imagenes', 'imagen_principal', 'created_at', 'updated_at']
+
+    def get_imagen_principal(self, obj):
+        # El ordering del modelo deja primero la principal (si existe), así que
+        # el primer elemento del prefetch ya es la imagen representativa.
+        principal = next(iter(obj.imagenes.all()), None)
+        if not principal or not principal.imagen:
+            return None
+        request = self.context.get('request')
+        return url_imagen_absoluta(request, principal.imagen.url)
 
     def validate(self, attrs):
         self._validar_codigo_unico(Repuesto)
