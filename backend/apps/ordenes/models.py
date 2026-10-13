@@ -163,11 +163,23 @@ class DetalleServicioOrdenTrabajo(models.Model):
     mecanico_asignado = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Técnico que ejecutó el servicio')
     horas_aplicadas = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('1.00'))
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=10,decimal_places=2,default=Decimal('0.00'))
+    costo_total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    margen_linea = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
     iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal('0.1500'))
     monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     completado = models.BooleanField(default=False)
+    servicio = models.ForeignKey(
+        'inventario.Servicio',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='detalles_ot',
+        verbose_name='Servicio del catálogo',
+    )
+    servicio_codigo = models.CharField(max_length=50, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # 1. Calcular el bruto total de la línea
@@ -176,6 +188,8 @@ class DetalleServicioOrdenTrabajo(models.Model):
         self.subtotal = max(Decimal('0.00'), bruto_linea - Decimal(self.descuento))
         # 3. El IVA se calcula directamente sobre el subtotal neto de la línea
         self.monto_iva = (self.subtotal * self.iva_porcentaje).quantize(Decimal('0.01'))
+        self.costo_total = (Decimal(self.horas_aplicadas) * Decimal(self.costo_unitario)).quantize(Decimal('0.01'))
+        self.margen_linea = (self.subtotal - self.costo_total).quantize(Decimal('0.01'))
         super().save(*args, **kwargs)
 
 
@@ -191,12 +205,14 @@ class DetalleRepuestoOrdenTrabajo(models.Model):
     codigo_repuesto = models.CharField(max_length=50, blank=True, null=True)
     descripcion = models.CharField(max_length=255, verbose_name='Descripción del Repuesto')
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    costo_total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    margen_linea = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     cantidad = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1.00'))
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
     iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal('0.1500'))
     monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    
 
     def save(self, *args, **kwargs):
         # 1. Calcular el bruto total de la línea
@@ -207,6 +223,9 @@ class DetalleRepuestoOrdenTrabajo(models.Model):
 
         # 3. El IVA se calcula directamente sobre el subtotal neto de la línea
         self.monto_iva = (self.subtotal * self.iva_porcentaje).quantize(Decimal('0.01'))
+
+        self.costo_total = (Decimal(self.cantidad) * Decimal(self.costo_unitario)).quantize(Decimal('0.01'))
+        self.margen_linea = (self.subtotal - self.costo_total).quantize(Decimal('0.01'))
 
         super().save(*args, **kwargs)
 

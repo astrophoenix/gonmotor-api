@@ -10,6 +10,7 @@ from apps.authentication.utils import (
     get_taller_desde_request,
 )
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
+from apps.inventario.models import Repuesto, Servicio
 
 from .models import (
     DetalleRepuestoInspeccion,
@@ -40,17 +41,48 @@ class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'orden_trabajo',
+            'servicio',
+            'servicio_codigo',
             'descripcion',
             'mecanico_asignado',
             'horas_aplicadas',
             'precio_unitario',
+            'costo_unitario',
+            'costo_total',
+            'margen_linea',
             'descuento',
             'iva_porcentaje',
             'monto_iva',
             'subtotal',
             'completado',
         ]
-        read_only_fields = ['id', 'subtotal', 'monto_iva']
+        read_only_fields = ['id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+
+    def _get_empresa_id(self, attrs):
+        ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
+        return ot.empresa_id if ot else None
+
+    def create(self, validated_data):
+        if 'costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None:
+            empresa_id = self._get_empresa_id(validated_data)
+            serv = None
+            if empresa_id:
+                sid = validated_data.get('servicio')
+                scode = validated_data.get('servicio_codigo')
+                if sid:
+                    serv = Servicio.objects.filter(id=sid, empresa_id=empresa_id, is_active=True).first()
+                if not serv and scode:
+                    serv = Servicio.objects.filter(empresa_id=empresa_id, codigo=scode.strip().upper(), is_active=True).first()
+            if serv:
+                validated_data['costo_unitario'] = serv.costo_referencial
+                if not validated_data.get('descripcion'):
+                    validated_data['descripcion'] = serv.nombre
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'costo_unitario' not in validated_data:
+            validated_data['costo_unitario'] = instance.costo_unitario
+        return super().update(instance, validated_data)
 
 
 class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
@@ -63,13 +95,37 @@ class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
             'codigo_repuesto',
             'descripcion',
             'precio_unitario',
+            'costo_unitario',
+            'costo_total',
+            'margen_linea',
             'cantidad',
             'descuento',
             'iva_porcentaje',
             'monto_iva',
             'subtotal',
         ]
-        read_only_fields = ['id', 'subtotal', 'monto_iva']
+        read_only_fields = ['id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+
+    def _get_empresa_id(self, attrs):
+        ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
+        return ot.empresa_id if ot else None
+
+    def create(self, validated_data):
+        if 'costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None:
+            empresa_id = self._get_empresa_id(validated_data)
+            codigo = validated_data.get('codigo_repuesto')
+            if empresa_id and codigo:
+                rep = Repuesto.objects.filter(
+                    empresa_id=empresa_id, codigo=codigo.strip().upper(), is_active=True
+                ).first()
+                if rep:
+                    validated_data['costo_unitario'] = rep.costo_referencial
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'costo_unitario' not in validated_data:
+            validated_data['costo_unitario'] = instance.costo_unitario
+        return super().update(instance, validated_data)
 
 
 class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):

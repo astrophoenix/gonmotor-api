@@ -259,6 +259,13 @@ class Servicio(BaseModel):
         default=Decimal('0.00'),
         verbose_name='Precio referencial de mano de obra',
     )
+    costo_referencial = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Costo referencial (mano de obra)',
+        help_text='Costo interno estimado para cálculo de margen',
+    )
     iva_porcentaje_defecto = models.DecimalField(
         max_digits=5, 
         decimal_places=4, 

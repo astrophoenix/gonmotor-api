@@ -59,6 +59,8 @@ INSTALLED_APPS = [
     'apps.configuracion',
     'apps.notificaciones',
     'apps.proveedores',
+    'apps.gastos',
+    'apps.reportes',
 ]
 
 LOCALE_PATHS = [
@@ -289,4 +291,5 @@ WHATSAPP_TWILIO_FROM_NUMBER = config(
 
 # Meta WhatsApp Cloud API (modo de pruebas de desarrollador)
 WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')
-WHATSAPP_META_PHONE_NUMBER_ID = config('WHATSAPP_META_PHONE_NUMBER_ID', default='')
+
+
