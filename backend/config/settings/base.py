@@ -285,9 +285,7 @@ WHATSAPP_MOCK_LOG_FILE = config('WHATSAPP_MOCK_LOG_FILE', default='logs/whatsapp
 # Twilio Sandbox (https://www.twilio.com — crédito de prueba gratuito)
 WHATSAPP_TWILIO_ACCOUNT_SID = config('WHATSAPP_TWILIO_ACCOUNT_SID', default='')
 WHATSAPP_TWILIO_AUTH_TOKEN = config('WHATSAPP_TWILIO_AUTH_TOKEN', default='')
-WHATSAPP_TWILIO_FROM_NUMBER = config(
-    'WHATSAPP_TWILIO_FROM_NUMBER', default='whatsapp:+14155238886'
-)
+WHATSAPP_TWILIO_FROM_NUMBER = config('WHATSAPP_TWILIO_FROM_NUMBER', default='whatsapp:+14155238886')
 
 # Meta WhatsApp Cloud API (modo de pruebas de desarrollador)
 WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')

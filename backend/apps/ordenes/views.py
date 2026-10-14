@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
@@ -12,6 +13,8 @@ from apps.authentication.permissions import TieneRecurso
 from apps.core.mixins import FiltroTallerMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     DetalleRepuestoInspeccion,
@@ -504,10 +507,17 @@ class FotoInspeccionViewSet(viewsets.ModelViewSet):
 
 
 def _check_orden_editable(orden):
-    if orden is not None and orden.estado == 'CANCELADO':
-        raise serializers.ValidationError(
-            'La orden de trabajo está cancelada; no se pueden modificar sus detalles.'
-        )
+    if orden is None:
+        logger.warning('_check_orden_editable called with orden=None (orden_trabajo not resolved)')
+        return
+    try:
+        if orden.estado == 'CANCELADO':
+            raise serializers.ValidationError(
+                'La orden de trabajo está cancelada; no se pueden modificar sus detalles.'
+            )
+    except OrdenTrabajo.DoesNotExist:
+        logger.error('_check_orden_editable: OrdenTrabajo.DoesNotExist for pk=%s', getattr(orden, 'pk', orden))
+        raise
 
 
 class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
@@ -529,8 +539,21 @@ class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        _check_orden_editable(serializer.validated_data.get('orden_trabajo'))
-        super().perform_create(serializer)
+        try:
+            _check_orden_editable(serializer.validated_data.get('orden_trabajo'))
+            super().perform_create(serializer)
+        except OrdenTrabajo.DoesNotExist:
+            empresa_id = get_empresa_id_desde_request(self.request)
+            logger.error(
+                'FotoOrdenTrabajoViewSet.perform_create: OrdenTrabajo.DoesNotExist. '
+                'empresa_id=%s, orden_trabajo=%s, user=%s',
+                empresa_id,
+                serializer.validated_data.get('orden_trabajo'),
+                getattr(self.request.user, 'username', None),
+            )
+            raise serializers.ValidationError(
+                {'orden_trabajo': 'La orden de trabajo seleccionada no existe o no pertenece a tu empresa.'}
+            )
 
     def perform_update(self, serializer):
         _check_orden_editable(self.get_object().orden_trabajo)
@@ -562,9 +585,22 @@ class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         orden = serializer.validated_data.get('orden_trabajo')
-        _check_orden_editable(orden)
-        serializer.save()
-        orden.calcular_totales()
+        try:
+            _check_orden_editable(orden)
+            serializer.save()
+            orden.calcular_totales()
+        except OrdenTrabajo.DoesNotExist:
+            empresa_id = get_empresa_id_desde_request(self.request)
+            logger.error(
+                'DetalleServicioOrdenTrabajoViewSet.perform_create: OrdenTrabajo.DoesNotExist. '
+                'empresa_id=%s, orden_trabajo=%s, user=%s',
+                empresa_id,
+                orden,
+                getattr(self.request.user, 'username', None),
+            )
+            raise serializers.ValidationError(
+                {'orden_trabajo': 'La orden de trabajo seleccionada no existe o no pertenece a tu empresa.'}
+            )
 
     def perform_update(self, serializer):
         _check_orden_editable(self.get_object().orden_trabajo)
@@ -599,9 +635,22 @@ class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         orden = serializer.validated_data.get('orden_trabajo')
-        _check_orden_editable(orden)
-        serializer.save()
-        orden.calcular_totales()
+        try:
+            _check_orden_editable(orden)
+            serializer.save()
+            orden.calcular_totales()
+        except OrdenTrabajo.DoesNotExist:
+            empresa_id = get_empresa_id_desde_request(self.request)
+            logger.error(
+                'DetalleRepuestoOrdenTrabajoViewSet.perform_create: OrdenTrabajo.DoesNotExist. '
+                'empresa_id=%s, orden_trabajo=%s, user=%s',
+                empresa_id,
+                orden,
+                getattr(self.request.user, 'username', None),
+            )
+            raise serializers.ValidationError(
+                {'orden_trabajo': 'La orden de trabajo seleccionada no existe o no pertenece a tu empresa.'}
+            )
 
     def perform_update(self, serializer):
         _check_orden_editable(self.get_object().orden_trabajo)
