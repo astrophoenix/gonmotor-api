@@ -1470,3 +1470,31 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 			self.assertIn('ruc', empresa)
 			self.assertEqual(empresa['rol'], 'ADMIN_SISTEMA')
 
+
+
+class LoginMensajesErrorTests(EscenarioMixin, APITestCase):
+	def _login(self, username, password):
+		return self.client.post(
+			'/api/auth/login/',
+			{'username': username, 'password': password},
+			format='json',
+		)
+
+	def test_contrasena_incorrecta(self):
+		resp = self._login('ana@taller.ec', 'mala')
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('incorrectos', resp.data['detail'][0])
+
+	def test_cuenta_desactivada_con_contrasena_correcta(self):
+		self.usuario.is_active = False
+		self.usuario.save(update_fields=['is_active'])
+		resp = self._login('ana@taller.ec', 'x')
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('desactivada', resp.data['detail'][0])
+
+	def test_cuenta_desactivada_no_se_revela_sin_contrasena(self):
+		self.usuario.is_active = False
+		self.usuario.save(update_fields=['is_active'])
+		resp = self._login('ana', 'mala')
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('incorrectos', resp.data['detail'][0])

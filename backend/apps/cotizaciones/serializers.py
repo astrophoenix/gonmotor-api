@@ -138,6 +138,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'id',
             'empresa',
             'numero_cotizacion',
+            'is_active',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',

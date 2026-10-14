@@ -1369,6 +1369,15 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         self.assertEqual(creada.sucursal_id, self.taller_activo.pk)
         self.assertNotEqual(creada.sucursal_id, self.taller_primero.pk)
 
+    def test_crear_por_multipart_queda_activa(self):
+        """El formulario envía FormData sin `is_active`: no debe leerse como False."""
+        from .models import RecepcionVehiculo
+
+        respuesta = self.client.post('/api/recepciones/', self._payload(), format='multipart')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        self.assertTrue(RecepcionVehiculo.objects.get(pk=respuesta.data['id']).is_active)
+
     def test_el_detalle_del_registro_creado_es_visible_en_el_taller_activo(self):
         creada = self.client.post('/api/recepciones/', self._payload(), format='json').data
 
@@ -1543,3 +1552,70 @@ class BackfillSucursalDocumentosTests(TestCase):
 
         cotizacion.refresh_from_db()
         self.assertEqual(cotizacion.sucursal_id, self.taller_b.pk)
+
+
+class OrdenSucursalConservadaTests(TestCase):
+    """La orden toma el taller de ``X-Taller-ID`` al crearse y una edición con
+    ``sucursal: null`` no lo borra (si no, el filtro estricto la ocultaría)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+
+        self.empresa = Empresa.objects.create(nombre_comercial='Taller OT Sucursal', ruc='555555555555')
+        Taller.objects.create(empresa=self.empresa, nombre='Taller Uno', codigo_sucursal='001', prefijo_ot='OT-')
+        self.taller_activo = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Dos', codigo_sucursal='002', prefijo_ot='OT-'
+        )
+        self.cliente = Cliente.objects.create(
+            empresa=self.empresa, nombre='Cliente OT', identificacion='1712345679'
+        )
+        self.vehiculo = Vehiculo.objects.create(placa='OTS-1234', marca='Kia', modelo='Rio')
+        self.vehiculo.empresas.add(self.empresa)
+
+        usuario = get_user_model().objects.create_superuser(
+            username='ot-sucursal', email='ot-sucursal@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.pk)
+
+    def _payload(self, **extra):
+        return {
+            'sucursal': None,
+            'cliente': self.cliente.id,
+            'vehiculo': self.vehiculo.id,
+            'estado': 'PENDIENTE',
+            'prioridad': 'MEDIA',
+            'tipo_trabajo': 'MANTENIMIENTO',
+            **extra,
+        }
+
+    def test_crear_sin_sucursal_usa_el_taller_activo(self):
+        from .models import OrdenTrabajo
+
+        resp = self.client.post('/api/ordenes/ordenes-trabajo/', self._payload(), format='json')
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(OrdenTrabajo.objects.get(pk=resp.data['id']).sucursal_id, self.taller_activo.pk)
+
+    def test_editar_con_sucursal_null_conserva_el_taller(self):
+        from .models import OrdenTrabajo
+
+        creada = self.client.post('/api/ordenes/ordenes-trabajo/', self._payload(), format='json').data
+
+        resp = self.client.put(
+            f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
+            self._payload(observaciones='Editada'),
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        orden = OrdenTrabajo.objects.get(pk=creada['id'])
+        self.assertEqual(orden.sucursal_id, self.taller_activo.pk)
+        self.assertEqual(orden.observaciones, 'Editada')

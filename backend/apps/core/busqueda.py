@@ -12,6 +12,10 @@ Decisiones:
   relevantes/ordenadas) para mantener la respuesta ligera.
 - El `tipo` y el `id` son lo mínimo que necesita el frontend para construir la
   URL de destino; así la elección de rutas queda en el cliente.
+- Los documentos del flujo (recepciones, inspecciones, cotizaciones y órdenes)
+  se buscan también inactivos, igual que en sus listados y detalle. Su `meta`
+  es el estado legible y `estado` el código crudo (para el color del badge).
+  Los catálogos (clientes, vehículos, etc.) solo devuelven activos.
 """
 
 from django.db.models import Q
@@ -78,13 +82,15 @@ def _detalle_vehiculo(vehiculo):
     return f'{vehiculo.marca or ""} {vehiculo.modelo or ""}'.strip() or None
 
 
-def _resultado(tipo, objeto, titulo, subtitulo=None, meta=None):
+def _resultado(tipo, objeto, titulo, subtitulo=None, meta=None, estado=None):
     return {
         'tipo': tipo,
         'id': objeto.id if objeto is not None else None,
         'titulo': titulo or '—',
         'subtitulo': subtitulo,
         'meta': meta,
+        # Código crudo del estado (documentos del flujo) para colorear el badge.
+        'estado': estado,
     }
 
 
@@ -142,7 +148,7 @@ def _buscar_vehiculos(empresa_id, q, talleres=None):
 
 def _buscar_recepciones(empresa_id, q, talleres=None):
     queryset = _con_taller(
-        RecepcionVehiculo.objects.filter(empresa_id=empresa_id, is_active=True),
+        RecepcionVehiculo.objects.filter(empresa_id=empresa_id),
         talleres,
     )
     queryset = (
@@ -164,6 +170,7 @@ def _buscar_recepciones(empresa_id, q, talleres=None):
             recepcion.numero_recepcion,
             _unir(_nombre_cliente(recepcion.cliente), _placa(recepcion.vehiculo)),
             recepcion.get_estado_display(),
+            estado=recepcion.estado,
         )
         for recepcion in queryset
     ]
@@ -171,7 +178,7 @@ def _buscar_recepciones(empresa_id, q, talleres=None):
 
 def _buscar_ordenes(empresa_id, q, talleres=None):
     queryset = _con_taller(
-        OrdenTrabajo.objects.filter(empresa_id=empresa_id, is_active=True),
+        OrdenTrabajo.objects.filter(empresa_id=empresa_id),
         talleres,
     )
     queryset = (
@@ -193,6 +200,7 @@ def _buscar_ordenes(empresa_id, q, talleres=None):
             orden.numero_orden,
             _unir(_nombre_cliente(orden.cliente), _placa(orden.vehiculo)),
             orden.get_estado_display(),
+            estado=orden.estado,
         )
         for orden in queryset
     ]
@@ -200,7 +208,7 @@ def _buscar_ordenes(empresa_id, q, talleres=None):
 
 def _buscar_cotizaciones(empresa_id, q, talleres=None):
     queryset = _con_taller(
-        Cotizacion.objects.filter(empresa_id=empresa_id, is_active=True),
+        Cotizacion.objects.filter(empresa_id=empresa_id),
         talleres,
     )
     queryset = (
@@ -222,6 +230,7 @@ def _buscar_cotizaciones(empresa_id, q, talleres=None):
             cotizacion.numero_cotizacion,
             _unir(_nombre_cliente(cotizacion.cliente), _placa(cotizacion.vehiculo)),
             cotizacion.get_estado_display(),
+            estado=cotizacion.estado,
         )
         for cotizacion in queryset
     ]
@@ -231,7 +240,6 @@ def _buscar_inspecciones(empresa_id, q, talleres=None):
     queryset = _con_taller(
         InspeccionVehiculo.objects.filter(
             _combinar(Q(empresa_id=empresa_id), Q(recepcion__empresa_id=empresa_id)),
-            is_active=True,
         ),
         talleres,
     )
@@ -259,6 +267,7 @@ def _buscar_inspecciones(empresa_id, q, talleres=None):
             numero,
             _unir(_nombre_cliente(cliente), _placa(vehiculo)),
             inspeccion.get_estado_display(),
+            estado=inspeccion.estado,
         ))
     return resultados
 
@@ -342,7 +351,7 @@ class BusquedaGlobalView(APIView):
               "etiqueta": "Vehículos",
               "resultados": [
                 {"tipo": "vehiculos", "id": 7, "titulo": "GSU5812",
-                 "subtitulo": "Toyota Corolla", "meta": null}
+                 "subtitulo": "Toyota Corolla", "meta": null, "estado": null}
               ]
             }
           ]

@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
 
@@ -119,8 +120,22 @@ def _user_payload(user, empresa, rol, request=None):
         "avatar": avatar_url,
     }
 
+def _es_cuenta_desactivada(username, password):
+    """True si las credenciales son correctas pero la cuenta está inactiva.
+
+    `authenticate()` devuelve None tanto para una contraseña errónea como para
+    un usuario inactivo. Solo se distingue el segundo caso cuando la contraseña
+    coincide, para no revelar qué correos existen a quien no la conoce.
+    """
+    candidatos = User.objects.filter(
+        Q(username__iexact=username) | Q(email__iexact=username),
+        is_active=False,
+    )
+    return any(candidato.check_password(password) for candidato in candidatos)
+
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    
+
     def validate(self, attrs):
         username = attrs.get(self.username_field, '')
         password = attrs.get('password', '')
@@ -132,13 +147,12 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         )
 
         if user is None:
+            if _es_cuenta_desactivada(username, password):
+                raise serializers.ValidationError({
+                    "detail": "Tu cuenta está desactivada. Contacta al administrador de tu empresa para reactivarla."
+                })
             raise serializers.ValidationError({
                 "detail": "Correo o contraseña incorrectos. Por favor, verifica tus datos e intenta nuevamente."
-            })
-
-        if not user.is_active:
-            raise serializers.ValidationError({
-                "detail": "Tu cuenta está desactivada. Contacta al administrador del sistema."
             })
 
         self.user = user

@@ -196,3 +196,29 @@ class BusquedaGlobalTallerTest(TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(self._ids_ordenes(respuesta), set())
 
+
+    def test_encuentra_documento_inactivo_del_taller_activo(self):
+        inactiva = OrdenTrabajo.objects.create(
+            empresa=self.empresa, sucursal=self.central, cliente=self.cliente,
+            vehiculo=self.vehiculo, numero_orden='FIL-C-0002', tipo_trabajo='REPARACION',
+            is_active=False,
+        )
+        respuesta = self.client.get(
+            ENDPOINT, {'q': 'FIL-C-0002'}, HTTP_X_TALLER_ID=str(self.central.pk)
+        )
+        grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
+        resultado = grupos['ordenes']['resultados'][0]
+        self.assertEqual(resultado['id'], inactiva.pk)
+        self.assertEqual(resultado['meta'], inactiva.get_estado_display())
+        self.assertEqual(resultado['estado'], inactiva.estado)
+
+    def test_documento_inactivo_de_otro_taller_no_aparece(self):
+        OrdenTrabajo.objects.create(
+            empresa=self.empresa, sucursal=self.norte, cliente=self.cliente,
+            vehiculo=self.vehiculo, numero_orden='FIL-N-0002', tipo_trabajo='REPARACION',
+            is_active=False,
+        )
+        respuesta = self.client.get(
+            ENDPOINT, {'q': 'FIL-N-0002'}, HTTP_X_TALLER_ID=str(self.central.pk)
+        )
+        self.assertEqual(respuesta.data['total'], 0)

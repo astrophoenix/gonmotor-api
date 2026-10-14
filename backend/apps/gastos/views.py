@@ -4,14 +4,18 @@ from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
 )
+from apps.core.mixins import FiltroTallerMixin
 
 from .models import Gasto
 from .serializers import GastoSerializer
 
 
-class GastoViewSet(viewsets.ModelViewSet):
+class GastoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = GastoSerializer
     queryset = Gasto.objects.select_related('taller', 'creado_por', 'empresa')
+    # Taller activo (`X-Taller-ID`); el filtro manual `?taller_id=` manda si viene.
+    taller_filter_field = 'taller'
+    taller_query_param = 'taller_id'
 
     def get_queryset(self):
         queryset = super().get_queryset().filter(is_active=True)
@@ -22,10 +26,6 @@ class GastoViewSet(viewsets.ModelViewSet):
         empresa_id = get_empresa_id_desde_request(request)
         if empresa_id:
             queryset = queryset.filter(empresa_id=empresa_id)
-
-        taller_id = self.request.query_params.get('taller_id')
-        if taller_id:
-            queryset = queryset.filter(taller_id=taller_id)
 
         fecha_desde = self.request.query_params.get('fecha_desde')
         if fecha_desde:
@@ -39,4 +39,4 @@ class GastoViewSet(viewsets.ModelViewSet):
         if categoria:
             queryset = queryset.filter(categoria=categoria)
 
-        return queryset
+        return self.filtrar_por_taller(queryset)

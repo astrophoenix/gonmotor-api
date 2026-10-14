@@ -26,6 +26,18 @@ from .models import (
 )
 
 
+def conservar_sucursal(validated_data):
+    """Evita que una edición deje el documento sin taller.
+
+    El taller se fija al crear; un `sucursal: null` en un PUT/PATCH se ignora
+    en lugar de borrar el taller (el documento desaparecería de los listados,
+    que filtran estrictamente por taller).
+    """
+    if 'sucursal' in validated_data and validated_data['sucursal'] is None:
+        validated_data.pop('sucursal')
+    return validated_data
+
+
 def url_imagen_absoluta(request, url):
     """Convierte una URL relativa de archivo en absoluta (basada en el Host de la API)."""
     if not url:
@@ -396,6 +408,10 @@ class InspeccionVehiculoSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        conservar_sucursal(validated_data)
+        return super().update(instance, validated_data)
+
     def validate(self, attrs):
         recepcion = attrs.get('recepcion')
         if recepcion is not None:
@@ -670,6 +686,9 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             'numero_recepcion',
             'fecha_firma_cliente',
             'aceptacion_condiciones',
+            # El formulario se envía como multipart (fotos): un BooleanField
+            # ausente se lee como False y la recepción nacería desactivada.
+            'is_active',
         ]
 
     def get_cotizaciones_generadas(self, instance):
@@ -841,6 +860,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
             })
         validated_data.pop('fecha_firma_cliente', None)
         validated_data.pop('aceptacion_condiciones', None)
+        conservar_sucursal(validated_data)
 
         request = self.context.get('request')
         fotos = {}
@@ -904,6 +924,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
             'id',
             'empresa',
             'numero_orden',
+            'is_active',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -929,6 +950,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         return attrs
 
     def update(self, instance, validated_data):
+        conservar_sucursal(validated_data)
         if validated_data.get('estado') == 'ENTREGADO' and 'fecha_entrega' not in validated_data:
             validated_data['fecha_entrega'] = timezone.now()
         return super().update(instance, validated_data)
