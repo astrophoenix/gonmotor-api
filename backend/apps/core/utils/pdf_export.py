@@ -639,10 +639,10 @@ def _crear_documento(
 #
 # Página 1:
 #   ┌───────────────────────────────────────────────────────────────┐
-#   │ [logo] EMPRESA                          LISTADO DE CLIENTES    │
-#   │        RUC · Dirección · Telf.   Fecha: 15/10/2026 · Hora: 11:09│
-#   │                                 Usuario: gromero · Registros: 7│
-#   │                                                   Página 1 de 2│
+#   │ [logo] EMPRESA                           LISTADO DE CLIENTES   │
+#   │        RUC 0925033667001       Fecha: 15/10/2026 · Hora: 11:09 │
+#   │        Dirección · Telf.         Usuario: gromero · Página 1 de 2│
+#   ├───────────────────────────────────────────────────────────────┤ línea fina
 #   │ FILTROS APLICADOS  Estado: Activos · Búsqueda: “carlos”        │ (solo si hay)
 #   └───────────────────────────────────────────────────────────────┘
 #   Tabla: cabecera en negrita entre filetes negros, filas separadas por
@@ -656,13 +656,14 @@ def _crear_documento(
 LST_MARGEN_SUPERIOR = 28
 LST_MARGEN_INFERIOR = 28
 LST_MARGEN_LATERAL = 28
-LST_LOGO_MAX = 44
+LST_LOGO_MAX = 48             # ~64 px a 96 ppp
 LST_ESPACIO_LOGO = 8
 LST_PROPORCION_TITULO = 0.45   # ancho de la columna del título
 LST_ESPACIO_FILETE = 6
-LST_META_TAMANO = 7.5        # metadatos bajo el título (discretos)
-LST_META_INTERLINEA = 9.5
-LST_META_ESPACIO = 3         # aire entre el título y los metadatos
+LST_META_TAMANO = 8          # metadatos bajo el título
+LST_META_INTERLINEA = 10
+LST_META_ESPACIO = 2         # aire entre el título y los metadatos
+LST_GROSOR_LINEA_CABECERA = 0.5
 LST_ESPACIO_FILTROS = 5
 LST_ESPACIO_ANTES_TABLA = 10
 LST_ALTO_CABECERA_CONT = 13
@@ -896,12 +897,12 @@ class _CabeceraListado:
         return Paragraph(_escape_xml(self.titulo).upper(), estilo)
 
     def _lineas_metadatos(self) -> List[str]:
-        """Metadatos bajo el título; la última línea es el paginado."""
-        total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
+        """Metadatos bajo el título. La última línea lleva el paginado y es una
+        plantilla para ``NumberedCanvas`` (de ahí el escape de '%')."""
+        usuario = self.usuario.replace('%', '%%')
         return [
             f"Fecha: {self.generado.strftime('%d/%m/%Y')}  ·  Hora: {self.generado.strftime('%H:%M')}",
-            f'Usuario: {self.usuario}  ·  Registros: {total}',
-            'Página %s de %s',
+            f'Usuario: {usuario}  ·  Página %s de %s',
         ]
 
     def _alto_metadatos(self) -> float:
@@ -954,16 +955,19 @@ class _CabeceraListado:
         _, alto_titulo = self._parrafo_titulo().wrap(ancho * LST_PROPORCION_TITULO, 1000)
         base = y_tope - alto_titulo - LST_META_ESPACIO - LST_META_TAMANO
         canvas.setFont('Helvetica', LST_META_TAMANO)
-        canvas.setFillColor(LST_GRIS_ETIQUETA)
+        canvas.setFillColor(LST_GRIS_TEXTO)
         for linea in self._lineas_metadatos()[:-1]:
             canvas.drawRightString(x1, base, linea)
             base -= LST_META_INTERLINEA
         canvas._gm_paginado = (
-            x1, base, LST_META_TAMANO, self._lineas_metadatos()[-1], 'R', LST_GRIS_ETIQUETA,
+            x1, base, LST_META_TAMANO, self._lineas_metadatos()[-1], 'R', LST_GRIS_TEXTO,
         )
 
-        # Sin filete propio: el filete superior de la tabla separa la cabecera.
+        # Línea fina que separa la cabecera de la tabla
         y_inf = y - LST_ESPACIO_FILETE
+        canvas.setStrokeColor(NEGRO)
+        canvas.setLineWidth(LST_GROSOR_LINEA_CABECERA)
+        canvas.line(x0, y_inf, x1, y_inf)
 
         # Filtros aplicados (solo si hay alguno)
         filtros = self._parrafo_filtros()
