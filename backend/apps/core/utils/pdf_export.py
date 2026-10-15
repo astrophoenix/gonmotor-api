@@ -155,10 +155,10 @@ class NumberedCanvas(pdf_gen_canvas.Canvas):
         # (``_gm_paginado``: x, y, tamaño, plantilla de texto, alineación).
         destino = getattr(self, '_gm_paginado', None)
         if destino:
-            x, y, tamano, plantilla, alineacion = destino
+            x, y, tamano, plantilla, alineacion, *color = destino
             self.saveState()
             self.setFont('Helvetica', tamano)
-            self.setFillColor(colors.black)
+            self.setFillColor(color[0] if color else colors.black)
             etiqueta = plantilla % (self._pageNumber, numero_total)
             if alineacion == 'R':
                 self.drawRightString(x, y, etiqueta)
@@ -640,12 +640,10 @@ def _crear_documento(
 # Página 1:
 #   ┌───────────────────────────────────────────────────────────────┐
 #   │ [logo] EMPRESA                          LISTADO DE CLIENTES    │
-#   │        RUC · Dirección · Telf.                                 │
-#   ├━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┤ filete negro
-#   │ FECHA      │ HORA  │ USUARIO     │ REGISTROS │ PÁGINA          │ franja de metadatos
-#   │ 15/10/2026 │ 11:09 │ gromero     │ 7         │ 1 de 2          │
-#   ├───────────────────────────────────────────────────────────────┤
-#   │ FILTROS APLICADOS  Estado: Activos · Búsqueda: “carlos”        │
+#   │        RUC · Dirección · Telf.   Fecha: 15/10/2026 · Hora: 11:09│
+#   │                                 Usuario: gromero · Registros: 7│
+#   │                                                   Página 1 de 2│
+#   │ FILTROS APLICADOS  Estado: Activos · Búsqueda: “carlos”        │ (solo si hay)
 #   └───────────────────────────────────────────────────────────────┘
 #   Tabla: cabecera en negrita entre filetes negros, filas separadas por
 #   líneas grises finas, sin rellenos (mínimo consumo de tinta).
@@ -660,8 +658,11 @@ LST_MARGEN_INFERIOR = 28
 LST_MARGEN_LATERAL = 28
 LST_LOGO_MAX = 44
 LST_ESPACIO_LOGO = 8
+LST_PROPORCION_TITULO = 0.45   # ancho de la columna del título
 LST_ESPACIO_FILETE = 6
-LST_ALTO_FRANJA_META = 26
+LST_META_TAMANO = 7.5        # metadatos bajo el título (discretos)
+LST_META_INTERLINEA = 9.5
+LST_META_ESPACIO = 3         # aire entre el título y los metadatos
 LST_ESPACIO_FILTROS = 5
 LST_ESPACIO_ANTES_TABLA = 10
 LST_ALTO_CABECERA_CONT = 13
@@ -669,7 +670,6 @@ LST_ALTO_CABECERA_CONT = 13
 LST_GRIS_TEXTO = colors.HexColor('#333333')     # datos secundarios (alto contraste)
 LST_HEX_ETIQUETA = '#595959'
 LST_GRIS_ETIQUETA = colors.HexColor(LST_HEX_ETIQUETA)  # etiquetas pequeñas en mayúsculas
-LST_GRIS_FILETE = colors.HexColor('#A6A6A6')    # separadores de la cabecera
 LST_GRIS_FILA = colors.HexColor('#C4C4C4')      # divisoria entre filas
 
 ORIENTACION_VERTICAL = 'vertical'
@@ -845,11 +845,6 @@ class _CabeceraListado:
         secundario = ParagraphStyle(
             'LstEmpresaDato', fontName='Helvetica', fontSize=8, leading=10, textColor=LST_GRIS_TEXTO,
         )
-        titulo = ParagraphStyle(
-            'LstTitulo', fontName='Helvetica-Bold', fontSize=13, leading=16,
-            alignment=TA_RIGHT, textColor=NEGRO,
-        )
-
         datos = self.identidad
         flujos: List = []
         if datos['nombre']:
@@ -866,7 +861,7 @@ class _CabeceraListado:
         if not flujos:
             flujos.append(Paragraph('', secundario))
 
-        ancho_der = ancho * 0.45
+        ancho_der = ancho * LST_PROPORCION_TITULO
         ancho_izq = ancho - ancho_der
         sin_padding = [
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -886,12 +881,31 @@ class _CabeceraListado:
             izquierda = Table([[flujos]], colWidths=[ancho_izq])
         izquierda.setStyle(TableStyle(sin_padding))
 
-        tabla = Table(
-            [[izquierda, Paragraph(_escape_xml(self.titulo).upper(), titulo)]],
-            colWidths=[ancho_izq, ancho_der],
-        )
-        tabla.setStyle(TableStyle(sin_padding))
+        # Columna derecha: título + hueco reservado para los metadatos, que se
+        # dibujan después en el canvas (el número de página se conoce al final).
+        derecha = [self._parrafo_titulo(), Spacer(1, self._alto_metadatos())]
+        tabla = Table([[izquierda, derecha]], colWidths=[ancho_izq, ancho_der])
+        tabla.setStyle(TableStyle(sin_padding + [('VALIGN', (1, 0), (1, 0), 'TOP')]))
         return tabla
+
+    def _parrafo_titulo(self) -> Paragraph:
+        estilo = ParagraphStyle(
+            'LstTitulo', fontName='Helvetica-Bold', fontSize=13, leading=16,
+            alignment=TA_RIGHT, textColor=NEGRO,
+        )
+        return Paragraph(_escape_xml(self.titulo).upper(), estilo)
+
+    def _lineas_metadatos(self) -> List[str]:
+        """Metadatos bajo el título; la última línea es el paginado."""
+        total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
+        return [
+            f"Fecha: {self.generado.strftime('%d/%m/%Y')}  ·  Hora: {self.generado.strftime('%H:%M')}",
+            f'Usuario: {self.usuario}  ·  Registros: {total}',
+            'Página %s de %s',
+        ]
+
+    def _alto_metadatos(self) -> float:
+        return LST_META_ESPACIO + len(self._lineas_metadatos()) * LST_META_INTERLINEA
 
     def _parrafo_filtros(self) -> Optional[Paragraph]:
         """Línea de filtros aplicados; ``None`` si no hay filtros (se omite)."""
@@ -910,22 +924,11 @@ class _CabeceraListado:
         ]
         return Paragraph(etiqueta + '&nbsp;&nbsp;·&nbsp;&nbsp;'.join(partes), estilo)
 
-    def _celdas_meta(self) -> List[Tuple[str, str, float]]:
-        """(etiqueta, valor, proporción del ancho) de la franja de metadatos."""
-        total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
-        return [
-            ('FECHA', self.generado.strftime('%d/%m/%Y'), 0.17),
-            ('HORA', self.generado.strftime('%H:%M'), 0.11),
-            ('USUARIO', self.usuario, 0.36),
-            ('REGISTROS', total, 0.16),
-            ('PÁGINA', '', 0.20),   # el valor lo escribe NumberedCanvas
-        ]
-
     # -- alturas -------------------------------------------------------------
 
     def alto_primera(self, ancho: float) -> float:
         _, alto_ident = self._identidad_y_titulo(ancho).wrap(ancho, 1000)
-        alto = alto_ident + LST_ESPACIO_FILETE + LST_ALTO_FRANJA_META + LST_ESPACIO_ANTES_TABLA
+        alto = alto_ident + LST_ESPACIO_FILETE + LST_ESPACIO_ANTES_TABLA
         filtros = self._parrafo_filtros()
         if filtros:
             alto += LST_ESPACIO_FILTROS + filtros.wrap(ancho, 1000)[1]
@@ -943,40 +946,24 @@ class _CabeceraListado:
         # Identidad + título
         bloque = self._identidad_y_titulo(ancho)
         _, alto = bloque.wrapOn(canvas, ancho, 1000)
+        y_tope = y
         y -= alto
         bloque.drawOn(canvas, x0, y)
 
-        # Filete principal
-        y -= LST_ESPACIO_FILETE
-        canvas.setStrokeColor(NEGRO)
-        canvas.setLineWidth(1.2)
-        canvas.line(x0, y, x1, y)
+        # Metadatos discretos, alineados a la derecha bajo el título
+        _, alto_titulo = self._parrafo_titulo().wrap(ancho * LST_PROPORCION_TITULO, 1000)
+        base = y_tope - alto_titulo - LST_META_ESPACIO - LST_META_TAMANO
+        canvas.setFont('Helvetica', LST_META_TAMANO)
+        canvas.setFillColor(LST_GRIS_ETIQUETA)
+        for linea in self._lineas_metadatos()[:-1]:
+            canvas.drawRightString(x1, base, linea)
+            base -= LST_META_INTERLINEA
+        canvas._gm_paginado = (
+            x1, base, LST_META_TAMANO, self._lineas_metadatos()[-1], 'R', LST_GRIS_ETIQUETA,
+        )
 
-        # Franja de metadatos
-        y_sup = y
-        y_inf = y - LST_ALTO_FRANJA_META
-        x = x0
-        canvas.setLineWidth(0.4)
-        canvas.setStrokeColor(LST_GRIS_FILETE)
-        for indice, (etiqueta, valor, proporcion) in enumerate(self._celdas_meta()):
-            ancho_celda = ancho * proporcion
-            pad = 0 if indice == 0 else 7
-            if indice:
-                canvas.line(x, y_sup - 4, x, y_inf + 4)
-            canvas.setFillColor(LST_GRIS_ETIQUETA)
-            canvas.setFont('Helvetica-Bold', 6.5)
-            canvas.drawString(x + pad, y_sup - 10, etiqueta)
-            canvas.setFillColor(NEGRO)
-            canvas.setFont('Helvetica', 9)
-            if etiqueta == 'PÁGINA':
-                canvas._gm_paginado = (x + pad, y_sup - 21, 9, '%s de %s', 'L')
-            else:
-                canvas.drawString(
-                    x + pad, y_sup - 21,
-                    _recortar_texto(valor, 'Helvetica', 9, ancho_celda - pad - 4),
-                )
-            x += ancho_celda
-        canvas.line(x0, y_inf, x1, y_inf)
+        # Sin filete propio: el filete superior de la tabla separa la cabecera.
+        y_inf = y - LST_ESPACIO_FILETE
 
         # Filtros aplicados (solo si hay alguno)
         filtros = self._parrafo_filtros()
@@ -998,7 +985,7 @@ class _CabeceraListado:
             x0, y,
             _recortar_texto(f'{texto} (continuación)', 'Helvetica', 8, (x1 - x0) * 0.75),
         )
-        canvas._gm_paginado = (x1, y, 8, 'Página %s de %s', 'R')
+        canvas._gm_paginado = (x1, y, 8, 'Página %s de %s', 'R', LST_GRIS_TEXTO)
         canvas.restoreState()
 
 
