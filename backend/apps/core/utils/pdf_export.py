@@ -640,8 +640,9 @@ def _crear_documento(
 # Página 1:
 #   ┌───────────────────────────────────────────────────────────────┐
 #   │ [logo] EMPRESA                           LISTADO DE CLIENTES   │
-#   │        RUC 0925033667001       Fecha: 15/10/2026 · Hora: 11:09 │
-#   │        Dirección · Telf.         Usuario: gromero · Página 1 de 2│
+#   │        RUC 0925033667001              Fecha: 15/10/2026 - 11:09 │
+#   │        Dirección · Telf.                       Usuario: gromero │
+#   │                                   Registros: 63 - Página 1 de 2 │
 #   ├───────────────────────────────────────────────────────────────┤ línea fina
 #   │ FILTROS APLICADOS  Estado: Activos · Búsqueda: “carlos”        │ (solo si hay)
 #   └───────────────────────────────────────────────────────────────┘
@@ -898,11 +899,12 @@ class _CabeceraListado:
 
     def _lineas_metadatos(self) -> List[str]:
         """Metadatos bajo el título. La última línea lleva el paginado y es una
-        plantilla para ``NumberedCanvas`` (de ahí el escape de '%')."""
-        usuario = self.usuario.replace('%', '%%')
+        plantilla para ``NumberedCanvas`` (rellena "Página %s de %s")."""
+        total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
         return [
-            f"Fecha: {self.generado.strftime('%d/%m/%Y')}  ·  Hora: {self.generado.strftime('%H:%M')}",
-            f'Usuario: {usuario}  ·  Página %s de %s',
+            f"Fecha: {self.generado.strftime('%d/%m/%Y')}  -  {self.generado.strftime('%H:%M')}",
+            f'Usuario: {self.usuario}',
+            f'Registros: {total}  -  Página %s de %s',
         ]
 
     def _alto_metadatos(self) -> float:
