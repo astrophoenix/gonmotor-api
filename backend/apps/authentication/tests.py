@@ -1326,6 +1326,17 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		)
 		self.assertEqual(grabado.status_code, 200, grabado.content)
 
+	def test_razon_social_es_obligatoria_en_configuracion(self):
+		dueno = User.objects.create_user(username='dueno-razon', password='x')
+		_asignar(dueno, self.empresa_a, 'ADMIN_EMPRESA', [self.a1])
+		resp = self._cliente(dueno).patch(
+			f'/api/configuracion/empresa/{self.empresa_a.pk}/',
+			{'razon_social': '   '},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 400, resp.content)
+		self.assertIn('razon_social', resp.data)
+
 	def test_gerente_sigue_gestionando_sucursales(self):
 		gerente = User.objects.create_user(username='gerente-suc', password='x')
 		_asignar(gerente, self.empresa_a, 'ADMIN_TALLER', [self.a1])

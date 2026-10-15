@@ -272,7 +272,10 @@ class EmpresaConfigSerializer(serializers.ModelSerializer):
         return value
 
     def validate_razon_social(self, value):
-        return (value or '').strip()
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('La razón social es obligatoria.')
+        return value
 
     def validate_ruc(self, value):
         value = (value or '').replace(' ', '').strip()
