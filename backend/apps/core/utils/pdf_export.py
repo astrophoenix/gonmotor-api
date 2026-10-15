@@ -9,8 +9,7 @@ de ``PdfExportConfig`` + ``PdfExportService``:
 
   * Cabecera página 1: logo en escala de grises + datos de la empresa a la
     izquierda y el título a la derecha; filete negro; franja de metadatos
-    (Fecha, Hora, Usuario, Registros, Página X de Y); línea de filtros
-    aplicados (``describir_filtros``).
+    (fecha y hora, usuario, registros y página X de Y).
   * Páginas 2+: "Empresa · TÍTULO (continuación)" y "Página X de Y", con la
     cabecera de la tabla repetida.
   * Tabla compacta sin rellenos: cabecera en negrita entre filetes negros,
@@ -640,11 +639,10 @@ def _crear_documento(
 # Página 1:
 #   ┌───────────────────────────────────────────────────────────────┐
 #   │ [logo] EMPRESA                           LISTADO DE CLIENTES   │
-#   │        RUC 0925033667001              Fecha: 15/10/2026 - 11:09 │
+#   │        RUC 0925033667001                Fecha: 15/10/2026 11:09 │
 #   │        Dirección · Telf.                       Usuario: gromero │
 #   │                                   Registros: 63 - Página 1 de 2 │
 #   ├───────────────────────────────────────────────────────────────┤ línea fina
-#   │ FILTROS APLICADOS  Estado: Activos · Búsqueda: “carlos”        │ (solo si hay)
 #   └───────────────────────────────────────────────────────────────┘
 #   Tabla: cabecera en negrita entre filetes negros, filas separadas por
 #   líneas grises finas, sin rellenos (mínimo consumo de tinta).
@@ -665,13 +663,10 @@ LST_META_TAMANO = 8          # metadatos bajo el título
 LST_META_INTERLINEA = 10
 LST_META_ESPACIO = 2         # aire entre el título y los metadatos
 LST_GROSOR_LINEA_CABECERA = 0.5
-LST_ESPACIO_FILTROS = 5
 LST_ESPACIO_ANTES_TABLA = 10
 LST_ALTO_CABECERA_CONT = 13
 
 LST_GRIS_TEXTO = colors.HexColor('#333333')     # datos secundarios (alto contraste)
-LST_HEX_ETIQUETA = '#595959'
-LST_GRIS_ETIQUETA = colors.HexColor(LST_HEX_ETIQUETA)  # etiquetas pequeñas en mayúsculas
 LST_GRIS_FILA = colors.HexColor('#C4C4C4')      # divisoria entre filas
 
 ORIENTACION_VERTICAL = 'vertical'
@@ -681,44 +676,6 @@ ORIENTACION_HORIZONTAL = 'horizontal'
 FACTOR_ORIENTACION_AUTO = 1.2
 
 _ALINEACIONES = {'L': TA_LEFT, 'C': TA_CENTER, 'R': TA_RIGHT}
-
-ESTADOS_FILTRO = {'activo': 'Activos', 'inactivo': 'Inactivos'}
-# Para listados que, sin filtro de estado, solo exportan los activos.
-ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO = {**ESTADOS_FILTRO, None: 'Activos'}
-FILTRO_BUSQUEDA = ('search', 'Búsqueda', lambda valor: f'“{valor}”')
-FILTRO_ESTADO = ('estado', 'Estado', ESTADOS_FILTRO)
-
-
-def describir_filtros(params, definiciones) -> List[Tuple[str, str]]:
-    """
-    Traduce los parámetros de consulta del listado a pares legibles
-    ``(etiqueta, valor)`` para la cabecera del PDF.
-
-    ``definiciones`` es una lista de ``(param, etiqueta, opciones)``:
-      * ``opciones`` dict: traduce el valor (la clave ``None`` es el texto a
-        mostrar cuando el parámetro no llega y el listado aplica un valor por
-        defecto).
-      * ``opciones`` callable: recibe el valor y devuelve el texto (o vacío
-        para omitirlo).
-      * ``None``: se muestra el valor tal cual.
-    """
-    filtros: List[Tuple[str, str]] = []
-    for param, etiqueta, opciones in definiciones:
-        valor = (params.get(param) or '').strip()
-        if not valor:
-            if isinstance(opciones, dict) and None in opciones:
-                filtros.append((etiqueta, opciones[None]))
-            continue
-        if isinstance(opciones, dict):
-            texto = opciones.get(valor, valor)
-        elif callable(opciones):
-            texto = opciones(valor)
-        else:
-            texto = valor
-        if texto:
-            filtros.append((etiqueta, str(texto)))
-    return filtros
-
 
 def contexto_reporte(request, empresa_id) -> Tuple[object, object, str]:
     """
@@ -825,11 +782,10 @@ def _resolver_pagina(anchos_pulgadas: List[float], orientacion: Optional[str]):
 class _CabeceraListado:
     """Dibuja la cabecera estándar (página 1 y continuaciones)."""
 
-    def __init__(self, titulo, empresa, taller, usuario, filtros, total_registros, logo):
+    def __init__(self, titulo, empresa, taller, usuario, total_registros, logo):
         self.titulo = (titulo or '').strip()
         self.identidad = _datos_identidad(empresa, taller)
         self.usuario = (usuario or '').strip() or '—'
-        self.filtros = list(filtros or [])
         self.total_registros = total_registros
         self.generado = timezone.localtime()
 
@@ -902,7 +858,7 @@ class _CabeceraListado:
         plantilla para ``NumberedCanvas`` (rellena "Página %s de %s")."""
         total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
         return [
-            f"Fecha: {self.generado.strftime('%d/%m/%Y')}  -  {self.generado.strftime('%H:%M')}",
+            f"Fecha: {self.generado.strftime('%d/%m/%Y %H:%M')}",
             f'Usuario: {self.usuario}',
             f'Registros: {total}  -  Página %s de %s',
         ]
@@ -910,32 +866,11 @@ class _CabeceraListado:
     def _alto_metadatos(self) -> float:
         return LST_META_ESPACIO + len(self._lineas_metadatos()) * LST_META_INTERLINEA
 
-    def _parrafo_filtros(self) -> Optional[Paragraph]:
-        """Línea de filtros aplicados; ``None`` si no hay filtros (se omite)."""
-        if not self.filtros:
-            return None
-        estilo = ParagraphStyle(
-            'LstFiltros', fontName='Helvetica', fontSize=8, leading=10, textColor=NEGRO,
-        )
-        etiqueta = (
-            f'<font name="Helvetica-Bold" size="6.5" color="{LST_HEX_ETIQUETA}">'
-            'FILTROS APLICADOS</font>&nbsp;&nbsp;&nbsp;'
-        )
-        partes = [
-            f'{_escape_xml(nombre)}: <b>{_escape_xml(valor)}</b>'
-            for nombre, valor in self.filtros
-        ]
-        return Paragraph(etiqueta + '&nbsp;&nbsp;·&nbsp;&nbsp;'.join(partes), estilo)
-
     # -- alturas -------------------------------------------------------------
 
     def alto_primera(self, ancho: float) -> float:
         _, alto_ident = self._identidad_y_titulo(ancho).wrap(ancho, 1000)
-        alto = alto_ident + LST_ESPACIO_FILETE + LST_ESPACIO_ANTES_TABLA
-        filtros = self._parrafo_filtros()
-        if filtros:
-            alto += LST_ESPACIO_FILTROS + filtros.wrap(ancho, 1000)[1]
-        return alto
+        return alto_ident + LST_ESPACIO_FILETE + LST_ESPACIO_ANTES_TABLA
 
     # -- dibujo --------------------------------------------------------------
 
@@ -970,12 +905,6 @@ class _CabeceraListado:
         canvas.setStrokeColor(NEGRO)
         canvas.setLineWidth(LST_GROSOR_LINEA_CABECERA)
         canvas.line(x0, y_inf, x1, y_inf)
-
-        # Filtros aplicados (solo si hay alguno)
-        filtros = self._parrafo_filtros()
-        if filtros:
-            _, alto_filtros = filtros.wrapOn(canvas, ancho, 1000)
-            filtros.drawOn(canvas, x0, y_inf - LST_ESPACIO_FILTROS - alto_filtros)
         canvas.restoreState()
 
     def dibujar_continuacion(self, canvas, doc) -> None:
@@ -1047,7 +976,7 @@ def _construir_tabla_listado(columnas, filas, ancho_util: float) -> Table:
             'ListadoVacio', parent=base, fontName='Helvetica-Oblique', textColor=LST_GRIS_TEXTO,
         )
         contenido.append(
-            [Paragraph('No se encontraron registros con los filtros aplicados.', vacio)]
+            [Paragraph('No se encontraron registros.', vacio)]
             + [''] * (len(columnas) - 1)
         )
         comandos.append(('SPAN', (0, 1), (-1, 1)))
@@ -1071,21 +1000,19 @@ def generar_listado_pdf(
     empresa=None,
     taller=None,
     usuario: str = '',
-    filtros=None,
     total_registros: Optional[int] = None,
     logo=None,
     orientacion: Optional[str] = None,
 ) -> None:
     """
     Plantilla única de los listados. Escribe en ``buffer`` un PDF con la
-    cabecera estándar (logo, título, fecha, hora, usuario, registros, página y
-    filtros aplicados) y la tabla de datos.
+    cabecera estándar (logo, título, fecha y hora, usuario, registros y
+    página) y la tabla de datos.
 
     * ``columnas``: ``[(título, ancho_pulgadas[, 'L'|'C'|'R']), ...]``; los
       anchos son relativos (se escalan al ancho útil de la hoja).
     * ``filas``: lista de filas; cada celda es un ``Paragraph`` (construido con
       ``estilo_celda_listado()``) o un valor que se convierte a texto.
-    * ``filtros``: ``[(etiqueta, valor)]``, ver ``describir_filtros``.
     * ``orientacion``: ``'vertical'``, ``'horizontal'`` o ``None`` (automática
       según el ancho total de las columnas).
     """
@@ -1097,7 +1024,7 @@ def generar_listado_pdf(
     pagina = _resolver_pagina([ancho for _, ancho, _ in columnas], orientacion)
     ancho_util = pagina[0] - 2 * LST_MARGEN_LATERAL
 
-    cabecera = _CabeceraListado(titulo, empresa, taller, usuario, filtros, total_registros, logo)
+    cabecera = _CabeceraListado(titulo, empresa, taller, usuario, total_registros, logo)
     top_p1 = LST_MARGEN_SUPERIOR + cabecera.alto_primera(ancho_util)
     top_cn = LST_MARGEN_SUPERIOR + LST_ALTO_CABECERA_CONT + LST_ESPACIO_ANTES_TABLA
 
@@ -1235,7 +1162,6 @@ def exportar_clientes_pdf(
     taller=None,
     usuario: str = '',
     logo=None,
-    filtros=None,
 ) -> None:
     """
     Exporta clientes con la plantilla estándar de listados. ``data_clientes``
@@ -1252,7 +1178,6 @@ def exportar_clientes_pdf(
         empresa=empresa,
         taller=taller,
         usuario=usuario,
-        filtros=filtros,
         total_registros=total_registros,
         logo=logo,
     )
@@ -1269,7 +1194,6 @@ class PdfExportConfig:
     * ``headers``: ``[(título, ancho_pulgadas[, 'L'|'C'|'R']), ...]``.
     * ``row_builder(instancia, estilo)``: devuelve las celdas de una fila;
       ``estilo`` es el de ``estilo_celda_listado()``.
-    * ``filtros``: ``[(etiqueta, valor)]`` mostrados en la cabecera.
     * ``total_registros``: si no se indica, se cuentan las filas.
     * ``orientacion``: ``'vertical'``, ``'horizontal'`` o ``None`` (auto).
     """
@@ -1283,7 +1207,6 @@ class PdfExportConfig:
         empresa=None,
         taller=None,
         usuario: Optional[str] = None,
-        filtros: Optional[List[Tuple[str, str]]] = None,
         total_registros: Optional[int] = None,
         orientacion: Optional[str] = None,
         logo=None,
@@ -1295,7 +1218,6 @@ class PdfExportConfig:
         self.empresa = empresa
         self.taller = taller
         self.usuario = usuario
-        self.filtros = filtros
         self.total_registros = total_registros
         self.orientacion = orientacion
         self.logo = logo
@@ -1324,7 +1246,6 @@ class PdfExportService:
             empresa=self.config.empresa,
             taller=self.config.taller,
             usuario=self.config.usuario or '',
-            filtros=self.config.filtros,
             total_registros=self.config.total_registros,
             logo=self.config.logo,
             orientacion=self.config.orientacion,

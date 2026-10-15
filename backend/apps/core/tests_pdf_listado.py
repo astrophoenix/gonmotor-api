@@ -9,11 +9,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.clientes.models import Cliente
 from apps.core.utils.pdf_export import (
-    ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO,
-    FILTRO_BUSQUEDA,
-    FILTRO_ESTADO,
     PAGINA,
-    describir_filtros,
     exportar_clientes_pdf,
     generar_listado_pdf,
 )
@@ -26,31 +22,6 @@ def _paginas(pdf: bytes):
         (float(a), float(b))
         for a, b in re.findall(rb'/MediaBox \[ 0 0 ([\d.]+) ([\d.]+) \]', pdf)
     ]
-
-
-class DescribirFiltrosTest(SimpleTestCase):
-    def test_traduce_y_omite_vacios(self):
-        filtros = describir_filtros(
-            {'search': 'carlos', 'estado': 'inactivo', 'tipo': '', 'anio': '2020'},
-            [
-                FILTRO_BUSQUEDA,
-                FILTRO_ESTADO,
-                ('tipo', 'Tipo', {'C': 'Cédula'}),
-                ('anio', 'Año', None),
-            ],
-        )
-        self.assertEqual(
-            filtros,
-            [('Búsqueda', '“carlos”'), ('Estado', 'Inactivos'), ('Año', '2020')],
-        )
-
-    def test_valor_por_defecto_cuando_no_llega_el_parametro(self):
-        filtros = describir_filtros({}, [('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO)])
-        self.assertEqual(filtros, [('Estado', 'Activos')])
-
-    def test_callable_vacio_omite_el_filtro(self):
-        definicion = [('stock_bajo', 'Stock bajo', lambda v: 'Sí' if v == 'true' else '')]
-        self.assertEqual(describir_filtros({'stock_bajo': 'false'}, definicion), [])
 
 
 class GenerarListadoPdfTest(SimpleTestCase):
@@ -66,7 +37,7 @@ class GenerarListadoPdfTest(SimpleTestCase):
 
     def test_listado_largo_continua_en_varias_paginas(self):
         filas = [[f'Registro {i}', f'{i}.00'] for i in range(150)]
-        pdf = self._generar([('Nombre', 2.0), ('Total', 1.0, 'R')], filas, filtros=[('Estado', 'Activos')])
+        pdf = self._generar([('Nombre', 2.0), ('Total', 1.0, 'R')], filas)
         self.assertGreater(len(_paginas(pdf)), 1)
 
     def test_orientacion_automatica(self):
@@ -88,13 +59,12 @@ class GenerarListadoPdfTest(SimpleTestCase):
                 'vehiculos': [{'placa': 'PCH3310', 'detalle': 'BMW 320i'}],
                 'saldo': '12.50',
             }],
-            filtros=[('Búsqueda', '“carlos”')],
         )
         self.assertTrue(buffer.getvalue().startswith(b'%PDF'))
 
 
 class ListadosPdfEndpointsTest(APITestCase):
-    """Cada listado responde un PDF con la plantilla estándar (con y sin filtros)."""
+    """Cada listado responde un PDF con la plantilla estándar (con y sin parámetros de filtro)."""
 
     ENDPOINTS = [
         ('/api/clientes/exportar-pdf/', {'search': 'demo', 'estado': 'activo', 'tipo_identificacion': 'C'}),

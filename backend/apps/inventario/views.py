@@ -13,12 +13,9 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
-    ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO,
-    FILTRO_BUSQUEDA,
     PdfExportConfig,
     PdfExportService,
     contexto_reporte,
-    describir_filtros,
 )
 
 from .models import Repuesto, RepuestoImagen, Servicio
@@ -165,20 +162,6 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         return Response({'results': data})
 
 
-FILTROS_REPUESTOS = [
-    FILTRO_BUSQUEDA,
-    ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
-    ('categoria', 'Categoría', dict(Repuesto.Categoria.choices)),
-    ('stock_bajo', 'Stock bajo', lambda v: 'Sí' if v.lower() == 'true' else ''),
-]
-
-FILTROS_SERVICIOS = [
-    FILTRO_BUSQUEDA,
-    ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
-    ('categoria', 'Categoría', dict(Servicio.Categoria.choices)),
-]
-
-
 def _repuesto_export_queryset(request, empresa_id):
     """Aplica los filtros del listado (search, estado, categoria, stock_bajo)
     a las exportaciones PDF/Excel de repuestos."""
@@ -256,7 +239,6 @@ class RepuestoPdfExportView(APIView):
             queryset = _repuesto_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, FILTROS_REPUESTOS)
 
             def row_builder(rep, cell_style):
                 return [
@@ -286,7 +268,6 @@ class RepuestoPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)
@@ -379,7 +360,6 @@ class ServicioPdfExportView(APIView):
             queryset = _servicio_export_queryset(request, empresa_id).order_by('codigo')
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, FILTROS_SERVICIOS)
 
             def row_builder(svc, cell_style):
                 return [
@@ -403,7 +383,6 @@ class ServicioPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

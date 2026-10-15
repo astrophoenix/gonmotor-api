@@ -11,12 +11,9 @@ from reportlab.platypus import Paragraph
 
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
-    FILTRO_BUSQUEDA,
-    FILTRO_ESTADO,
     PdfExportConfig,
     PdfExportService,
     contexto_reporte,
-    describir_filtros,
 )
 from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
@@ -150,11 +147,6 @@ class TallerPdfExportView(APIView):
             queryset = _taller_export_queryset(request, empresa_id).order_by('nombre')
 
             empresa, taller_sesion, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, [
-                FILTRO_BUSQUEDA,
-                FILTRO_ESTADO,
-                ('ciudad', 'Ciudad', None),
-            ])
 
             def row_builder(taller, cell_style):
                 return [
@@ -180,7 +172,6 @@ class TallerPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller_sesion,
                 usuario=usuario_nombre,
-                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

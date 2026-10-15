@@ -50,12 +50,9 @@ from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
-    ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO,
-    FILTRO_BUSQUEDA,
     PdfExportConfig,
     PdfExportService,
     contexto_reporte,
-    describir_filtros,
 )
 
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -1010,16 +1007,6 @@ class EmpleadoPdfExportView(APIView):
             queryset = _empleado_export_queryset(request, empresa_id).order_by('user__first_name', 'user__last_name')
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, [
-                FILTRO_BUSQUEDA,
-                ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
-                ('rol', 'Rol', nombre_rol),
-                ('acceso', 'Acceso', {'con': 'Con acceso', 'sin': 'Sin acceso'}),
-                ('taller', 'Taller', lambda v: (
-                    Taller.objects.filter(pk=v, empresa_id=empresa_id)
-                    .values_list('nombre', flat=True).first() or v
-                ) if v.isdigit() else v),
-            ])
 
             def row_builder(ue, cell_style):
                 nombre = f"{ue.user.first_name} {ue.user.last_name}".strip()
@@ -1046,7 +1033,6 @@ class EmpleadoPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

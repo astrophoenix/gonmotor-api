@@ -10,12 +10,9 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
-    FILTRO_BUSQUEDA,
-    FILTRO_ESTADO,
     PdfExportConfig,
     PdfExportService,
     contexto_reporte,
-    describir_filtros,
 )
 
 from .models import Proveedor
@@ -162,11 +159,6 @@ class ProveedorPdfExportView(APIView):
             ).select_related('empresa').order_by('nombre')
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, [
-                FILTRO_BUSQUEDA,
-                FILTRO_ESTADO,
-                ('tipo_identificacion', 'Tipo de identificación', dict(Proveedor.TIPO_IDENTIFICACION)),
-            ])
 
             def row_builder(proveedor, cell_style):
                 return [
@@ -185,7 +177,6 @@ class ProveedorPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

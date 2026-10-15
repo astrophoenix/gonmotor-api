@@ -11,11 +11,8 @@ from django.db.models import Prefetch
 from django.http import FileResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
-    FILTRO_BUSQUEDA,
-    FILTRO_ESTADO,
     _formatear_saldo,
     contexto_reporte,
-    describir_filtros,
     exportar_clientes_pdf,
 )
 # from apps.empresas.models import Empresa, Taller
@@ -183,12 +180,6 @@ class ClientePdfExportView(APIView):
             ).order_by('nombre')
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-            filtros = describir_filtros(request.query_params, [
-                FILTRO_BUSQUEDA,
-                FILTRO_ESTADO,
-                ('tipo_identificacion', 'Tipo de identificación', dict(Cliente.TIPO_IDENTIFICACION)),
-                ('min_vehiculos', 'Mínimo de vehículos', None),
-            ])
 
             buffer = BytesIO()
             exportar_clientes_pdf(
@@ -200,7 +191,6 @@ class ClientePdfExportView(APIView):
                 taller=taller,
                 usuario=usuario_nombre,
                 logo=empresa.logo if empresa else None,
-                filtros=filtros,
             )
             buffer.seek(0)
             return FileResponse(
