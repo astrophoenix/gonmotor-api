@@ -651,7 +651,7 @@ def _crear_documento(
 #   líneas grises finas, sin rellenos (mínimo consumo de tinta).
 #
 # Páginas 2+: "EMPRESA · TÍTULO (continuación)" a la izquierda, "Página X de Y"
-# a la derecha, filete negro y la cabecera de la tabla repetida.
+# a la derecha y la cabecera de la tabla repetida (sin filete propio).
 #
 # Todo en blanco y negro/grises; el logo se convierte a escala de grises.
 
@@ -999,10 +999,6 @@ class _CabeceraListado:
             _recortar_texto(f'{texto} (continuación)', 'Helvetica', 8, (x1 - x0) * 0.75),
         )
         canvas._gm_paginado = (x1, y, 8, 'Página %s de %s', 'R')
-
-        canvas.setStrokeColor(NEGRO)
-        canvas.setLineWidth(0.8)
-        canvas.line(x0, y - 5, x1, y - 5)
         canvas.restoreState()
 
 
