@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils.html import format_html
 
 from apps.core.admin import SoftDeleteAdminMixin
 from .models import Empresa, Taller
@@ -41,7 +42,49 @@ class EmpresaAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             'fields': ('logo', 'logo_preview')
         }),
         ('Estado', {
-            'fields': ('is_active', 'created_at', 'updated_at')
+            'fields': ('is_active', 'deleted_at', 'created_at', 'updated_at')
+        }),
+    )
+
+    @admin.display(description='Logo')
+    def logo_thumb(self, obj):
+        if obj.logo:
+            return format_html('<img src="{}" style="height:40px;width:auto;" />', obj.logo.url)
+        return '—'
+
+    @admin.display(description='Vista previa')
+    def logo_preview(self, obj):
+        if obj.logo:
+            return format_html('<img src="{}" style="max-height:200px;width:auto;" />', obj.logo.url)
+        return 'Sin logo cargado.'
+
+
+@admin.register(Taller)
+class TallerAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'nombre',
+        'empresa',
+        'codigo_sucursal',
+        'direccion',
+        'telefono',
+        'is_active'
+    )
+    list_filter = ('empresa', 'is_active', 'created_at')
+    search_fields = ('nombre', 'codigo_sucursal', 'direccion', 'empresa__nombre_comercial')
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Empresa & Información', {
+            'fields': ('empresa', 'nombre', 'codigo_sucursal')
+        }),
+        ('Ubicación & Contacto', {
+            'fields': ('ciudad', 'direccion', 'telefono')
+        }),
+        ('Capacidad y Horario de Citas', {
+            'fields': (
+                ('capacidad_citas_dia', 'capacidad_simultanea'),
+                ('hora_apertura', 'hora_cierre'),
+            ),
         }),
         ('Secuencias de Documentos', {
             'fields': (
@@ -60,47 +103,11 @@ class EmpresaAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             ),
             'description': (
                 'La numeración de Recepciones, Inspecciones, Cotizaciones y Órdenes '
-                'de Trabajo se genera automáticamente con el prefijo, contador y dígitos '
-                'configurados aquí.'
+                'de Trabajo de este taller se genera automáticamente con el prefijo, '
+                'contador y dígitos configurados aquí.'
             ),
         }),
-    )
-
-    @admin.display(description='Logo')
-    def logo_thumb(self, obj):
-        if obj.logo:
-            return f'<img src="{obj.logo.url}" style="height:40px;width:auto;" />'
-        return '—'
-
-    @admin.display(description='Vista previa')
-    def logo_preview(self, obj):
-        if obj.logo:
-            return f'<img src="{obj.logo.url}" style="max-height:200px;width:auto;" />'
-        return 'Sin logo cargado.'
-
-
-@admin.register(Taller)
-class TallerAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display = (
-        'nombre',
-        'empresa',
-        'codigo_sucursal',
-        'direccion',
-        'telefono',
-        'is_active'
-    )
-    list_filter = ('empresa', 'is_active', 'created_at')
-    search_fields = ('nombre', 'codigo_sucursal', 'direccion', 'empresa__nombre_comercial')
-    readonly_fields = ('created_at', 'updated_at')
-    
-    fieldsets = (
-        ('Empresa & Información', {
-            'fields': ('empresa', 'nombre', 'codigo_sucursal')
-        }),
-        ('Ubicación & Contacto', {
-            'fields': ('direccion', 'telefono')
-        }),
         ('Estado', {
-            'fields': ('is_active', 'created_at', 'updated_at')
+            'fields': ('is_active', 'deleted_at', 'created_at', 'updated_at')
         }),
     )

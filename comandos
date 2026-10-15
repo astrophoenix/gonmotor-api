@@ -26,9 +26,11 @@ pip freeze > requirements.txt
 Crear un usuario administrador (para entrar al panel de Django /admin):
 python manage.py createsuperuser
 
+Admin local:
+http://127.0.0.1:8000/admin/
+
 Env: Local AdminUser:
     user: gromero
-    pass: Pegazo13_
     pass new: 4w_w$RFViGM4.xx
 
     user: mantify
