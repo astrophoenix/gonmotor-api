@@ -10,7 +10,11 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import (
+    PdfExportConfig,
+    PdfExportService,
+    contexto_reporte,
+)
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
@@ -270,12 +274,7 @@ class VehiculoPdfExportView(APIView):
 
             # Encabezado con la empresa de la sesión (un vehículo compartido
             # puede estar vinculado a otras empresas).
-            empresa = Empresa.objects.filter(pk=empresa_id).first()
-            taller = empresa.talleres.first() if empresa else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
 
             config = PdfExportConfig(
                 title='Listado de Vehículos',
@@ -288,7 +287,6 @@ class VehiculoPdfExportView(APIView):
                     ('Dueño', 1.9),
                     ('Estado', 0.9),
                 ],
-                metadata=f'Número total de Vehículos: {queryset.count()}',
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,

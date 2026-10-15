@@ -10,7 +10,11 @@ from django.db.models import Count, Q
 from django.db.models import Prefetch
 from django.http import FileResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import _formatear_saldo, exportar_clientes_pdf
+from apps.core.utils.pdf_export import (
+    _formatear_saldo,
+    contexto_reporte,
+    exportar_clientes_pdf,
+)
 # from apps.empresas.models import Empresa, Taller
 from .models import Cliente
 from apps.vehiculos.models import VehiculoPropietario
@@ -175,17 +179,7 @@ class ClientePdfExportView(APIView):
                 )
             ).order_by('nombre')
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera_empresa = queryset.first().empresa
-                if primera_empresa:
-                    empresa = primera_empresa
-                    taller = primera_empresa.talleres.first()
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
 
             buffer = BytesIO()
             exportar_clientes_pdf(

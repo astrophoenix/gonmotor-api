@@ -7,11 +7,14 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 from django.db import IntegrityError
 from django.db.models import Q
-from django.utils import timezone
 from reportlab.platypus import Paragraph
 
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import (
+    PdfExportConfig,
+    PdfExportService,
+    contexto_reporte,
+)
 from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
@@ -143,16 +146,7 @@ class TallerPdfExportView(APIView):
         try:
             queryset = _taller_export_queryset(request, empresa_id).order_by('nombre')
 
-            empresa = queryset.first().empresa if queryset.exists() else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            empresa, taller_sesion, usuario_nombre = contexto_reporte(request, empresa_id)
 
             def row_builder(taller, cell_style):
                 return [
@@ -176,8 +170,8 @@ class TallerPdfExportView(APIView):
                     ('Activo', 0.7),
                 ],
                 empresa=empresa,
+                taller=taller_sesion,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

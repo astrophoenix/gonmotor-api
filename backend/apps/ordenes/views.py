@@ -7,12 +7,13 @@ from rest_framework.decorators import action
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from reportlab.platypus import Paragraph
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService, contexto_reporte
 
 logger = logging.getLogger(__name__)
 
@@ -691,11 +692,6 @@ class RecepcionPdfExportView(APIView):
                 is_active=True
             ).select_related('orden_trabajo', 'orden_trabajo__vehiculo', 'orden_trabajo__cliente').order_by('-created_at')
 
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
-
             def row_builder(recepcion, cell_style):
                 orden = recepcion.orden_trabajo
                 vehiculo = orden.vehiculo if orden else None
@@ -708,17 +704,7 @@ class RecepcionPdfExportView(APIView):
                     Paragraph(timezone.localtime(recepcion.created_at).strftime('%d/%m/%Y %H:%M'), cell_style),
                 ]
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera = queryset.first()
-                if primera.orden_trabajo:
-                    empresa = primera.orden_trabajo.empresa
-                    taller = primera.orden_trabajo.empresa.talleres.first() if hasattr(primera.orden_trabajo.empresa, 'talleres') else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
 
             config = PdfExportConfig(
                 title='Listado de Recepciones',
@@ -733,7 +719,6 @@ class RecepcionPdfExportView(APIView):
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
                 row_builder=row_builder,
             )
 

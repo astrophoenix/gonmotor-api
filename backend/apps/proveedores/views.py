@@ -1,5 +1,4 @@
 from django.db.models import Q
-from django.utils import timezone
 from reportlab.platypus import Paragraph
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
@@ -10,7 +9,11 @@ from rest_framework.views import APIView
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import (
+    PdfExportConfig,
+    PdfExportService,
+    contexto_reporte,
+)
 
 from .models import Proveedor
 from .serializers import ProveedorListSerializer, ProveedorSerializer
@@ -155,17 +158,7 @@ class ProveedorPdfExportView(APIView):
                 request, empresa_id
             ).select_related('empresa').order_by('nombre')
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                empresa = queryset.first().empresa
-                if empresa:
-                    taller = empresa.talleres.first()
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
 
             def row_builder(proveedor, cell_style):
                 return [
@@ -183,9 +176,7 @@ class ProveedorPdfExportView(APIView):
                 headers=EXPORT_HEADERS,
                 empresa=empresa,
                 taller=taller,
-                usuario=_usuario_nombre(request),
-                subtitle_builder=subtitle_builder,
-                metadata=f'Número total de Proveedores: {queryset.count()}',
+                usuario=usuario_nombre,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)

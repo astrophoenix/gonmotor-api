@@ -1,75 +1,26 @@
 """
-Exportación de PDFs con ReportLab/Platypus, filosofía *ink-friendly* (ahorro
-de tinta) y un diseño de grilla exacta que elimina cualquier solapamiento.
+Exportación de PDFs con ReportLab/Platypus, filosofía *ink-friendly*.
 
-PÁGINA Y MÁRGENES PERIMETRALES
-------------------------------
-Hoja A4 con márgenes limpios y explícitos: topMargin=40, bottomMargin=40,
-leftMargin=36, rightMargin=36 (puntos). La cabecera ya NO toca el borde físico
-superior: siempre queda un aire visual de ``MARGEN_SUPERIOR`` puntos antes de
-dibujar el primer elemento, en TODAS las hojas.
+LISTADOS (plantilla única, secciones 7-9)
+-----------------------------------------
+Todos los listados (clientes, vehículos, proveedores, inventario, empleados,
+talleres, recepciones…) usan ``generar_listado_pdf``, directamente o a través
+de ``PdfExportConfig`` + ``PdfExportService``:
 
-DISEÑO DE CABECERA ASIMÉTRICA (multi-página)
----------------------------------------------
-  * ``Número de página``: la etiqueta "Página X de Y" (``NumberedCanvas``) se
-    dibuja en la esquina superior derecha de absolutamente todas las hojas,
-    dentro de la banda del margen superior establecido y alineada al margen
-    derecho (nunca invade el contenido).
+  * Cabecera página 1: logo en escala de grises + datos de la empresa a la
+    izquierda y el título a la derecha; filete negro; franja de metadatos
+    (fecha y hora, usuario, registros y página X de Y).
+  * Páginas 2+: "Empresa · TÍTULO (continuación)" y "Página X de Y", con la
+    cabecera de la tabla repetida.
+  * Tabla compacta sin rellenos: cabecera en negrita entre filetes negros,
+    filas separadas por líneas grises finas, alineación por columna y anchos
+    escalados al ancho útil. Orientación vertical u horizontal automática
+    según el ancho total de las columnas.
 
-  * Página 1 (``p1`` / cabecera completa): identidad completa mediante una
-    **Tabla principal invisible de dos columnas**:
-
-      - Columna izquierda: sub-tabla de dos columnas:
-          + Sub-columna izquierda: ``Image`` del logo (ancho máx. 75pt, alto
-            proporcional). Si el logo es ``None`` o falla su lectura, esta
-            sub-columna se colapsa automáticamente de la estructura.
-          + Sub-columna derecha (datos de la EMPRESA, no del taller):
-              · L1: Nombre de la empresa en NEGRILLA (11-12pt).
-              · L2: "RUC: <ruc>" (9pt, gris #555555).
-              · L3: "Dir: <dirección>" (9pt, gris #555555).
-              · L4: "Telf: <teléfono>" (9pt, gris #555555).
-      - Columna derecha (metadatos alineados a la derecha): "Generado: …" y
-        "Usuario: …" a 9pt en gris #555555.
-
-    Debajo de la tabla se traza una línea divisoria horizontal gris muy fina
-    (gris asulado) con espaciado equilibrado (10pt sobre y 10pt bajo la línea),
-    de modo que queda centrada entre la cabecera y el título (grilla exacta).
-
-  * Páginas 2+ (``cn`` / cabecera slim): NO se repite logo ni identidad. Solo
-    una línea gris fina y, encima, un texto pequeño (8pt):
-    "[Nombre empresa] - <Título del reporte> (Continuación)".
-
-GRÁFICA DEL DOCUMENTO (PÁGINA 1)
---------------------------------
-- MARGEN_SUPERIOR (40)            <- banda libre (número de página aquí)
-  - Cabecera completa (altura real)
-  - Línea divisoria fina (2pt), espaciada 10/10 alrededor (equilibrada)
-  - Story: título 14pt NEGRILLA negro puro + "Número total de Clientes: X"
-  - Tabla de datos (repeatRows=1) con: Identificación / Cliente / Contacto /
-    Vehículos / Saldo (las mismas columnas del Excel más el Saldo).
-
-TABLA DE DATOS INK-FRIENDLY
----------------------------
-  * Cabecera de campos con fondo y líneas en el MISMO gris asulado (#D7E0E9),
-    claro y discreto (la cabecera NO se ve resaltada), con texto negro en
-    NEGRILLA para distinguir los campos de los datos.
-  * Alineación idéntica cabecera/datos por columna (Identificación a la
-    izquierda, Cliente a la izquierda, Saldo a la derecha), aplicada a nivel de
-    ``ParagraphStyle`` de cada celda (el ``TableStyle ALIGN`` no reescribe
-    Paragraphs).
-  * Registros en texto regular (sin negrillas); ÚNICA excepción: el saldo
-    pendiente > $0.00 en NEGRILLA (alerta visual).
-  * Vehículos múltiples separados con viñeta y salto de línea.
-  * Líneas de tabla finas en el mismo gris asulado (#D7E0E9).
-
-API PÚBLICA (compatible con las pantallas existentes)
--------------------------------------------------------
-  * ``exportar_clientes_pdf(...)``: reporte de referencia (Clientes).
-  * ``PdfExportConfig`` + ``PdfExportService``: servicio genérico usado por
-    Vehículos, Recepciones/Órdenes, Inventario y Configuración. El servicio
-    AUTOESCALA las columnas si la configuración supera el ancho útil de la
-    hoja, garantizando que ninguna tabla se salga de la página. Ambos
-    devuelven un ``FileResponse`` listo para Django REST Framework.
+DOCUMENTOS (secciones 1-6)
+--------------------------
+``_crear_documento`` + ``NumberedCanvas`` montan la cabecera de identidad de
+documentos individuales (la cotización, ``apps/cotizaciones/pdf.py``).
 """
 
 from decimal import Decimal
@@ -199,6 +150,22 @@ class NumberedCanvas(pdf_gen_canvas.Canvas):
         pdf_gen_canvas.Canvas.save(self)
 
     def _dibujar_paginado(self, numero_total: int) -> None:
+        # Las plantillas pueden fijar por página dónde va el paginado
+        # (``_gm_paginado``: x, y, tamaño, plantilla de texto, alineación).
+        destino = getattr(self, '_gm_paginado', None)
+        if destino:
+            x, y, tamano, plantilla, alineacion, *color = destino
+            self.saveState()
+            self.setFont('Helvetica', tamano)
+            self.setFillColor(color[0] if color else colors.black)
+            etiqueta = plantilla % (self._pageNumber, numero_total)
+            if alineacion == 'R':
+                self.drawRightString(x, y, etiqueta)
+            else:
+                self.drawString(x, y, etiqueta)
+            self.restoreState()
+            return
+
         self.saveState()
         self.setFont('Helvetica', 8)
         self.setFillColor(GRIS_INFORMACION)
@@ -221,7 +188,11 @@ def _coincidir_logo(empresa, taller):
     return getattr(taller, 'logo', None) or getattr(empresa, 'logo', None) or None
 
 
-def _leer_logo(logo) -> Tuple[Optional[bytes], float, float]:
+def _leer_logo(
+    logo,
+    ancho_max: float = ANCHO_LOGO_MAX,
+    alto_max: float = ALTO_LOGO_MAX,
+) -> Tuple[Optional[bytes], float, float]:
     """
     Lee un logo (ImageField/FieldFile, ruta o bytes) en memoria y calcula sus
     dimensiones finales de impresión (ancho máx. ``ANCHO_LOGO_MAX``, alto máx.
@@ -257,8 +228,8 @@ def _leer_logo(logo) -> Tuple[Optional[bytes], float, float]:
 
         ancho_nat, alto_nat = ImageReader(BytesIO(bin_)).getSize()
         escala = min(
-            ANCHO_LOGO_MAX / (ancho_nat or 1),
-            ALTO_LOGO_MAX / (alto_nat or 1),
+            ancho_max / (ancho_nat or 1),
+            alto_max / (alto_nat or 1),
         )
         return bin_, ancho_nat * escala, alto_nat * escala
     except Exception:
@@ -660,23 +631,438 @@ def _crear_documento(
     return doc, ancho_util
 
 
+
 # ---------------------------------------------------------------------------
-# 7) EXPORTACIÓN DE CLIENTES (flujo Platypus de referencia)
+# 7) PLANTILLA ESTÁNDAR DE LISTADOS
+# ---------------------------------------------------------------------------
+#
+# Página 1:
+#   ┌───────────────────────────────────────────────────────────────┐
+#   │ [logo] EMPRESA                           LISTADO DE CLIENTES   │
+#   │        RUC 0925033667001                Fecha: 15/10/2026 11:09 │
+#   │        Dirección                               Usuario: gromero │
+#   │        Telf. 0984024265           Registros: 63 - Página 1 de 2 │
+#   └───────────────────────────────────────────────────────────────┘
+#   Tabla: cabecera en negrita entre filetes negros, filas separadas por
+#   líneas grises finas, sin rellenos (mínimo consumo de tinta).
+#
+# Páginas 2+: "EMPRESA · TÍTULO (continuación)" a la izquierda, "Página X de Y"
+# a la derecha y la cabecera de la tabla repetida (sin filete propio).
+#
+# Todo en blanco y negro/grises; el logo se convierte a escala de grises.
+
+LST_MARGEN_SUPERIOR = 28
+LST_MARGEN_INFERIOR = 28
+LST_MARGEN_LATERAL = 28
+LST_LOGO_MAX = 48             # ~64 px a 96 ppp
+LST_ESPACIO_LOGO = 8
+LST_PROPORCION_TITULO = 0.45   # ancho de la columna del título
+LST_ESPACIO_FILETE = 6
+LST_META_TAMANO = 8          # metadatos bajo el título
+LST_META_INTERLINEA = 10
+LST_META_ESPACIO = 2         # aire entre el título y los metadatos
+LST_ESPACIO_ANTES_TABLA = 10
+LST_ALTO_CABECERA_CONT = 13
+
+LST_GRIS_TEXTO = colors.HexColor('#333333')     # datos secundarios (alto contraste)
+LST_GRIS_FILA = colors.HexColor('#C4C4C4')      # divisoria entre filas
+
+ORIENTACION_VERTICAL = 'vertical'
+ORIENTACION_HORIZONTAL = 'horizontal'
+# Con orientación automática, la hoja pasa a horizontal cuando las columnas
+# pedidas superan en este factor el ancho útil vertical.
+FACTOR_ORIENTACION_AUTO = 1.2
+
+_ALINEACIONES = {'L': TA_LEFT, 'C': TA_CENTER, 'R': TA_RIGHT}
+
+def contexto_reporte(request, empresa_id) -> Tuple[object, object, str]:
+    """
+    Identidad de la cabecera: ``(empresa, taller, usuario)``. La empresa es la
+    de la sesión (aunque el listado salga vacío) y el taller, el activo de la
+    sesión (de él sale la dirección); si no hay, el primero de la empresa.
+    """
+    from apps.authentication.utils import get_taller_desde_request
+    from apps.empresas.models import Empresa, Taller
+
+    empresa = Empresa.objects.filter(pk=empresa_id).first() if empresa_id else None
+    taller = None
+    if empresa:
+        taller_id = get_taller_desde_request(request, empresa_id)
+        if taller_id:
+            taller = Taller.objects.filter(pk=taller_id, empresa=empresa).first()
+        if taller is None:
+            taller = empresa.talleres.first()
+
+    usuario = ''
+    user = getattr(request, 'user', None)
+    if user and user.is_authenticated:
+        usuario = getattr(user, 'username', '') or getattr(user, 'email', '') or ''
+    return empresa, taller, usuario
+
+
+def _logo_en_grises(bin_: Optional[bytes]) -> Optional[bytes]:
+    """Convierte el logo a escala de grises (conserva la transparencia)."""
+    if not bin_:
+        return bin_
+    try:
+        from PIL import Image as PilImage
+
+        with PilImage.open(BytesIO(bin_)) as imagen:
+            tiene_alfa = imagen.mode in ('RGBA', 'LA') or (
+                imagen.mode == 'P' and 'transparency' in imagen.info
+            )
+            gris = imagen.convert('LA' if tiene_alfa else 'L')
+            salida = BytesIO()
+            gris.save(salida, format='PNG')
+            return salida.getvalue()
+    except Exception:
+        return bin_
+
+
+def _recortar_texto(texto: str, fuente: str, tamano: float, ancho: float) -> str:
+    """Recorta ``texto`` con '…' para que quepa en ``ancho`` puntos."""
+    if pdfmetrics.stringWidth(texto, fuente, tamano) <= ancho:
+        return texto
+    while texto and pdfmetrics.stringWidth(texto + '…', fuente, tamano) > ancho:
+        texto = texto[:-1]
+    return texto + '…'
+
+
+def estilo_celda_listado() -> ParagraphStyle:
+    """Estilo base de las celdas de datos (8pt, negro)."""
+    return ParagraphStyle(
+        'CeldaListado',
+        parent=getSampleStyleSheet()['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        leading=9.6,
+        textColor=NEGRO,
+    )
+
+
+def _estilo_cabecera_columna(alineacion: int) -> ParagraphStyle:
+    return ParagraphStyle(
+        f'CabeceraListado{alineacion}',
+        parent=getSampleStyleSheet()['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=7.5,
+        leading=9,
+        alignment=alineacion,
+        textColor=NEGRO,
+    )
+
+
+def _normalizar_columnas(columnas) -> List[Tuple[str, float, str]]:
+    """Columnas como ``(título, ancho_pulgadas[, 'L'|'C'|'R'])``."""
+    normalizadas = []
+    for columna in columnas:
+        titulo, ancho = columna[0], columna[1]
+        alineacion = columna[2] if len(columna) > 2 else 'L'
+        normalizadas.append((titulo, float(ancho), alineacion))
+    return normalizadas
+
+
+def _resolver_pagina(anchos_pulgadas: List[float], orientacion: Optional[str]):
+    """Tamaño de hoja según la orientación pedida o, si es ``None``, automática."""
+    if orientacion is None:
+        util_vertical = PAGINA[0] - 2 * LST_MARGEN_LATERAL
+        pedido = sum(anchos_pulgadas) * inch
+        orientacion = (
+            ORIENTACION_HORIZONTAL
+            if pedido > util_vertical * FACTOR_ORIENTACION_AUTO
+            else ORIENTACION_VERTICAL
+        )
+    if orientacion == ORIENTACION_HORIZONTAL:
+        return (PAGINA[1], PAGINA[0])
+    return PAGINA
+
+
+class _CabeceraListado:
+    """Dibuja la cabecera estándar (página 1 y continuaciones)."""
+
+    def __init__(self, titulo, empresa, taller, usuario, total_registros, logo):
+        self.titulo = (titulo or '').strip()
+        self.identidad = _datos_identidad(empresa, taller)
+        self.usuario = (usuario or '').strip() or '—'
+        self.total_registros = total_registros
+        self.generado = timezone.localtime()
+
+        if logo is None:
+            logo = _coincidir_logo(empresa, taller)
+        bin_, self.logo_ancho, self.logo_alto = _leer_logo(logo, LST_LOGO_MAX, LST_LOGO_MAX)
+        self.logo_bin = _logo_en_grises(bin_)
+
+    # -- bloques -------------------------------------------------------------
+
+    def _identidad_y_titulo(self, ancho: float) -> Table:
+        nombre = ParagraphStyle(
+            'LstEmpresa', fontName='Helvetica-Bold', fontSize=11, leading=13, textColor=NEGRO,
+        )
+        secundario = ParagraphStyle(
+            'LstEmpresaDato', fontName='Helvetica', fontSize=8, leading=10, textColor=LST_GRIS_TEXTO,
+        )
+        datos = self.identidad
+        flujos: List = []
+        if datos['nombre']:
+            flujos.append(Paragraph(_escape_xml(datos['nombre']), nombre))
+        if datos['ruc']:
+            flujos.append(Paragraph(_escape_xml(f"RUC {datos['ruc']}"), secundario))
+        if datos['direccion']:
+            flujos.append(Paragraph(_escape_xml(datos['direccion']), secundario))
+        if datos['telefono']:
+            flujos.append(Paragraph(_escape_xml(f"Telf. {datos['telefono']}"), secundario))
+        if not flujos:
+            flujos.append(Paragraph('', secundario))
+
+        ancho_der = ancho * LST_PROPORCION_TITULO
+        ancho_izq = ancho - ancho_der
+        sin_padding = [
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]
+
+        if self.logo_bin and self.logo_ancho and self.logo_alto:
+            ancho_logo = self.logo_ancho + LST_ESPACIO_LOGO
+            izquierda = Table(
+                [[Image(BytesIO(self.logo_bin), width=self.logo_ancho, height=self.logo_alto), flujos]],
+                colWidths=[ancho_logo, ancho_izq - ancho_logo],
+            )
+        else:
+            izquierda = Table([[flujos]], colWidths=[ancho_izq])
+        izquierda.setStyle(TableStyle(sin_padding))
+
+        # Columna derecha: título + hueco reservado para los metadatos, que se
+        # dibujan después en el canvas (el número de página se conoce al final).
+        derecha = [self._parrafo_titulo(), Spacer(1, self._alto_metadatos())]
+        tabla = Table([[izquierda, derecha]], colWidths=[ancho_izq, ancho_der])
+        tabla.setStyle(TableStyle(sin_padding + [('VALIGN', (1, 0), (1, 0), 'TOP')]))
+        return tabla
+
+    def _parrafo_titulo(self) -> Paragraph:
+        estilo = ParagraphStyle(
+            'LstTitulo', fontName='Helvetica-Bold', fontSize=13, leading=16,
+            alignment=TA_RIGHT, textColor=NEGRO,
+        )
+        return Paragraph(_escape_xml(self.titulo).upper(), estilo)
+
+    def _lineas_metadatos(self) -> List[str]:
+        """Metadatos bajo el título. La última línea lleva el paginado y es una
+        plantilla para ``NumberedCanvas`` (rellena "Página %s de %s")."""
+        total = '—' if self.total_registros is None else f'{self.total_registros:,}'.replace(',', '.')
+        return [
+            f"Fecha: {self.generado.strftime('%d/%m/%Y %H:%M')}",
+            f'Usuario: {self.usuario}',
+            f'Registros: {total}  -  Página %s de %s',
+        ]
+
+    def _alto_metadatos(self) -> float:
+        return LST_META_ESPACIO + len(self._lineas_metadatos()) * LST_META_INTERLINEA
+
+    # -- alturas -------------------------------------------------------------
+
+    def alto_primera(self, ancho: float) -> float:
+        _, alto_ident = self._identidad_y_titulo(ancho).wrap(ancho, 1000)
+        return alto_ident + LST_ESPACIO_FILETE + LST_ESPACIO_ANTES_TABLA
+
+    # -- dibujo --------------------------------------------------------------
+
+    def dibujar_primera(self, canvas, doc) -> None:
+        canvas.saveState()
+        x0 = doc.leftMargin
+        ancho = doc.pagesize[0] - doc.leftMargin - doc.rightMargin
+        x1 = x0 + ancho
+        y = doc.pagesize[1] - LST_MARGEN_SUPERIOR
+
+        # Identidad + título
+        bloque = self._identidad_y_titulo(ancho)
+        _, alto = bloque.wrapOn(canvas, ancho, 1000)
+        y_tope = y
+        y -= alto
+        bloque.drawOn(canvas, x0, y)
+
+        # Metadatos discretos, alineados a la derecha bajo el título
+        _, alto_titulo = self._parrafo_titulo().wrap(ancho * LST_PROPORCION_TITULO, 1000)
+        base = y_tope - alto_titulo - LST_META_ESPACIO - LST_META_TAMANO
+        canvas.setFont('Helvetica', LST_META_TAMANO)
+        canvas.setFillColor(LST_GRIS_TEXTO)
+        for linea in self._lineas_metadatos()[:-1]:
+            canvas.drawRightString(x1, base, linea)
+            base -= LST_META_INTERLINEA
+        canvas._gm_paginado = (
+            x1, base, LST_META_TAMANO, self._lineas_metadatos()[-1], 'R', LST_GRIS_TEXTO,
+        )
+
+        canvas.restoreState()
+
+    def dibujar_continuacion(self, canvas, doc) -> None:
+        canvas.saveState()
+        x0 = doc.leftMargin
+        x1 = doc.pagesize[0] - doc.rightMargin
+        y = doc.pagesize[1] - LST_MARGEN_SUPERIOR - 8
+
+        texto = ' · '.join(p for p in (self.identidad['nombre'], self.titulo.upper()) if p)
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(LST_GRIS_TEXTO)
+        canvas.drawString(
+            x0, y,
+            _recortar_texto(f'{texto} (continuación)', 'Helvetica', 8, (x1 - x0) * 0.75),
+        )
+        canvas._gm_paginado = (x1, y, 8, 'Página %s de %s', 'R', LST_GRIS_TEXTO)
+        canvas.restoreState()
+
+
+def _construir_tabla_listado(columnas, filas, ancho_util: float) -> Table:
+    """
+    Tabla compacta y sin rellenos: cabecera en negrita entre filetes negros,
+    filas separadas por líneas grises finas y alineación por columna (las
+    cifras a la derecha). Los anchos se escalan para ocupar todo el ancho útil.
+    """
+    anchos = [ancho for _, ancho, _ in columnas]
+    factor = ancho_util / ((sum(anchos) * inch) or 1)
+    col_widths = [a * inch * factor for a in anchos]
+
+    base = estilo_celda_listado()
+    estilos_col = [
+        ParagraphStyle(f'CeldaListado{i}', parent=base, alignment=_ALINEACIONES.get(al, TA_LEFT))
+        for i, (_, _, al) in enumerate(columnas)
+    ]
+
+    cabecera = [
+        Paragraph(_escape_xml(titulo).upper(), _estilo_cabecera_columna(_ALINEACIONES.get(al, TA_LEFT)))
+        for titulo, _, al in columnas
+    ]
+    contenido = [cabecera]
+
+    for fila in filas:
+        celdas = []
+        for indice, celda in enumerate(fila):
+            estilo = estilos_col[indice] if indice < len(estilos_col) else base
+            if isinstance(celda, Paragraph):
+                # Mismo cuerpo de letra que ``base``: solo cambia la alineación.
+                celda.style = estilo
+            else:
+                celda = Paragraph(_escape_xml('' if celda is None else str(celda)), estilo)
+            celdas.append(celda)
+        contenido.append(celdas)
+
+    comandos = [
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (0, -1), 2),
+        ('RIGHTPADDING', (-1, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+        ('LINEABOVE', (0, 0), (-1, 0), 1.0, NEGRO),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.6, NEGRO),
+    ]
+
+    if not filas:
+        vacio = ParagraphStyle(
+            'ListadoVacio', parent=base, fontName='Helvetica-Oblique', textColor=LST_GRIS_TEXTO,
+        )
+        contenido.append(
+            [Paragraph('No se encontraron registros.', vacio)]
+            + [''] * (len(columnas) - 1)
+        )
+        comandos.append(('SPAN', (0, 1), (-1, 1)))
+        comandos.append(('TOPPADDING', (0, 1), (-1, 1), 8))
+        comandos.append(('BOTTOMPADDING', (0, 1), (-1, 1), 8))
+    else:
+        comandos.append(('LINEBELOW', (0, 1), (-1, -2), 0.3, LST_GRIS_FILA))
+    comandos.append(('LINEBELOW', (0, -1), (-1, -1), 0.8, NEGRO))
+
+    tabla = Table(contenido, colWidths=col_widths, repeatRows=1)
+    tabla.setStyle(TableStyle(comandos))
+    return tabla
+
+
+def generar_listado_pdf(
+    buffer: BytesIO,
+    *,
+    titulo: str,
+    columnas,
+    filas,
+    empresa=None,
+    taller=None,
+    usuario: str = '',
+    total_registros: Optional[int] = None,
+    logo=None,
+    orientacion: Optional[str] = None,
+) -> None:
+    """
+    Plantilla única de los listados. Escribe en ``buffer`` un PDF con la
+    cabecera estándar (logo, título, fecha y hora, usuario, registros y
+    página) y la tabla de datos.
+
+    * ``columnas``: ``[(título, ancho_pulgadas[, 'L'|'C'|'R']), ...]``; los
+      anchos son relativos (se escalan al ancho útil de la hoja).
+    * ``filas``: lista de filas; cada celda es un ``Paragraph`` (construido con
+      ``estilo_celda_listado()``) o un valor que se convierte a texto.
+    * ``orientacion``: ``'vertical'``, ``'horizontal'`` o ``None`` (automática
+      según el ancho total de las columnas).
+    """
+    columnas = _normalizar_columnas(columnas)
+    filas = list(filas or [])
+    if total_registros is None:
+        total_registros = len(filas)
+
+    pagina = _resolver_pagina([ancho for _, ancho, _ in columnas], orientacion)
+    ancho_util = pagina[0] - 2 * LST_MARGEN_LATERAL
+
+    cabecera = _CabeceraListado(titulo, empresa, taller, usuario, total_registros, logo)
+    top_p1 = LST_MARGEN_SUPERIOR + cabecera.alto_primera(ancho_util)
+    top_cn = LST_MARGEN_SUPERIOR + LST_ALTO_CABECERA_CONT + LST_ESPACIO_ANTES_TABLA
+
+    doc = BaseDocTemplate(
+        buffer,
+        pagesize=pagina,
+        leftMargin=LST_MARGEN_LATERAL,
+        rightMargin=LST_MARGEN_LATERAL,
+        topMargin=LST_MARGEN_SUPERIOR,
+        bottomMargin=LST_MARGEN_INFERIOR,
+        title=titulo,
+        author=cabecera.identidad['nombre'] or 'GonMotor',
+    )
+    marco = dict(leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    doc.addPageTemplates([
+        PageTemplate(
+            id='p1',
+            frames=[Frame(
+                LST_MARGEN_LATERAL, LST_MARGEN_INFERIOR, ancho_util,
+                pagina[1] - LST_MARGEN_INFERIOR - top_p1, id='frame_p1', **marco,
+            )],
+            onPage=cabecera.dibujar_primera,
+        ),
+        PageTemplate(
+            id='cn',
+            frames=[Frame(
+                LST_MARGEN_LATERAL, LST_MARGEN_INFERIOR, ancho_util,
+                pagina[1] - LST_MARGEN_INFERIOR - top_cn, id='frame_cn', **marco,
+            )],
+            onPage=cabecera.dibujar_continuacion,
+        ),
+    ])
+
+    story = [NextPageTemplate('cn'), _construir_tabla_listado(columnas, filas, ancho_util)]
+    doc.build(story, canvasmaker=NumberedCanvas)
+
+
+# ---------------------------------------------------------------------------
+# 8) LISTADO DE CLIENTES
 # ---------------------------------------------------------------------------
 
-# (encabezado, ancho en pulgadas) — total 7.25in = 522pt < 523.27pt (A4 útil).
-# Coincide con el Excel de clientes: Identificación / Cliente / Contacto /
-# Vehículos / Saldo (mismas columnas y anchos relativos).
-COLUMNAS_CLIENTES: List[Tuple[str, float]] = [
-    ('Identificación', 1.20),
-    ('Cliente', 2.05),
-    ('Contacto', 1.75),
-    ('Vehículos', 1.40),
-    ('Saldo', 0.85),
+COLUMNAS_CLIENTES = [
+    ('Identificación', 1.05),
+    ('Cliente', 2.0),
+    ('Contacto', 1.9),
+    ('Vehículos', 1.75),
+    ('Saldo', 0.7, 'R'),
 ]
-
-# Alineación por columna, IDÉNTICA para cabeceras y datos.
-ALINEACION_COLUMNAS: List[int] = [TA_LEFT, TA_LEFT, TA_LEFT, TA_LEFT, TA_RIGHT]
 
 
 def _cliente_a_datos(cliente) -> dict:
@@ -701,7 +1087,6 @@ def _cliente_a_datos(cliente) -> dict:
             'saldo': getattr(cliente, 'saldo', 0),
         }
 
-    # Entrada tipo dict
     vehiculos = cliente.get('vehiculos') or []
     norm_vehiculos = []
     for v in vehiculos:
@@ -720,101 +1105,29 @@ def _cliente_a_datos(cliente) -> dict:
     }
 
 
-def _celda_cliente(datos: dict, celdas_style: List[ParagraphStyle]) -> List[Paragraph]:
-    """
-    Celdas de la fila del cliente. Ink-friendly: texto regular (sin negrillas
-    para clientes, email ni vehículos); el saldo > $0.00 se resalta en negrita
-    como alerta visual discreta. Cabecera y datos comparten alineación.
-    """
-    contacto = []
-    if datos.get('telefono'):
-        contacto.append(_escape_xml(datos['telefono']))
-    if datos.get('email'):
-        contacto.append(_escape_xml(datos['email']))
-    texto_contacto = '<br/>'.join(contacto) if contacto else 'Sin contacto'
+def _fila_cliente(datos: dict, estilo: ParagraphStyle) -> List[Paragraph]:
+    """Celdas de un cliente; el saldo pendiente (> $0.00) va en negrita."""
+    contacto = [_escape_xml(datos[c]) for c in ('telefono', 'email') if datos.get(c)]
+    texto_contacto = '<br/>'.join(contacto) if contacto else '—'
 
-    vehiculos = datos.get('vehiculos') or []
-    if vehiculos:
-        lineas_vehiculos = []
-        for v in vehiculos:
-            placa = _escape_xml(v.get('placa', '') or '')
-            detalle = _escape_xml(v.get('detalle', '') or '')
-            if placa and detalle:
-                lineas_vehiculos.append(f'• {placa} - {detalle}')
-            elif placa:
-                lineas_vehiculos.append(f'• {placa}')
-            elif detalle:
-                lineas_vehiculos.append(f'• {detalle}')
-        texto_vehiculos = '<br/>'.join(lineas_vehiculos)
-    else:
-        texto_vehiculos = '—'
+    lineas_vehiculos = []
+    for v in datos.get('vehiculos') or []:
+        partes = [_escape_xml(v.get(c, '') or '') for c in ('placa', 'detalle')]
+        partes = ' - '.join(p for p in partes if p)
+        if partes:
+            lineas_vehiculos.append(f'• {partes}')
+    texto_vehiculos = '<br/>'.join(lineas_vehiculos) if lineas_vehiculos else '—'
 
     saldo, es_positivo = _formatear_saldo(datos.get('saldo'))
     texto_saldo = f'<b>{saldo}</b>' if es_positivo else saldo
 
     return [
-        Paragraph(_escape_xml(datos.get('identificacion', '') or ''), celdas_style[0]),
-        Paragraph(_escape_xml(datos.get('nombre', '') or ''), celdas_style[1]),
-        Paragraph(texto_contacto, celdas_style[2]),
-        Paragraph(texto_vehiculos, celdas_style[3]),
-        Paragraph(texto_saldo, celdas_style[4]),
+        Paragraph(_escape_xml(datos.get('identificacion', '') or ''), estilo),
+        Paragraph(_escape_xml(datos.get('nombre', '') or ''), estilo),
+        Paragraph(texto_contacto, estilo),
+        Paragraph(texto_vehiculos, estilo),
+        Paragraph(texto_saldo, estilo),
     ]
-
-
-def _construir_tabla_clientes(data_clientes: Iterable) -> Table:
-    """Construye la ``Table`` de clientes con celdas ``Paragraph``."""
-    styles = getSampleStyleSheet()
-    cabecera_base = dict(
-        fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=10,
-        textColor=NEGRO,
-    )
-    # Un estilo POR COLUMNA: así cabeceras y datos quedan alineados exactamente
-    # igual (el TableStyle ALIGN no reescribe la alineación de Paragraphs).
-    celdas_style = [
-        ParagraphStyle(
-            f'CeldaCliente{i}',
-            parent=styles['Normal'],
-            alignment=alineacion,
-            fontName='Helvetica',
-            fontSize=8.5,
-            leading=10,
-            textColor=GRIS_OSCURO_TEXTO,
-        )
-        for i, alineacion in enumerate(ALINEACION_COLUMNAS)
-    ]
-
-    cabeceras = [
-        Paragraph(h, ParagraphStyle(
-            f'Cabecera{i}',
-            alignment=ALINEACION_COLUMNAS[i],
-            **cabecera_base,
-        ))
-        for i, (h, _) in enumerate(COLUMNAS_CLIENTES)
-    ]
-    filas = [cabeceras]
-
-    filas_datos = [_cliente_a_datos(c) for c in (data_clientes or [])]
-    if not filas_datos:
-        fila_vacia = [Paragraph('', s) for s in celdas_style]
-        fila_vacia[0] = Paragraph('No se encontraron registros.', celdas_style[0])
-        filas.append(fila_vacia)
-    else:
-        for datos in filas_datos:
-            filas.append(_celda_cliente(datos, celdas_style))
-
-    tabla = Table(
-        filas,
-        colWidths=[ancho * inch for _, ancho in COLUMNAS_CLIENTES],
-        repeatRows=1,
-    )
-    tabla.setStyle(TableStyle(ESTILO_TABLA_INK_FRIENDLY + [
-        # Alineación de celdas por columna (a nivel de tabla, refuerzo).
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),
-    ]))
-    return tabla
 
 
 def _formatear_saldo(valor) -> Tuple[str, bool]:
@@ -841,165 +1154,92 @@ def exportar_clientes_pdf(
     logo=None,
 ) -> None:
     """
-    Exporta clientes a un PDF dentro de ``buffer`` (flujo Platypus de
-    referencia). ``data_clientes`` acepta un queryset de ``Cliente`` o una
-    lista de dicts con las claves usadas en ``_cliente_a_datos``.
-
-    ``logo`` recibe la ubicación del logo (ImageField/ruta); si no se indica o
-    su archivo no está disponible, la sub-columna del logo se colapsa y el
-    nombre de la empresa toma el lugar sin romper el PDF.
-
-    El story de la página 1 es: título (14pt negrita), metadato
-    "Número total de Clientes: X" y la tabla de datos con cabecera repetible.
+    Exporta clientes con la plantilla estándar de listados. ``data_clientes``
+    acepta un queryset de ``Cliente`` o una lista de dicts con las claves de
+    ``_cliente_a_datos``.
     """
-    doc, _ = _crear_documento(buffer, titulo, empresa, taller, usuario, logo)
-
-    if total_registros is None:
-        total_registros = len(list(data_clientes))
-
-    story: List = [
-        NextPageTemplate('cn'),
-        Paragraph(_escape_xml(titulo).upper(), _estilo_titulo_reporte()),
-        Paragraph(
-            f'Número total de Clientes: {total_registros}',
-            _estilo_metadato_reporte(),
-        ),
-        Spacer(1, 10),
-        _construir_tabla_clientes(data_clientes),
-    ]
-
-    doc.build(story, canvasmaker=NumberedCanvas)
+    estilo = estilo_celda_listado()
+    filas = [_fila_cliente(_cliente_a_datos(c), estilo) for c in (data_clientes or [])]
+    generar_listado_pdf(
+        buffer,
+        titulo=titulo,
+        columnas=COLUMNAS_CLIENTES,
+        filas=filas,
+        empresa=empresa,
+        taller=taller,
+        usuario=usuario,
+        total_registros=total_registros,
+        logo=logo,
+    )
 
 
 # ---------------------------------------------------------------------------
-# 8) CAPA DE COMPATIBILIDAD: API GENÉRICA PARA LAS PANTALLAS EXISTENTES
+# 9) API GENÉRICA PARA LAS PANTALLAS DE LISTADO
 # ---------------------------------------------------------------------------
-
-def _ajustar_anchos(
-    anchos: List[float],
-    ancho_disponible: float,
-) -> List[float]:
-    """
-    AUTOESCALA proporcionalmente los anchos (en pulgadas) de columnas si su
-    total supera el ancho útil de la hoja (en puntos). Garantiza que ninguna
-    tabla se salga de la página sin importar la configuración histórica.
-    """
-    total_pt = sum(anchos) * inch
-    if total_pt <= ancho_disponible:
-        return anchos
-    factor = ancho_disponible / total_pt
-    return [a * factor for a in anchos]
-
 
 class PdfExportConfig:
-    """Configuración de un reporte genérico (mantiene su API histórica)."""
+    """
+    Configuración de un listado PDF.
+
+    * ``headers``: ``[(título, ancho_pulgadas[, 'L'|'C'|'R']), ...]``.
+    * ``row_builder(instancia, estilo)``: devuelve las celdas de una fila;
+      ``estilo`` es el de ``estilo_celda_listado()``.
+    * ``total_registros``: si no se indica, se cuentan las filas.
+    * ``orientacion``: ``'vertical'``, ``'horizontal'`` o ``None`` (auto).
+    """
 
     def __init__(
         self,
         title: str,
         filename: str,
-        headers: List[Tuple[str, float]],
-        subtitle_builder=None,
+        headers: List[Tuple],
         row_builder=None,
         empresa=None,
         taller=None,
         usuario: Optional[str] = None,
-        metadata: Optional[str] = None,
+        total_registros: Optional[int] = None,
+        orientacion: Optional[str] = None,
+        logo=None,
     ):
         self.title = title
         self.filename = filename
         self.headers = headers
-        self.subtitle_builder = subtitle_builder
         self.row_builder = row_builder
         self.empresa = empresa
         self.taller = taller
         self.usuario = usuario
-        self.metadata = metadata
+        self.total_registros = total_registros
+        self.orientacion = orientacion
+        self.logo = logo
 
 
 class PdfExportService:
-    """
-    Servicio genérico que construye una tabla Platypus a partir de un
-    ``PdfExportConfig`` y se apoya en la cabecera asimétrica (completa/slim) +
-    ``NumberedCanvas`` para estandarizar todas las pantallas. Devuelve un
-    ``FileResponse`` listo para Django REST Framework.
-    """
+    """Genera el listado de un ``PdfExportConfig`` y lo devuelve como ``FileResponse``."""
 
     def __init__(self, config: PdfExportConfig, queryset):
         self.config = config
         self.queryset = queryset
 
-    def _build_subtitle(self) -> Optional[Paragraph]:
-        if not self.config.subtitle_builder:
-            return None
-        texto = self.config.subtitle_builder(self.queryset)
-        if not texto:
-            return None
-        return Paragraph(texto, _estilo_informacion())
-
-    def _build_metadata(self) -> Optional[Paragraph]:
-        """Metadato del reporte (ej. 'Número total de Vehículos: X')."""
-        if not self.config.metadata:
-            return None
-        return Paragraph(_escape_xml(self.config.metadata), _estilo_metadato_reporte())
-
-    def _build_table(self, ancho_util: float) -> Table:
-        styles = getSampleStyleSheet()
-        celda_style = ParagraphStyle(
-            'CeldaGenerica',
-            parent=styles['Normal'],
-            fontName='Helvetica',
-            fontSize=9,
-            leading=11,
-            textColor=GRIS_OSCURO_TEXTO,
-        )
-        encabezado_style = ParagraphStyle(
-            'CabeceraGenerica',
-            parent=celda_style,
-            fontName='Helvetica-Bold',
-            textColor=NEGRO,
-        )
-
-        filas = [[Paragraph(h[0], encabezado_style) for h in self.config.headers]]
-
-        if self.config.row_builder:
-            for instancia in self.queryset:
-                filas.append(self.config.row_builder(instancia, celda_style))
-        else:
-            filas.append([Paragraph(str(instancia), celda_style)])
-
-        anchos_orig = [ancho for _, ancho in self.config.headers]
-        anchos = _ajustar_anchos(anchos_orig, ancho_util)  # nunca se sale de la hoja
-        col_widths = [a * inch for a in anchos]
-
-        tabla = Table(filas, colWidths=col_widths, repeatRows=1)
-        tabla.setStyle(TableStyle(ESTILO_TABLA_INK_FRIENDLY))
-        return tabla
-
     def generate_response(self) -> FileResponse:
+        estilo = estilo_celda_listado()
+        if self.config.row_builder:
+            filas = [self.config.row_builder(instancia, estilo) for instancia in self.queryset]
+        else:
+            filas = [[str(instancia)] for instancia in self.queryset]
+
         buffer = BytesIO()
-        doc, ancho_util = _crear_documento(
+        generar_listado_pdf(
             buffer,
-            self.config.title,
-            self.config.empresa,
-            self.config.taller,
-            self.config.usuario or '',
+            titulo=self.config.title,
+            columnas=self.config.headers,
+            filas=filas,
+            empresa=self.config.empresa,
+            taller=self.config.taller,
+            usuario=self.config.usuario or '',
+            total_registros=self.config.total_registros,
+            logo=self.config.logo,
+            orientacion=self.config.orientacion,
         )
-
-        story: List = [
-            NextPageTemplate('cn'),
-            Paragraph(
-                _escape_xml(self.config.title).upper(),
-                _estilo_titulo_reporte(),
-            ),
-        ]
-        subtitulo = self._build_metadata() or self._build_subtitle()
-        if subtitulo:
-            story.append(subtitulo)
-        story.append(Spacer(1, 10))
-        story.append(self._build_table(ancho_util))
-
-        doc.build(story, canvasmaker=NumberedCanvas)
         buffer.seek(0)
 
         return FileResponse(
@@ -1008,3 +1248,18 @@ class PdfExportService:
             filename=self.config.filename,
             as_attachment=False,
         )
+
+
+def _ajustar_anchos(
+    anchos: List[float],
+    ancho_disponible: float,
+) -> List[float]:
+    """
+    Escala proporcionalmente los anchos (en pulgadas) si su total supera el
+    ancho útil (en puntos). Lo usa la cotización.
+    """
+    total_pt = sum(anchos) * inch
+    if total_pt <= ancho_disponible:
+        return anchos
+    factor = ancho_disponible / total_pt
+    return [a * factor for a in anchos]
