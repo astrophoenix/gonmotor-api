@@ -91,7 +91,7 @@ La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export
 
 ### Configuración y entorno
 - Activar el venv antes de cualquier comando: `cd backend && source venv/bin/activate`.
-- `backend/.env` es obligatorio: `SECRET_KEY` y `DB_NAME/USER/PASSWORD/HOST/PORT` no tienen valor por defecto. Opcionales: `DB_SSLMODE`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, `WHATSAPP_*`, `AI_TEXT_*`, `THROTTLE_*`.
+- `backend/.env` es obligatorio: `SECRET_KEY` y `DB_NAME/USER/PASSWORD/HOST/PORT` no tienen valor por defecto. Opcionales: `DB_SSLMODE`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, `WHATSAPP_*`, `AI_TEXT_*`, `THROTTLE_*`, `EXPORT_MAX_FILAS_PDF` (default 5000) y `EXPORT_MAX_FILAS_EXCEL` (default 20000): máximo de filas de los exportes de listados; por encima responden 400 pidiendo filtrar (`apps/core/utils/export_limits.py`).
 - `local.py`: `DEBUG=True`, `ALLOWED_HOSTS=['*']`, email por consola. `production.py`: HTTPS/HSTS, whitenoise, SMTP, logging a consola.
 - CORS permite las cabeceras `x-empresa-id` y `x-taller-id`; si se añade una cabecera nueva desde el frontend hay que agregarla a `CORS_ALLOW_HEADERS`.
 

@@ -54,6 +54,7 @@ from apps.core.utils.pdf_export import (
     PdfExportService,
     contexto_reporte,
 )
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -1037,6 +1038,8 @@ class EmpleadoPdfExportView(APIView):
             )
             service = PdfExportService(config, queryset)
             return service.generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
@@ -1091,6 +1094,8 @@ class EmpleadoExcelExportView(APIView):
             )
             service = ExcelExportService(config, queryset)
             return service.generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},

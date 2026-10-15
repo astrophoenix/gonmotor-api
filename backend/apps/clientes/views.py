@@ -22,6 +22,7 @@ from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import ClienteListSerializer, ClienteSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
+from apps.core.utils.export_limits import ExporteDemasiadoGrande, validar_limite_exporte
 from .excel_import import (
 
     CLIENT_COLUMNS,
@@ -181,11 +182,14 @@ class ClientePdfExportView(APIView):
 
             empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
 
+            total = queryset.count()
+            validar_limite_exporte(total, 'pdf')
+
             buffer = BytesIO()
             exportar_clientes_pdf(
                 buffer,
                 queryset,
-                total_registros=queryset.count(),
+                total_registros=total,
                 titulo='Listado de Clientes',
                 empresa=empresa,
                 taller=taller,
@@ -200,6 +204,8 @@ class ClientePdfExportView(APIView):
                 as_attachment=False,
             )
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
@@ -303,6 +309,8 @@ class ClienteExcelExportView(APIView):
             service = ExcelExportService(config, queryset)
             return service.generate_response()
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},

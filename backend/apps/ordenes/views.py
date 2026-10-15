@@ -4,16 +4,20 @@ import logging
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from reportlab.platypus import Paragraph
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService, contexto_reporte
+from apps.core.utils.pdf_export import (
+    PdfExportConfig,
+    PdfExportService,
+    celda_texto,
+    contexto_reporte,
+    fecha_hora_local,
+)
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +92,60 @@ class OrdenTrabajoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         'prioridad': 'prioridad',
         'tipo_trabajo': 'tipo_trabajo',
     }
+
+    @action(detail=False, methods=['get'], url_path='exportar-pdf', url_name='exportar-listado-pdf')
+    def exportar_listado_pdf(self, request):
+        """Listado PDF con los mismos filtros, búsqueda y recorte por taller del listado."""
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        # Las filas solo usan relaciones de `select_related`: sin los prefetch del listado.
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related(None)
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+
+        def row_builder(orden, cell_style):
+            return [
+                celda_texto(orden.numero_orden or f'#{orden.id}', cell_style),
+                celda_texto(orden.vehiculo.placa if orden.vehiculo else None, cell_style),
+                celda_texto(orden.cliente.nombre if orden.cliente else None, cell_style),
+                celda_texto(orden.get_tipo_trabajo_display(), cell_style),
+                celda_texto(orden.get_prioridad_display(), cell_style),
+                celda_texto(orden.get_estado_display(), cell_style),
+                celda_texto(fecha_hora_local(orden.fecha_ingreso), cell_style),
+                celda_texto(fecha_hora_local(orden.fecha_entrega), cell_style),
+                celda_texto(f'${orden.total:,.2f}', cell_style),
+            ]
+
+        config = PdfExportConfig(
+            title='Listado de Órdenes de Trabajo',
+            filename='listado_ordenes.pdf',
+            headers=[
+                ('Nº Orden', 1.1),
+                ('Placa', 0.9),
+                ('Cliente', 2.0),
+                ('Tipo', 1.1),
+                ('Prioridad', 0.8),
+                ('Estado', 1.1),
+                ('Ingreso', 1.1),
+                ('Entrega', 1.1),
+                ('Total', 0.9, 'R'),
+            ],
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=row_builder,
+        )
+        try:
+            return PdfExportService(config, queryset).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception as e:
+            logger.exception('Error al generar el PDF del listado de órdenes')
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
 
     def get_queryset(self):
         # `para_request` encadena, con las funciones de authentication.utils:
@@ -165,6 +223,91 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         'estado': 'estado',
         'tipo_recepcion': 'tipo_recepcion',
     }
+
+    EXPORT_HEADERS = [
+        ('Nº Recepción', 1.2),
+        ('Placa', 0.9),
+        ('Cliente', 2.0),
+        ('Tipo', 1.1),
+        ('Estado', 1.1),
+        ('Ingreso', 1.1),
+        ('Salida', 1.1),
+        ('Grúa', 0.6),
+    ]
+
+    def _export_queryset(self):
+        """Mismo queryset del listado: empresa en sesión, taller, búsqueda y filtros
+        (sin sus prefetch: las filas solo usan relaciones de `select_related`)."""
+        return self.filter_queryset(self.get_queryset()).prefetch_related(None)
+
+    @staticmethod
+    def _export_valores(recepcion):
+        return [
+            recepcion.numero_recepcion or f'#{recepcion.id}',
+            recepcion.vehiculo.placa if recepcion.vehiculo else '-',
+            recepcion.cliente.nombre if recepcion.cliente else '-',
+            recepcion.get_tipo_recepcion_display(),
+            recepcion.get_estado_display(),
+            fecha_hora_local(recepcion.fecha_ingreso or recepcion.created_at),
+            fecha_hora_local(recepcion.fecha_salida),
+            'Sí' if recepcion.ingreso_en_grua else 'No',
+        ]
+
+    @action(detail=False, methods=['get'], url_path='exportar-pdf')
+    def exportar_pdf(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+        config = PdfExportConfig(
+            title='Listado de Recepciones',
+            filename='listado_recepciones.pdf',
+            headers=self.EXPORT_HEADERS,
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=lambda recepcion, cell_style: [
+                celda_texto(valor, cell_style) for valor in self._export_valores(recepcion)
+            ],
+        )
+        try:
+            return PdfExportService(config, self._export_queryset()).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception as e:
+            logger.exception('Error al generar el PDF del listado de recepciones')
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
+
+    @action(detail=False, methods=['get'], url_path='export-excel')
+    def export_excel(self, request):
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+        config = ExcelExportConfig(
+            title='Listado de Recepciones',
+            filename='listado_recepciones.xlsx',
+            headers=self.EXPORT_HEADERS,
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=self._export_valores,
+        )
+        try:
+            return ExcelExportService(config, self._export_queryset()).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception as e:
+            logger.exception('Error al generar el Excel del listado de recepciones')
+            return Response(
+                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
+                status=500,
+            )
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
@@ -360,6 +503,62 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         'estado': 'estado',
         'tipo_inspeccion': 'tipo_inspeccion',
     }
+
+    @action(detail=False, methods=['get'], url_path='exportar-pdf', url_name='exportar-listado-pdf')
+    def exportar_listado_pdf(self, request):
+        """Listado PDF con los mismos filtros, búsqueda y recorte por taller del listado."""
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        queryset = self.filter_queryset(self.get_queryset()).select_related('responsable').prefetch_related(None)
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+
+        def row_builder(inspeccion, cell_style):
+            recepcion = inspeccion.recepcion
+            vehiculo = inspeccion.vehiculo or (recepcion.vehiculo if recepcion else None)
+            cliente = inspeccion.cliente or (recepcion.cliente if recepcion else None)
+            responsable = inspeccion.responsable
+            return [
+                celda_texto(inspeccion.numero_inspeccion or f'#{inspeccion.id}', cell_style),
+                celda_texto(vehiculo.placa if vehiculo else None, cell_style),
+                celda_texto(cliente.nombre if cliente else None, cell_style),
+                celda_texto(inspeccion.get_tipo_inspeccion_display(), cell_style),
+                celda_texto(
+                    (responsable.get_full_name() or responsable.username) if responsable else None,
+                    cell_style,
+                ),
+                celda_texto(inspeccion.get_estado_display(), cell_style),
+                celda_texto(fecha_hora_local(inspeccion.fecha_inspeccion or inspeccion.created_at), cell_style),
+            ]
+
+        config = PdfExportConfig(
+            title='Listado de Inspecciones',
+            filename='listado_inspecciones.pdf',
+            headers=[
+                ('Nº Inspección', 1.2),
+                ('Placa', 0.9),
+                ('Cliente', 2.0),
+                ('Tipo', 1.1),
+                ('Responsable', 1.5),
+                ('Estado', 1.1),
+                ('Fecha', 1.1),
+            ],
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=row_builder,
+        )
+        try:
+            return PdfExportService(config, queryset).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception as e:
+            logger.exception('Error al generar el PDF del listado de inspecciones')
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
@@ -671,131 +870,3 @@ class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
         _check_orden_editable(orden)
         instance.delete()
         orden.calcular_totales()
-
-
-class RecepcionPdfExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
-    renderer_classes = [JSONRenderer]
-
-    def get(self, request):
-        empresa_id = get_empresa_id_desde_request(request)
-
-        if not empresa_id:
-            return Response(
-                {'detail': 'No se pudo determinar la empresa activa.'},
-                status=403
-            )
-
-        try:
-            queryset = RecepcionVehiculo.objects.filter(
-                orden_trabajo__empresa=empresa_id,
-                is_active=True
-            ).select_related('orden_trabajo', 'orden_trabajo__vehiculo', 'orden_trabajo__cliente').order_by('-created_at')
-
-            def row_builder(recepcion, cell_style):
-                orden = recepcion.orden_trabajo
-                vehiculo = orden.vehiculo if orden else None
-                cliente = orden.cliente if orden else None
-                return [
-                    Paragraph(f'#{recepcion.id}', cell_style),
-                    Paragraph(vehiculo.placa if vehiculo else '-', cell_style),
-                    Paragraph(cliente.nombre if cliente else '-', cell_style),
-                    Paragraph('Sí' if recepcion.ingreso_en_grua else 'No', cell_style),
-                    Paragraph(timezone.localtime(recepcion.created_at).strftime('%d/%m/%Y %H:%M'), cell_style),
-                ]
-
-            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
-
-            config = PdfExportConfig(
-                title='Listado de Recepciones',
-                filename='listado_recepciones.pdf',
-                headers=[
-                    ('ID', 0.8),
-                    ('Placa', 1.4),
-                    ('Cliente', 2.0),
-                    ('Grúa', 0.8),
-                    ('Fecha ingreso', 1.6),
-                ],
-                empresa=empresa,
-                taller=taller,
-                usuario=usuario_nombre,
-                row_builder=row_builder,
-            )
-
-            service = PdfExportService(config, queryset)
-            return service.generate_response()
-
-        except Exception as e:
-            return Response(
-                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
-                status=500
-            )
-
-
-class RecepcionExcelExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
-    renderer_classes = [JSONRenderer]
-
-    def get(self, request):
-        empresa_id = get_empresa_id_desde_request(request)
-
-        if not empresa_id:
-            return Response(
-                {'detail': 'No se pudo determinar la empresa activa.'},
-                status=403
-            )
-
-        try:
-            queryset = RecepcionVehiculo.objects.filter(
-                orden_trabajo__empresa=empresa_id,
-                is_active=True
-            ).select_related('orden_trabajo', 'orden_trabajo__vehiculo', 'orden_trabajo__cliente').order_by('-created_at')
-
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera = queryset.first()
-                if primera.orden_trabajo:
-                    empresa = primera.orden_trabajo.empresa
-                    taller = primera.orden_trabajo.empresa.talleres.first() if hasattr(primera.orden_trabajo.empresa, 'talleres') else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
-
-            def row_builder(recepcion):
-                orden = recepcion.orden_trabajo
-                vehiculo = orden.vehiculo if orden else None
-                cliente = orden.cliente if orden else None
-                return [
-                    str(recepcion.id),
-                    vehiculo.placa if vehiculo else '-',
-                    cliente.nombre if cliente else '-',
-                    'Sí' if recepcion.ingreso_en_grua else 'No',
-                    timezone.localtime(recepcion.created_at).strftime('%d/%m/%Y %H:%M'),
-                ]
-
-            config = ExcelExportConfig(
-                title='Listado de Recepciones',
-                filename='listado_recepciones.xlsx',
-                headers=[
-                    ('ID', 0.8),
-                    ('Placa', 1.4),
-                    ('Cliente', 2.0),
-                    ('Grúa', 0.8),
-                    ('Fecha ingreso', 1.6),
-                ],
-                empresa=empresa,
-                taller=taller,
-                usuario=usuario_nombre,
-                row_builder=row_builder,
-            )
-
-            service = ExcelExportService(config, queryset)
-            return service.generate_response()
-
-        except Exception as e:
-            return Response(
-                {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
-                status=500
-            )

@@ -291,3 +291,8 @@ WHATSAPP_TWILIO_FROM_NUMBER = config('WHATSAPP_TWILIO_FROM_NUMBER', default='wha
 WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')
 
 
+
+# Máximo de filas de los exportes de listados (PDF/Excel). Por encima se
+# responde 400 pidiendo filtrar: generar todo en memoria agota la instancia.
+EXPORT_MAX_FILAS_PDF = config('EXPORT_MAX_FILAS_PDF', cast=int, default=5000)
+EXPORT_MAX_FILAS_EXCEL = config('EXPORT_MAX_FILAS_EXCEL', cast=int, default=20000)

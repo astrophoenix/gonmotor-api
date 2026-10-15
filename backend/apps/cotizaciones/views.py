@@ -1,6 +1,7 @@
 from django.http import FileResponse
 
 import datetime
+import logging
 
 from io import BytesIO
 
@@ -11,7 +12,15 @@ from rest_framework.response import Response
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.mixins import FiltroTallerMixin
+from apps.core.utils.pdf_export import (
+    PdfExportConfig,
+    PdfExportService,
+    celda_texto,
+    contexto_reporte,
+    fecha_hora_local,
+)
 from apps.ordenes.relaciones_flujo import responder_relaciones
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
 from .pdf import exportar_cotizacion_pdf
@@ -21,6 +30,8 @@ from .serializers import (
     DetalleServicioCotizacionSerializer,
     ESTADOS_EDITABLES,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _parsear_fecha(valor):
@@ -78,6 +89,61 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     FILTROS_LISTADO = {
         'estado': 'estado',
     }
+
+    @action(detail=False, methods=['get'], url_path='exportar-pdf', url_name='exportar-listado-pdf')
+    def exportar_listado_pdf(self, request):
+        """
+        Listado PDF con los mismos filtros, búsqueda y recorte por taller del
+        listado. No confundir con ``exportar_pdf`` (detail): el documento formal
+        de una cotización.
+        """
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        # Las filas solo usan relaciones de `select_related`: sin los prefetch del listado.
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related(None)
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+
+        def row_builder(cotizacion, cell_style):
+            asesor = cotizacion.asesor
+            return [
+                celda_texto(cotizacion.numero_cotizacion or f'#{cotizacion.id}', cell_style),
+                celda_texto(cotizacion.vehiculo.placa if cotizacion.vehiculo else None, cell_style),
+                celda_texto(cotizacion.cliente.nombre if cotizacion.cliente else None, cell_style),
+                celda_texto((asesor.get_full_name() or asesor.username) if asesor else None, cell_style),
+                celda_texto(cotizacion.get_estado_display(), cell_style),
+                celda_texto(fecha_hora_local(cotizacion.created_at), cell_style),
+                celda_texto(f'${cotizacion.total:,.2f}', cell_style),
+            ]
+
+        config = PdfExportConfig(
+            title='Listado de Cotizaciones',
+            filename='listado_cotizaciones.pdf',
+            headers=[
+                ('Nº Cotización', 1.2),
+                ('Placa', 0.9),
+                ('Cliente', 2.0),
+                ('Asesor', 1.5),
+                ('Estado', 1.1),
+                ('Fecha', 1.1),
+                ('Total', 0.9, 'R'),
+            ],
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=row_builder,
+        )
+        try:
+            return PdfExportService(config, queryset).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception as e:
+            logger.exception('Error al generar el PDF del listado de cotizaciones')
+            return Response(
+                {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
+                status=500,
+            )
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)

@@ -41,6 +41,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .export_limits import contar_filas, iterar_filas, validar_limite_exporte
 from .pdf_export import _datos_identidad
 
 # ---------------------------------------------------------------------------
@@ -136,10 +137,10 @@ class ExcelExportService:
     def _build_data_rows(self) -> List[List]:
         rows = []
         if self.config.row_builder:
-            for instance in self.queryset:
+            for instance in iterar_filas(self.queryset):
                 rows.append(self.config.row_builder(instance))
         else:
-            for instance in self.queryset:
+            for instance in iterar_filas(self.queryset):
                 rows.append([str(instance) if instance is not None else ''])
         return rows
 
@@ -233,6 +234,7 @@ class ExcelExportService:
         return fila
 
     def generate_response(self) -> HttpResponse:
+        validar_limite_exporte(contar_filas(self.queryset), 'excel')
         wb = Workbook()
         ws = wb.active
         ws.title = self.config.title[:31]

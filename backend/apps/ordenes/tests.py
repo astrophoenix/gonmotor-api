@@ -829,6 +829,120 @@ class _BaseRelacionesFlujoApiTests(TestCase):
         )
 
 
+class ListadoPdfFlujoApiTests(_BaseRelacionesFlujoApiTests):
+    """``GET .../exportar-pdf/`` (listado) de inspecciones, cotizaciones y órdenes."""
+
+    URLS = {
+        'inspecciones': ('/api/ordenes/inspecciones/exportar-pdf/', 'listado_inspecciones.pdf'),
+        'cotizaciones': ('/api/cotizaciones/exportar-pdf/', 'listado_cotizaciones.pdf'),
+        'ordenes': ('/api/ordenes/ordenes-trabajo/exportar-pdf/', 'listado_ordenes.pdf'),
+    }
+
+    def _assert_pdf(self, respuesta, filename):
+        self.assertEqual(respuesta.status_code, 200, getattr(respuesta, 'content', b''))
+        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        self.assertIn(filename, respuesta['Content-Disposition'])
+        self.assertTrue(b''.join(respuesta.streaming_content).startswith(b'%PDF'))
+
+    def test_descarga_listado_pdf(self):
+        for modulo, (url, filename) in self.URLS.items():
+            with self.subTest(modulo=modulo):
+                self._assert_pdf(self.client.get(url), filename)
+
+    def test_texto_con_caracteres_de_markup_no_rompe_el_pdf(self):
+        # `&` y `<` sin escapar hacen fallar el Paragraph de reportlab.
+        self.cliente.nombre = 'Pérez & Hijos <SA>'
+        self.cliente.save()
+        for modulo, (url, filename) in self.URLS.items():
+            with self.subTest(modulo=modulo):
+                self._assert_pdf(self.client.get(url), filename)
+
+    def test_aplica_filtros_del_listado(self):
+        for modulo, (url, filename) in self.URLS.items():
+            with self.subTest(modulo=modulo):
+                self._assert_pdf(self.client.get(url, {'search': 'NO-EXISTE', 'estado': 'PENDIENTE'}), filename)
+
+    def test_requiere_autenticacion(self):
+        from rest_framework.test import APIClient
+
+        anonimo = APIClient()
+        for modulo, (url, _) in self.URLS.items():
+            with self.subTest(modulo=modulo):
+                self.assertEqual(anonimo.get(url).status_code, 401)
+
+    def test_el_pdf_de_una_cotizacion_sigue_disponible(self):
+        respuesta = self.client.get(f'/api/cotizaciones/{self.cotizacion.pk}/exportar-pdf/')
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn('COT-GRA-0001', respuesta['Content-Disposition'])
+
+
+class RecepcionListadoExportApiTests(_BaseRelacionesFlujoApiTests):
+    """Exportes del listado de recepciones: empresa en sesión (no la de la OT),
+    búsqueda y filtros del panel."""
+
+    def _valores_excel(self, params=None):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        respuesta = self.client.get('/api/recepciones/export-excel/', params or {})
+        self.assertEqual(respuesta.status_code, 200)
+        contenido = b''.join(respuesta.streaming_content) if respuesta.streaming else respuesta.content
+        hoja = load_workbook(BytesIO(contenido)).active
+        return {str(c.value) for fila in hoja.iter_rows() for c in fila if c.value is not None}
+
+    def test_pdf_incluye_recepciones_sin_orden(self):
+        self.assertIsNone(self.recepcion.orden_trabajo_id)
+        respuesta = self.client.get('/api/recepciones/exportar-pdf/')
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn('listado_recepciones.pdf', respuesta['Content-Disposition'])
+        self.assertTrue(b''.join(respuesta.streaming_content).startswith(b'%PDF'))
+
+    def test_excel_incluye_recepciones_sin_orden(self):
+        valores = self._valores_excel()
+        self.assertIn('REC-GRA-0001', valores)
+        self.assertIn('GRA-0001', valores)
+        self.assertIn('Cliente Grafo', valores)
+
+    def test_aplica_busqueda_y_filtros(self):
+        self.assertNotIn('REC-GRA-0001', self._valores_excel({'search': 'NO-EXISTE'}))
+        self.assertIn('REC-GRA-0001', self._valores_excel({'search': 'GRA-0001'}))
+        self.assertNotIn('REC-GRA-0001', self._valores_excel({'solo_grua': 'true'}))
+
+    def test_excluye_recepciones_de_otra_empresa(self):
+        from apps.empresas.models import Empresa
+
+        from .models import RecepcionVehiculo
+
+        otra = Empresa.objects.create(nombre_comercial='Otra', ruc='777777777777')
+        RecepcionVehiculo.objects.create(
+            empresa=otra, cliente=self.cliente, vehiculo=self.vehiculo, numero_recepcion='REC-AJENA-1'
+        )
+        self.assertNotIn('REC-AJENA-1', self._valores_excel())
+
+
+class ListadoExportLimiteApiTests(_BaseRelacionesFlujoApiTests):
+    """Sobre el máximo de filas los exportes del flujo responden 400, no 500."""
+
+    URLS = [
+        '/api/ordenes/inspecciones/exportar-pdf/',
+        '/api/cotizaciones/exportar-pdf/',
+        '/api/ordenes/ordenes-trabajo/exportar-pdf/',
+        '/api/recepciones/exportar-pdf/',
+        '/api/recepciones/export-excel/',
+    ]
+
+    def test_sobre_el_limite_responde_400(self):
+        from django.test import override_settings
+
+        with override_settings(EXPORT_MAX_FILAS_PDF=0, EXPORT_MAX_FILAS_EXCEL=0):
+            for url in self.URLS:
+                with self.subTest(url=url):
+                    respuesta = self.client.get(url)
+                    self.assertEqual(respuesta.status_code, 400, respuesta.content)
+                    self.assertIn('máximo', respuesta.json()['detail'])
+
+
 class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
     def _url(self, inspeccion=None):
         return f'/api/ordenes/inspecciones/{(inspeccion or self.inspeccion).pk}/relaciones/'

@@ -18,6 +18,7 @@ from apps.core.utils.pdf_export import (
 from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from rest_framework import permissions
 
 from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
@@ -176,6 +177,8 @@ class TallerPdfExportView(APIView):
             )
             service = PdfExportService(config, queryset)
             return service.generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
@@ -231,6 +234,8 @@ class TallerExcelExportView(APIView):
             )
             service = ExcelExportService(config, queryset)
             return service.generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},

@@ -49,6 +49,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from .export_limits import contar_filas, iterar_filas, validar_limite_exporte
+
 # Helvetica conoce su variante en negrita (fuentes base, sin incrustar).
 pdfmetrics.registerFontFamily(
     'Helvetica',
@@ -728,6 +730,19 @@ def _recortar_texto(texto: str, fuente: str, tamano: float, ancho: float) -> str
     return texto + '…'
 
 
+def celda_texto(valor, estilo: ParagraphStyle, vacio: str = '-') -> Paragraph:
+    """Celda de listado con el texto escapado (``&``, ``<`` y ``>`` rompen ``Paragraph``)."""
+    texto = str(valor).strip() if valor not in (None, '') else ''
+    return Paragraph(_escape_xml(texto) or vacio, estilo)
+
+
+def fecha_hora_local(valor, formato: str = '%d/%m/%Y %H:%M') -> str:
+    """Fecha/hora en la zona local del proyecto; ``'-'`` si no hay valor."""
+    if not valor:
+        return '-'
+    return timezone.localtime(valor).strftime(formato)
+
+
 def estilo_celda_listado() -> ParagraphStyle:
     """Estilo base de las celdas de datos (8pt, negro)."""
     return ParagraphStyle(
@@ -1221,11 +1236,14 @@ class PdfExportService:
         self.queryset = queryset
 
     def generate_response(self) -> FileResponse:
+        total = contar_filas(self.queryset)
+        validar_limite_exporte(total, 'pdf')
+
         estilo = estilo_celda_listado()
         if self.config.row_builder:
-            filas = [self.config.row_builder(instancia, estilo) for instancia in self.queryset]
+            filas = [self.config.row_builder(instancia, estilo) for instancia in iterar_filas(self.queryset)]
         else:
-            filas = [[str(instancia)] for instancia in self.queryset]
+            filas = [[str(instancia)] for instancia in iterar_filas(self.queryset)]
 
         buffer = BytesIO()
         generar_listado_pdf(
@@ -1236,7 +1254,7 @@ class PdfExportService:
             empresa=self.config.empresa,
             taller=self.config.taller,
             usuario=self.config.usuario or '',
-            total_registros=self.config.total_registros,
+            total_registros=self.config.total_registros or total,
             logo=self.config.logo,
             orientacion=self.config.orientacion,
         )

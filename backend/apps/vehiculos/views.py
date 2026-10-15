@@ -23,6 +23,7 @@ from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
 from apps.authentication.permissions import TieneRecurso
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 
 
 
@@ -296,6 +297,8 @@ class VehiculoPdfExportView(APIView):
             service = PdfExportService(config, queryset)
             return service.generate_response()
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
@@ -370,6 +373,8 @@ class VehiculoExcelExportView(APIView):
             service = ExcelExportService(config, queryset)
             return service.generate_response()
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},

@@ -18,6 +18,7 @@ from apps.core.utils.pdf_export import (
 from .models import Proveedor
 from .serializers import ProveedorListSerializer, ProveedorSerializer
 from apps.authentication.permissions import TieneRecurso
+from apps.core.utils.export_limits import ExporteDemasiadoGrande
 
 
 
@@ -182,6 +183,8 @@ class ProveedorPdfExportView(APIView):
             service = PdfExportService(config, queryset)
             return service.generate_response()
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
@@ -238,6 +241,8 @@ class ProveedorExcelExportView(APIView):
             service = ExcelExportService(config, queryset)
             return service.generate_response()
 
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
