@@ -640,9 +640,8 @@ def _crear_documento(
 #   ┌───────────────────────────────────────────────────────────────┐
 #   │ [logo] EMPRESA                           LISTADO DE CLIENTES   │
 #   │        RUC 0925033667001                Fecha: 15/10/2026 11:09 │
-#   │        Dirección · Telf.                       Usuario: gromero │
-#   │                                   Registros: 63 - Página 1 de 2 │
-#   ├───────────────────────────────────────────────────────────────┤ línea fina
+#   │        Dirección                               Usuario: gromero │
+#   │        Telf. 0984024265           Registros: 63 - Página 1 de 2 │
 #   └───────────────────────────────────────────────────────────────┘
 #   Tabla: cabecera en negrita entre filetes negros, filas separadas por
 #   líneas grises finas, sin rellenos (mínimo consumo de tinta).
@@ -662,7 +661,6 @@ LST_ESPACIO_FILETE = 6
 LST_META_TAMANO = 8          # metadatos bajo el título
 LST_META_INTERLINEA = 10
 LST_META_ESPACIO = 2         # aire entre el título y los metadatos
-LST_GROSOR_LINEA_CABECERA = 0.5
 LST_ESPACIO_ANTES_TABLA = 10
 LST_ALTO_CABECERA_CONT = 13
 
@@ -809,13 +807,10 @@ class _CabeceraListado:
             flujos.append(Paragraph(_escape_xml(datos['nombre']), nombre))
         if datos['ruc']:
             flujos.append(Paragraph(_escape_xml(f"RUC {datos['ruc']}"), secundario))
-        contacto = [
-            _escape_xml(datos['direccion']) if datos['direccion'] else '',
-            _escape_xml(f"Telf. {datos['telefono']}") if datos['telefono'] else '',
-        ]
-        contacto = ' · '.join(c for c in contacto if c)
-        if contacto:
-            flujos.append(Paragraph(contacto, secundario))
+        if datos['direccion']:
+            flujos.append(Paragraph(_escape_xml(datos['direccion']), secundario))
+        if datos['telefono']:
+            flujos.append(Paragraph(_escape_xml(f"Telf. {datos['telefono']}"), secundario))
         if not flujos:
             flujos.append(Paragraph('', secundario))
 
@@ -900,11 +895,6 @@ class _CabeceraListado:
             x1, base, LST_META_TAMANO, self._lineas_metadatos()[-1], 'R', LST_GRIS_TEXTO,
         )
 
-        # Línea fina que separa la cabecera de la tabla
-        y_inf = y - LST_ESPACIO_FILETE
-        canvas.setStrokeColor(NEGRO)
-        canvas.setLineWidth(LST_GROSOR_LINEA_CABECERA)
-        canvas.line(x0, y_inf, x1, y_inf)
         canvas.restoreState()
 
     def dibujar_continuacion(self, canvas, doc) -> None:
