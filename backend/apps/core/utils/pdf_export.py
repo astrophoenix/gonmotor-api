@@ -893,7 +893,10 @@ class _CabeceraListado:
         tabla.setStyle(TableStyle(sin_padding))
         return tabla
 
-    def _parrafo_filtros(self) -> Paragraph:
+    def _parrafo_filtros(self) -> Optional[Paragraph]:
+        """Línea de filtros aplicados; ``None`` si no hay filtros (se omite)."""
+        if not self.filtros:
+            return None
         estilo = ParagraphStyle(
             'LstFiltros', fontName='Helvetica', fontSize=8, leading=10, textColor=NEGRO,
         )
@@ -901,15 +904,11 @@ class _CabeceraListado:
             f'<font name="Helvetica-Bold" size="6.5" color="{LST_HEX_ETIQUETA}">'
             'FILTROS APLICADOS</font>&nbsp;&nbsp;&nbsp;'
         )
-        if self.filtros:
-            partes = [
-                f'{_escape_xml(nombre)}: <b>{_escape_xml(valor)}</b>'
-                for nombre, valor in self.filtros
-            ]
-            cuerpo = '&nbsp;&nbsp;·&nbsp;&nbsp;'.join(partes)
-        else:
-            cuerpo = 'Ninguno (se incluyen todos los registros)'
-        return Paragraph(etiqueta + cuerpo, estilo)
+        partes = [
+            f'{_escape_xml(nombre)}: <b>{_escape_xml(valor)}</b>'
+            for nombre, valor in self.filtros
+        ]
+        return Paragraph(etiqueta + '&nbsp;&nbsp;·&nbsp;&nbsp;'.join(partes), estilo)
 
     def _celdas_meta(self) -> List[Tuple[str, str, float]]:
         """(etiqueta, valor, proporción del ancho) de la franja de metadatos."""
@@ -926,11 +925,11 @@ class _CabeceraListado:
 
     def alto_primera(self, ancho: float) -> float:
         _, alto_ident = self._identidad_y_titulo(ancho).wrap(ancho, 1000)
-        _, alto_filtros = self._parrafo_filtros().wrap(ancho, 1000)
-        return (
-            alto_ident + LST_ESPACIO_FILETE + LST_ALTO_FRANJA_META
-            + LST_ESPACIO_FILTROS + alto_filtros + LST_ESPACIO_ANTES_TABLA
-        )
+        alto = alto_ident + LST_ESPACIO_FILETE + LST_ALTO_FRANJA_META + LST_ESPACIO_ANTES_TABLA
+        filtros = self._parrafo_filtros()
+        if filtros:
+            alto += LST_ESPACIO_FILTROS + filtros.wrap(ancho, 1000)[1]
+        return alto
 
     # -- dibujo --------------------------------------------------------------
 
@@ -979,10 +978,11 @@ class _CabeceraListado:
             x += ancho_celda
         canvas.line(x0, y_inf, x1, y_inf)
 
-        # Filtros aplicados
+        # Filtros aplicados (solo si hay alguno)
         filtros = self._parrafo_filtros()
-        _, alto_filtros = filtros.wrapOn(canvas, ancho, 1000)
-        filtros.drawOn(canvas, x0, y_inf - LST_ESPACIO_FILTROS - alto_filtros)
+        if filtros:
+            _, alto_filtros = filtros.wrapOn(canvas, ancho, 1000)
+            filtros.drawOn(canvas, x0, y_inf - LST_ESPACIO_FILTROS - alto_filtros)
         canvas.restoreState()
 
     def dibujar_continuacion(self, canvas, doc) -> None:
