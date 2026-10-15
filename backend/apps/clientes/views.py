@@ -10,7 +10,14 @@ from django.db.models import Count, Q
 from django.db.models import Prefetch
 from django.http import FileResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import _formatear_saldo, exportar_clientes_pdf
+from apps.core.utils.pdf_export import (
+    FILTRO_BUSQUEDA,
+    FILTRO_ESTADO,
+    _formatear_saldo,
+    contexto_reporte,
+    describir_filtros,
+    exportar_clientes_pdf,
+)
 # from apps.empresas.models import Empresa, Taller
 from .models import Cliente
 from apps.vehiculos.models import VehiculoPropietario
@@ -175,17 +182,13 @@ class ClientePdfExportView(APIView):
                 )
             ).order_by('nombre')
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera_empresa = queryset.first().empresa
-                if primera_empresa:
-                    empresa = primera_empresa
-                    taller = primera_empresa.talleres.first()
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+            filtros = describir_filtros(request.query_params, [
+                FILTRO_BUSQUEDA,
+                FILTRO_ESTADO,
+                ('tipo_identificacion', 'Tipo de identificación', dict(Cliente.TIPO_IDENTIFICACION)),
+                ('min_vehiculos', 'Mínimo de vehículos', None),
+            ])
 
             buffer = BytesIO()
             exportar_clientes_pdf(
@@ -197,6 +200,7 @@ class ClientePdfExportView(APIView):
                 taller=taller,
                 usuario=usuario_nombre,
                 logo=empresa.logo if empresa else None,
+                filtros=filtros,
             )
             buffer.seek(0)
             return FileResponse(

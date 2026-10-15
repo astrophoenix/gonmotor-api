@@ -2,7 +2,6 @@ import operator
 from functools import reduce
 
 from django.db.models import F, Q
-from django.utils import timezone
 from rest_framework import filters, permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.renderers import JSONRenderer
@@ -13,7 +12,14 @@ from reportlab.platypus import Paragraph
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import (
+    ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO,
+    FILTRO_BUSQUEDA,
+    PdfExportConfig,
+    PdfExportService,
+    contexto_reporte,
+    describir_filtros,
+)
 
 from .models import Repuesto, RepuestoImagen, Servicio
 from .serializers import (
@@ -159,6 +165,20 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         return Response({'results': data})
 
 
+FILTROS_REPUESTOS = [
+    FILTRO_BUSQUEDA,
+    ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
+    ('categoria', 'Categoría', dict(Repuesto.Categoria.choices)),
+    ('stock_bajo', 'Stock bajo', lambda v: 'Sí' if v.lower() == 'true' else ''),
+]
+
+FILTROS_SERVICIOS = [
+    FILTRO_BUSQUEDA,
+    ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
+    ('categoria', 'Categoría', dict(Servicio.Categoria.choices)),
+]
+
+
 def _repuesto_export_queryset(request, empresa_id):
     """Aplica los filtros del listado (search, estado, categoria, stock_bajo)
     a las exportaciones PDF/Excel de repuestos."""
@@ -235,17 +255,8 @@ class RepuestoPdfExportView(APIView):
         try:
             queryset = _repuesto_export_queryset(request, empresa_id).order_by('codigo')
 
-            empresa = queryset.first().empresa if queryset.exists() else None
-            taller = empresa.talleres.first() if empresa else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+            filtros = describir_filtros(request.query_params, FILTROS_REPUESTOS)
 
             def row_builder(rep, cell_style):
                 return [
@@ -267,15 +278,15 @@ class RepuestoPdfExportView(APIView):
                     ('Nombre', 1.9),
                     ('Categoría', 1.3),
                     ('Marca', 1.3),
-                    ('Stock', 0.7),
-                    ('Mínimo', 0.7),
-                    ('Bajo', 0.6),
-                    ('P. Venta', 0.9),
+                    ('Stock', 0.7, 'R'),
+                    ('Mínimo', 0.7, 'R'),
+                    ('Bajo', 0.6, 'C'),
+                    ('P. Venta', 0.9, 'R'),
                 ],
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
+                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)
@@ -367,17 +378,8 @@ class ServicioPdfExportView(APIView):
         try:
             queryset = _servicio_export_queryset(request, empresa_id).order_by('codigo')
 
-            empresa = queryset.first().empresa if queryset.exists() else None
-            taller = empresa.talleres.first() if empresa else None
-
-            usuario_nombre = ''
-            if request.user and request.user.is_authenticated:
-                usuario_nombre = getattr(request.user, 'username', '') or getattr(request.user, 'email', '') or ''
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+            filtros = describir_filtros(request.query_params, FILTROS_SERVICIOS)
 
             def row_builder(svc, cell_style):
                 return [
@@ -395,13 +397,13 @@ class ServicioPdfExportView(APIView):
                     ('Código', 1.1),
                     ('Nombre', 2.4),
                     ('Categoría', 1.6),
-                    ('Minutos', 0.9),
-                    ('P. Referencial', 1.2),
+                    ('Minutos', 0.9, 'R'),
+                    ('P. Referencial', 1.2, 'R'),
                 ],
                 empresa=empresa,
                 taller=taller,
                 usuario=usuario_nombre,
-                subtitle_builder=subtitle_builder,
+                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)
@@ -451,8 +453,8 @@ class ServicioExcelExportView(APIView):
                     ('Código', 1.2),
                     ('Nombre', 2.4),
                     ('Categoría', 1.6),
-                    ('Minutos', 0.9),
-                    ('P. Referencial', 1.2),
+                    ('Minutos', 0.9, 'R'),
+                    ('P. Referencial', 1.2, 'R'),
                 ],
                 empresa=empresa,
                 taller=taller,

@@ -22,7 +22,6 @@ from django.core.mail import EmailMultiAlternatives
 from email.mime.text import MIMEText
 import base64
 from django.conf import settings
-from django.utils import timezone
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 from .serializers import UserProfileUpdateSerializer, ChangePasswordSerializer
@@ -50,7 +49,14 @@ from .permisos_repo import (
 from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
-from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.utils.pdf_export import (
+    ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO,
+    FILTRO_BUSQUEDA,
+    PdfExportConfig,
+    PdfExportService,
+    contexto_reporte,
+    describir_filtros,
+)
 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -1003,13 +1009,17 @@ class EmpleadoPdfExportView(APIView):
         try:
             queryset = _empleado_export_queryset(request, empresa_id).order_by('user__first_name', 'user__last_name')
 
-            empresa = queryset.first().empresa if queryset.exists() else None
-            taller = empresa.talleres.first() if empresa else None
-
-            def subtitle_builder(qs):
-                if not qs.exists():
-                    return None
-                return f'Generado: {timezone.localtime().strftime("%d/%m/%Y %H:%M")}'
+            empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+            filtros = describir_filtros(request.query_params, [
+                FILTRO_BUSQUEDA,
+                ('estado', 'Estado', ESTADOS_FILTRO_ACTIVOS_POR_DEFECTO),
+                ('rol', 'Rol', nombre_rol),
+                ('acceso', 'Acceso', {'con': 'Con acceso', 'sin': 'Sin acceso'}),
+                ('taller', 'Taller', lambda v: (
+                    Taller.objects.filter(pk=v, empresa_id=empresa_id)
+                    .values_list('nombre', flat=True).first() or v
+                ) if v.isdigit() else v),
+            ])
 
             def row_builder(ue, cell_style):
                 nombre = f"{ue.user.first_name} {ue.user.last_name}".strip()
@@ -1035,8 +1045,8 @@ class EmpleadoPdfExportView(APIView):
                 ],
                 empresa=empresa,
                 taller=taller,
-                usuario=_usuario_nombre(request),
-                subtitle_builder=subtitle_builder,
+                usuario=usuario_nombre,
+                filtros=filtros,
                 row_builder=row_builder,
             )
             service = PdfExportService(config, queryset)
