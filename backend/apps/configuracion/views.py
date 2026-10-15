@@ -19,6 +19,7 @@ from apps.empresas.models import Empresa, Taller
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 from rest_framework import permissions
 
 from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
@@ -35,7 +36,7 @@ class TallerConfigViewSet(viewsets.ModelViewSet):
     """
     serializer_class = TallerConfigSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('talleres')]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'codigo_sucursal', 'ciudad', 'direccion', 'telefono']
     ordering_fields = ['nombre']
 

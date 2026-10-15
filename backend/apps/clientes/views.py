@@ -6,7 +6,8 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from django.db.models import Count, Q
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.db.models import Prefetch
 from django.http import FileResponse
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
@@ -23,6 +24,7 @@ from .serializers import ClienteListSerializer, ClienteSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande, validar_limite_exporte
+from apps.core.filters import BusquedaIndexadaFilter
 from .excel_import import (
 
     CLIENT_COLUMNS,
@@ -32,6 +34,25 @@ from .excel_import import (
 )
 
 
+
+def _anotar_vehiculos_count(queryset):
+    """
+    `vehiculos_count` (vehículos actuales del cliente) como subconsulta
+    correlacionada. Con `Count` sobre la relación, Postgres agrupaba TODOS los
+    clientes de la empresa antes de paginar; la subconsulta solo se evalúa
+    para las filas de la página.
+    """
+    conteo = (
+        VehiculoPropietario.objects.filter(cliente=OuterRef('pk'), es_actual=True)
+        .order_by()
+        .values('cliente')
+        .annotate(total=Count('vehiculo', distinct=True))
+        .values('total')
+    )
+    return queryset.annotate(
+        vehiculos_count=Coalesce(Subquery(conteo, output_field=IntegerField()), 0)
+    )
+
 class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     parser_classes = (MultiPartParser, FormParser)
     serializer_class = ClienteSerializer
@@ -39,7 +60,7 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
     delete_identifier_fields = ['nombre']
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'identificacion', 'email', 'telefono']
     ordering_fields = ['nombre', 'created_at']
     ordering = ['-created_at']
@@ -72,13 +93,7 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(tipo_identificacion=tipo_identificacion)
 
         if self.action in ['list', 'retrieve']:
-            queryset = queryset.select_related('empresa').annotate(
-                vehiculos_count=Count(
-                    'vehiculos_asociados__vehiculo',
-                    filter=Q(vehiculos_asociados__es_actual=True),
-                    distinct=True,
-                )
-            )
+            queryset = _anotar_vehiculos_count(queryset.select_related('empresa'))
             min_vehiculos = self.request.query_params.get('min_vehiculos')
             if min_vehiculos and min_vehiculos.isdigit():
                 queryset = queryset.filter(vehiculos_count__gte=int(min_vehiculos))
@@ -143,13 +158,7 @@ def _cliente_export_queryset(request, empresa_id):
 
     min_vehiculos = request.query_params.get('min_vehiculos')
     if min_vehiculos and min_vehiculos.isdigit():
-        queryset = queryset.annotate(
-            vehiculos_count=Count(
-                'vehiculos_asociados__vehiculo',
-                filter=Q(vehiculos_asociados__es_actual=True),
-                distinct=True,
-            )
-        ).filter(vehiculos_count__gte=int(min_vehiculos))
+        queryset = _anotar_vehiculos_count(queryset).filter(vehiculos_count__gte=int(min_vehiculos))
 
     return queryset
 

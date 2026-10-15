@@ -123,6 +123,13 @@ class Cotizacion(BaseTallerModel):
                 condition=models.Q(deleted_at__isnull=True),
                 name='cotizacion_tal_vivos_idx'
             ),
+            # Vista "Todos los talleres" (sin filtro de sucursal): sin este
+            # índice el listado une y ordena todas las filas de la empresa.
+            models.Index(
+                fields=['empresa', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='cotizacion_emp_vivos_idx'
+            ),
         ]
 
     def __str__(self):

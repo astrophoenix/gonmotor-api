@@ -27,9 +27,6 @@ class EstadoPorEmpresaMixin:
                 data['is_active'] = instance.activo_en(empresa_id)
             else:
                 data['is_active'] = bool(activo) and instance.esta_operativo
-        if 'empresas' in data:
-            # Solo la empresa de la sesión: no se exponen otros tenants.
-            data['empresas'] = [empresa_id] if empresa_id else []
         return data
 
     def _aplicar_estado_vinculo(self, instance, is_active):
@@ -96,10 +93,9 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, serializers.ModelSerialize
             'observaciones',
             'is_active',
             'imagen',
-            'empresas',
             'cliente_id',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'empresas']
+        read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
             # La unicidad de placa se valida manualmente en create() para poder
             # distinguir entre una placa activa (error normal) y una desactivada
@@ -223,6 +219,10 @@ class VehiculoSerializer(EstadoPorEmpresaMixin, serializers.ModelSerializer):
     cliente_id = serializers.SerializerMethodField()
 
     def _propietario_actual(self, obj):
+        # El listado precarga `propietarios_actuales`; sin él (create/update) se consulta.
+        precargados = getattr(obj, 'propietarios_actuales', None)
+        if precargados is not None:
+            return precargados[0] if precargados else None
         return obj.propietarios.filter(es_actual=True).select_related('cliente').first()
 
     def get_cliente_nombre(self, obj):
@@ -248,8 +248,10 @@ class VehiculoSerializer(EstadoPorEmpresaMixin, serializers.ModelSerializer):
 
     class Meta:
         model = Vehiculo
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at', 'updated_at', 'cliente_nombre', 'cliente_id', 'empresas']
+        # `empresas` no se expone: el vehículo es global y su lista de empresas
+        # revelaría qué otros tenants lo atienden.
+        exclude = ['empresas']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'cliente_nombre', 'cliente_id']
         extra_kwargs = {
             # La unicidad de placa se valida manualmente en create() para poder
             # distinguir entre una placa activa (error normal) y una desactivada

@@ -213,3 +213,21 @@ class VehiculoExportTest(APITestCase):
             for celda in fila
         ]
         self.assertIn('Propietario Demo (inactivo)', valores)
+
+class VehiculoNoExponeEmpresasTests(TestCase):
+    """El vehículo es global: la API no revela qué otras empresas lo atienden."""
+
+    def test_listado_y_detalle_sin_empresas(self):
+        propia = Empresa.objects.create(nombre_comercial='Propia', ruc='1790000000333')
+        ajena = Empresa.objects.create(nombre_comercial='Ajena', ruc='1790000000444')
+        vehiculo = Vehiculo.objects.create(placa='EMP0001', marca='Kia', modelo='Rio')
+        vehiculo.empresas.add(propia, ajena)
+
+        client = APIClient()
+        client.force_authenticate(User.objects.create_superuser(username='emp', password='x'))
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(propia.pk)
+
+        listado = client.get('/api/vehiculos/').json()['results']
+        self.assertEqual([v['placa'] for v in listado], ['EMP0001'])
+        self.assertNotIn('empresas', listado[0])
+        self.assertNotIn('empresas', client.get(f'/api/vehiculos/{vehiculo.pk}/').json())

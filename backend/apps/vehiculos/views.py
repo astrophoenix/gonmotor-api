@@ -24,6 +24,7 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 
 
@@ -44,30 +45,15 @@ def formatear_placa(placa):
     return f'{match.group(1)}-{match.group(2)}'
 
 
-class PlacaNormalizableSearchFilter(filters.SearchFilter):
-    """SearchFilter que además busca placas con/sin guiones o espacios.
+class PlacaNormalizableSearchFilter(BusquedaIndexadaFilter):
+    """Búsqueda indexada que además encuentra placas con/sin guiones o espacios.
 
     Ej.: almacenado 'GSU5812' también aparece al buscar 'GSU-5812' o 'GSU 5812'.
     """
 
-    def filter_queryset(self, request, queryset, view):
-        search_terms = self.get_search_terms(request)
-        search_fields = getattr(view, 'search_fields', None)
-
-        if not search_fields or not search_terms:
-            return queryset
-
-        lookups = [self.construct_search(str(field), queryset) for field in search_fields]
-
-        conditions = []
-        for term in search_terms:
-            queries = [Q(**{lookup: term}) for lookup in lookups]
-            normalized = term.replace('-', '').replace(' ', '').upper()
-            if normalized:
-                queries.append(Q(**{'placa__icontains': normalized}))
-            conditions.append(reduce(operator.or_, queries))
-
-        return queryset.filter(reduce(operator.and_, conditions))
+    def condiciones_extra(self, termino):
+        normalizada = termino.replace('-', '').replace(' ', '').upper()
+        return [Q(placa__sintilde_icontains=normalizada)] if normalizada else []
 
 
 class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
@@ -137,10 +123,16 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         cliente_id = self.request.query_params.get('cliente')
         if cliente_id:
-            queryset = queryset.filter(propietarios__cliente_id=cliente_id, propietarios__es_actual=True)
+            # Subconsulta en vez de JOIN: no duplica filas, así que el listado
+            # no necesita `DISTINCT` (que obligaba a deduplicar todo el tenant).
+            queryset = queryset.filter(
+                pk__in=VehiculoPropietario.objects.filter(
+                    cliente_id=cliente_id, es_actual=True
+                ).values('vehiculo_id')
+            )
 
         if self.action in ['list', 'retrieve']:
-            return queryset.select_related().prefetch_related(
+            return queryset.prefetch_related(
                 Prefetch(
                     'propietarios',
                     queryset=VehiculoPropietario.objects.filter(
@@ -148,9 +140,9 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
                     ).select_related('cliente'),
                     to_attr='propietarios_actuales',
                 ),
-            ).distinct()
+            )
 
-        return queryset.distinct()
+        return queryset
 
     @action(detail=False, methods=['get'])
     def choices(self, request):

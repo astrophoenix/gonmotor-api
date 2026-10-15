@@ -555,18 +555,21 @@ class InspeccionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializ
             rep['responsable_rol_display'] = None
         from apps.cotizaciones.models import Cotizacion
 
-        rep['tiene_cotizacion_activa'] = instance.cotizaciones_generadas.filter(
-            estado__in=Cotizacion.ESTADOS_VIGENTES
-        ).exists()
-        cotizacion_activa = instance.cotizaciones_generadas.filter(
-            estado__in=Cotizacion.ESTADOS_VIGENTES
-        ).only('id', 'numero_cotizacion', 'estado').order_by('-created_at', '-id').first()
+        # Se resuelve en memoria sobre `.all()`: el listado precarga
+        # `cotizaciones_generadas`, y cada `.filter()`/`.order_by()` sobre la
+        # relación lanzaba una consulta nueva por fila (4 por inspección).
+        cotizaciones = sorted(
+            instance.cotizaciones_generadas.all(), key=lambda c: (c.created_at, c.id)
+        )
+        vigentes = [c for c in cotizaciones if c.estado in Cotizacion.ESTADOS_VIGENTES]
+        rep['tiene_cotizacion_activa'] = bool(vigentes)
+        cotizacion_activa = vigentes[-1] if vigentes else None
         rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
         rep['cotizacion_activa_estado'] = cotizacion_activa.estado if cotizacion_activa else None
         rep['numero_cotizacion'] = (
             cotizacion_activa.numero_cotizacion if cotizacion_activa else None
         )
-        ultima_cotizacion = instance.cotizaciones_generadas.order_by('created_at', 'id').last()
+        ultima_cotizacion = cotizaciones[-1] if cotizaciones else None
         rep['cotizacion_estado'] = ultima_cotizacion.estado if ultima_cotizacion else None
         rep['cotizacion_estado_display'] = (
             ultima_cotizacion.get_estado_display() if ultima_cotizacion else None
@@ -577,12 +580,10 @@ class InspeccionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializ
         )
         # La reapertura se bloquea si la inspección ya generó una orden de trabajo
         # o si tiene una cotización enviada/aceptada que el cliente ya conoció.
-        bloquea_cotizacion = instance.cotizaciones_generadas.filter(
-            estado__in=(
-                Cotizacion.EstadoCotizacion.ENVIADA,
-                Cotizacion.EstadoCotizacion.ACEPTADA,
-            )
-        ).exists()
+        bloquea_cotizacion = any(
+            c.estado in (Cotizacion.EstadoCotizacion.ENVIADA, Cotizacion.EstadoCotizacion.ACEPTADA)
+            for c in cotizaciones
+        )
         rep['tiene_cotizacion_bloqueante'] = bloquea_cotizacion
         rep['puede_reabrir'] = (
             instance.estado == 'FINALIZADA'
@@ -700,7 +701,10 @@ class RecepcionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerialize
                 'estado': cotizacion.estado,
                 'estado_display': cotizacion.get_estado_display(),
             }
-            for cotizacion in instance.cotizaciones_generadas.order_by('created_at')
+            # En memoria sobre `.all()` para aprovechar el prefetch del listado.
+            for cotizacion in sorted(
+                instance.cotizaciones_generadas.all(), key=lambda c: (c.created_at, c.id)
+            )
         ]
 
     def get_orden_trabajo_numero(self, instance):

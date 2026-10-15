@@ -18,6 +18,7 @@ from apps.core.utils.pdf_export import (
     fecha_hora_local,
 )
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class OrdenTrabajoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     # Query param que fija el taller explícitamente (se valida igual que la
     # cabecera X-Taller-ID contra el alcance del rol).
     taller_query_param = 'sucursal'
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = [
         'numero_orden',
         'cliente__nombre',
@@ -212,7 +213,7 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     taller_filter_field = 'sucursal'
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['numero_recepcion', 'vehiculo__placa', 'vehiculo__marca', 'cliente__nombre', 'cliente__identificacion', 'orden_trabajo__numero_orden']
     ordering_fields = ['created_at', 'id', 'fecha_ingreso']
     ordering = ['-created_at']
@@ -316,7 +317,7 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         queryset = (
             RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
             .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal')
-            .prefetch_related('inspecciones', 'cotizaciones_generadas')
+            .prefetch_related('inspecciones', 'cotizaciones_generadas', 'fotos')
         )
         return self.filtrar_por_taller(self._filtrar_recepciones(queryset))
 
@@ -477,7 +478,7 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     taller_filter_field = 'sucursal'
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     # La búsqueda alcanza el número de la inspección, el de su recepción y los
     # datos del vehículo/cliente, que pueden venir en la propia inspección o en
     # la recepción de origen.

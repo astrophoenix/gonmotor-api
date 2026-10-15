@@ -19,6 +19,7 @@ from .models import Proveedor
 from .serializers import ProveedorListSerializer, ProveedorSerializer
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 
 
@@ -46,7 +47,7 @@ class ProveedorViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
     delete_identifier_fields = ['nombre']
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'identificacion', 'email', 'telefono', 'contacto']
     ordering_fields = ['nombre', 'created_at']
     ordering = ['-created_at']

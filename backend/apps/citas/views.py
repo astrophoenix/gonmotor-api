@@ -18,6 +18,7 @@ from .models import Cita
 from .serializers import CitaSerializer
 from .services import disponibilidad, resolver_taller_de_cita
 from apps.authentication.permissions import TieneRecurso
+from apps.core.filters import BusquedaIndexadaFilter
 
 
 # Restricción de unicidad del número de recepción (UNIQUE (empresa, numero_recepcion)).
@@ -71,7 +72,7 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
     pagination_class = CitaPagination
     taller_filter_field = 'taller'
     taller_query_param = 'taller'
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = [
         'cliente__nombre',
         'cliente__identificacion',

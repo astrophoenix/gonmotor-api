@@ -21,6 +21,7 @@ from apps.core.utils.pdf_export import (
 )
 from apps.ordenes.relaciones_flujo import responder_relaciones
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
 from .pdf import exportar_cotizacion_pdf
@@ -72,7 +73,7 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     taller_filter_field = 'sucursal'
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = [
         'numero_cotizacion',
         'cliente__nombre',

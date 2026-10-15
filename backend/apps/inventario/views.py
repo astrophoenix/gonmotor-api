@@ -26,6 +26,7 @@ from .serializers import (
 )
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 
 
@@ -35,7 +36,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
     delete_identifier_fields = ['codigo']
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['codigo', 'nombre', 'descripcion', 'marca', 'numero_parte', 'ubicacion', 'proveedor']
     ordering_fields = ['codigo', 'nombre', 'categoria', 'stock_actual', 'created_at']
     ordering = ['-created_at']
@@ -118,7 +119,7 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
     delete_identifier_fields = ['codigo']
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = ['codigo', 'nombre', 'descripcion', 'tareas_estandar']
     ordering_fields = ['codigo', 'nombre', 'categoria', 'tiempo_estimado_minutos', 'precio_referencial', 'created_at']
     ordering = ['-created_at']

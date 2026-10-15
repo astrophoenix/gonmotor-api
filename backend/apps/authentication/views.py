@@ -55,6 +55,7 @@ from apps.core.utils.pdf_export import (
     contexto_reporte,
 )
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
+from apps.core.filters import BusquedaIndexadaFilter
 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -396,7 +397,7 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('empleados')]
 
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
     search_fields = [
         'user__first_name',
         'user__last_name',
