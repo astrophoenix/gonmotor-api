@@ -465,6 +465,7 @@ class OrdenTrabajoEstadosTests(TestCase):
             empresa=self.empresa, nombre='Cliente Estados', identificacion='0912345679'
         )
         self.vehiculo = Vehiculo.objects.create(placa='EST-0001', marca='Kia', modelo='Sportage')
+        self.vehiculo.empresas.add(self.empresa)
         self._contador = 0
 
     def _orden(self, estado='PENDIENTE', motivo_espera=None):
@@ -1619,3 +1620,105 @@ class OrdenSucursalConservadaTests(TestCase):
         orden = OrdenTrabajo.objects.get(pk=creada['id'])
         self.assertEqual(orden.sucursal_id, self.taller_activo.pk)
         self.assertEqual(orden.observaciones, 'Editada')
+
+
+class SalidaRecepcionAlEntregarOrdenTests(TestCase):
+    """Al pasar la orden a ENTREGADO, la recepción del flujo toma como fecha de
+    salida la fecha de entrega de la orden (signal `post_save`)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.clientes.models import Cliente
+        from apps.empresas.models import Empresa, Taller
+        from apps.vehiculos.models import Vehiculo
+
+        from .models import OrdenTrabajo, RecepcionVehiculo
+
+        self.empresa = Empresa.objects.create(nombre_comercial='Taller Entrega', ruc='666666666666')
+        self.taller = Taller.objects.create(
+            empresa=self.empresa, nombre='Taller Entrega', codigo_sucursal='001', prefijo_ot='OT-'
+        )
+        cliente = Cliente.objects.create(empresa=self.empresa, nombre='Cliente Entrega', identificacion='1712345680')
+        vehiculo = Vehiculo.objects.create(placa='ENT-1234', marca='Kia', modelo='Rio')
+        vehiculo.empresas.add(self.empresa)
+
+        self.orden = OrdenTrabajo.objects.create(
+            empresa=self.empresa, sucursal=self.taller, cliente=cliente, vehiculo=vehiculo,
+            numero_orden='OT-ENT-1', estado='EN_PROCESO',
+        )
+        self.recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=self.taller, cliente=cliente, vehiculo=vehiculo,
+            numero_recepcion='REC-ENT-1', estado='ACEPTADA', orden_trabajo=self.orden,
+        )
+        self.inspeccion_recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=self.taller, cliente=cliente, vehiculo=vehiculo,
+            numero_recepcion='REC-ENT-2', estado='ACEPTADA',
+        )
+        self.otra_recepcion = RecepcionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=self.taller, cliente=cliente, vehiculo=vehiculo,
+            numero_recepcion='REC-ENT-3', estado='ACEPTADA',
+        )
+        InspeccionVehiculo.objects.create(
+            empresa=self.empresa, sucursal=self.taller, recepcion=self.inspeccion_recepcion,
+            cliente=cliente, vehiculo=vehiculo, numero_inspeccion='INS-ENT-1',
+            tipo_inspeccion='MANTENIMIENTO', orden_trabajo=self.orden,
+        )
+
+        usuario = get_user_model().objects.create_superuser(
+            username='ot-entrega', email='ot-entrega@test.local', password='x'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(usuario)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.pk)
+
+    def _entregar(self, **extra):
+        return self.client.patch(
+            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            {'estado': 'ENTREGADO', **extra},
+            format='json',
+        )
+
+    def test_entregar_copia_la_fecha_de_entrega_a_las_recepciones_del_flujo(self):
+        fecha = timezone.now().replace(microsecond=0) - timedelta(hours=2)
+        resp = self._entregar(fecha_entrega=fecha.isoformat())
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        for recepcion in (self.recepcion, self.inspeccion_recepcion):
+            recepcion.refresh_from_db()
+            self.assertEqual(recepcion.fecha_salida, fecha)
+        self.otra_recepcion.refresh_from_db()
+        self.assertIsNone(self.otra_recepcion.fecha_salida)
+
+    def test_entregar_sin_fecha_usa_ahora_en_orden_y_recepcion(self):
+        resp = self._entregar(fecha_entrega=None)
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        self.orden.refresh_from_db()
+        self.recepcion.refresh_from_db()
+        self.assertIsNotNone(self.orden.fecha_entrega)
+        self.assertEqual(self.recepcion.fecha_salida, self.orden.fecha_entrega)
+
+    def test_corregir_fecha_de_entrega_actualiza_la_salida(self):
+        self._entregar()
+        nueva = timezone.now().replace(microsecond=0) - timedelta(days=1)
+        resp = self.client.patch(
+            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            {'fecha_entrega': nueva.isoformat()},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.fecha_salida, nueva)
+
+    def test_orden_no_entregada_no_toca_la_recepcion(self):
+        resp = self.client.patch(
+            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            {'estado': 'COMPLETADO'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.recepcion.refresh_from_db()
+        self.assertIsNone(self.recepcion.fecha_salida)

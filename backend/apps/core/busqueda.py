@@ -135,7 +135,7 @@ def _buscar_vehiculos(empresa_id, q, talleres=None):
         condiciones |= Q(placa__icontains=normalizado)
 
     queryset = (
-        Vehiculo.objects.filter(empresas=empresa_id, is_active=True)
+        Vehiculo.objects.operativos_en(empresa_id)
         .filter(condiciones)
         .distinct()
         .order_by('placa')[:LIMITE_POR_GRUPO]

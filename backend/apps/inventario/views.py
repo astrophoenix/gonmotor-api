@@ -30,7 +30,6 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
     delete_identifier_fields = ['codigo']
-    delete_relation_fields = ['detalles_inspeccion']
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['codigo', 'nombre', 'descripcion', 'marca', 'numero_parte', 'ubicacion', 'proveedor']
@@ -114,7 +113,6 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
     delete_identifier_fields = ['codigo']
-    delete_relation_fields = ['detalles_inspeccion']
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['codigo', 'nombre', 'descripcion', 'tareas_estandar']

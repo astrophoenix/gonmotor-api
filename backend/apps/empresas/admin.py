@@ -1,4 +1,6 @@
 from django.contrib import admin
+
+from apps.core.admin import SoftDeleteAdminMixin
 from .models import Empresa, Taller
 
 
@@ -13,7 +15,7 @@ class TallerInline(admin.TabularInline):
 
 
 @admin.register(Empresa)
-class EmpresaAdmin(admin.ModelAdmin):
+class EmpresaAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'nombre_comercial',
         'ruc',
@@ -78,7 +80,7 @@ class EmpresaAdmin(admin.ModelAdmin):
 
 
 @admin.register(Taller)
-class TallerAdmin(admin.ModelAdmin):
+class TallerAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'nombre',
         'empresa',

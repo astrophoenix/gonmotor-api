@@ -221,6 +221,11 @@ def _recepciones_de_orden(orden):
     )
 
 
+def recepciones_de_orden(orden):
+    """Recepciones conectadas a la orden por cualquier camino del flujo."""
+    return _recepciones_de_orden(orden)
+
+
 def _inspeccion_de_orden(orden):
     return getattr(orden, 'inspeccion', None)
 

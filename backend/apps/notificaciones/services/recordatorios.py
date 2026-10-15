@@ -69,7 +69,7 @@ def _ya_notificado_recientemente(vehiculo, empresa, frecuencia_dias):
 
     desde = timezone.now() - timedelta(days=frecuencia_dias)
     return RegistroMensajeWhatsApp.objects.filter(
-        empresa=empresa,
+        empresa=empresa,  # instancia o id
         vehiculo=vehiculo,
         created_at__gte=desde,
     ).exclude(estado=RegistroMensajeWhatsApp.EstadoMensaje.ERROR).exists()
@@ -84,10 +84,7 @@ def vehiculos_proximos_mantenimiento(empresa_id, preferencia):
     vehiculos = []
     base_query = (
         Vehiculo.objects
-        .filter(
-            empresas=empresa_id,
-            is_active=True,
-        )
+        .operativos_en(empresa_id)
         .filter(
             Q(propietarios__es_actual=True),
             Q(propietarios__cliente__telefono__isnull=False),
@@ -102,7 +99,7 @@ def vehiculos_proximos_mantenimiento(empresa_id, preferencia):
             continue
         if _ya_notificado_recientemente(
             vehiculo,
-            vehiculo.empresas.filter(pk=empresa_id).first(),
+            empresa_id,
             preferencia.frecuencia_dias,
         ):
             continue

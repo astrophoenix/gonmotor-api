@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseTallerModel
 
 
 class TipoTrabajo(models.TextChoices):
@@ -25,7 +25,7 @@ class TipoTrabajo(models.TextChoices):
     OTRO = 'OTRO', 'Otro'
 
 
-class OrdenTrabajo(BaseModel):
+class OrdenTrabajo(BaseTallerModel):
     """Modelo principal para la gestión de la reparación o mantenimiento del vehículo."""
 
     # Alias retrocompatible: el enum vive a nivel de módulo para poder reutilizarlo
@@ -114,10 +114,19 @@ class OrdenTrabajo(BaseModel):
         verbose_name_plural = 'Órdenes de Trabajo'
         ordering = ['-created_at']
         constraints = [
+            # Completa a propósito (sin condición de borrado): un número de OT
+            # emitido nunca se reutiliza, aunque la OT se elimine lógicamente.
             models.UniqueConstraint(
                 fields=['empresa', 'sucursal', 'numero_orden'],
                 name='ot_empresa_sucursal_numero_unico'
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', 'sucursal', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='ot_tal_vivos_idx'
+            ),
         ]
 
     def __str__(self):
@@ -233,7 +242,7 @@ class DetalleRepuestoOrdenTrabajo(models.Model):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'
 
 
-class RecepcionVehiculo(BaseModel):
+class RecepcionVehiculo(BaseTallerModel):
     """Registro del estado físico y administrativo del vehículo al ingresar al taller.
 
     Puede existir independientemente de una Orden de Trabajo.
@@ -509,6 +518,13 @@ class RecepcionVehiculo(BaseModel):
                 name='recepcion_empresa_sucursal_numero_unico'
             )
         ]
+        indexes = [
+            models.Index(
+                fields=['empresa', 'sucursal', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='recepcion_tal_vivos_idx'
+            ),
+        ]
 
     def __str__(self):
         if self.orden_trabajo_id:
@@ -516,7 +532,7 @@ class RecepcionVehiculo(BaseModel):
         return f'Recepción #{self.pk} - Sin OT vinculada'
 
 
-class InspeccionVehiculo(BaseModel):
+class InspeccionVehiculo(BaseTallerModel):
     """Registro técnico del diagnóstico y estado mecánico del vehículo.
     Puede existir independientemente de una Orden de Trabajo."""
 
@@ -655,13 +671,20 @@ class InspeccionVehiculo(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['recepcion'],
-                condition=models.Q(recepcion__isnull=False),
-                name='una_inspeccion_por_recepcion'
+                condition=models.Q(recepcion__isnull=False, deleted_at__isnull=True),
+                name='una_inspeccion_viva_por_recepcion'
             ),
             models.UniqueConstraint(
                 fields=['empresa', 'sucursal', 'numero_inspeccion'],
                 name='inspeccion_empresa_sucursal_numero_unico'
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', 'sucursal', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='inspeccion_tal_vivos_idx'
+            ),
         ]
 
     def __str__(self):

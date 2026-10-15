@@ -9,6 +9,7 @@ from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
 )
+from apps.core.mixins import ValidarTenantMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 from apps.inventario.models import Repuesto, Servicio
 
@@ -310,7 +311,7 @@ class FotoOrdenTrabajoSerializer(serializers.ModelSerializer):
         return rep
 
 
-class InspeccionVehiculoSerializer(serializers.ModelSerializer):
+class InspeccionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
     servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
     repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
     fotos = FotoInspeccionSerializer(many=True, read_only=True)
@@ -672,7 +673,7 @@ class FotoRecepcionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class RecepcionVehiculoSerializer(serializers.ModelSerializer):
+class RecepcionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
     fotos = FotoRecepcionSerializer(many=True, read_only=True)
     cotizaciones_generadas = serializers.SerializerMethodField()
@@ -877,7 +878,7 @@ class RecepcionVehiculoSerializer(serializers.ModelSerializer):
         return instance
 
 
-class OrdenTrabajoSerializer(serializers.ModelSerializer):
+class OrdenTrabajoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
     servicios = DetalleServicioOrdenTrabajoSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoOrdenTrabajoSerializer(many=True, read_only=True)
     recepciones = RecepcionVehiculoSerializer(many=True, read_only=True)

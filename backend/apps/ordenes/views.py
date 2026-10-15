@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
-from apps.core.mixins import FiltroTallerMixin
+from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 
@@ -61,10 +61,13 @@ def tipo_inspeccion_desde_recepcion(tipo_recepcion):
     return TipoTrabajo.DIAGNOSTICO
 
 
-class OrdenTrabajoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
+class OrdenTrabajoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
-    taller_filter_field = 'sucursal'
+    delete_identifier_fields = ['numero_orden']
+    # Query param que fija el taller explícitamente (se valida igual que la
+    # cabecera X-Taller-ID contra el alcance del rol).
+    taller_query_param = 'sucursal'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'numero_orden',
@@ -86,11 +89,16 @@ class OrdenTrabajoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return OrdenTrabajo.objects.none()
+        # `para_request` encadena, con las funciones de authentication.utils:
+        #   1. empresa activa validada contra UsuarioEmpresa (sin ella -> none());
+        #   2. talleres permitidos por empresa + alcance del rol (un taller
+        #      ajeno en cabecera o query param -> sin resultados);
+        #   3. el manager por defecto ya excluye las OTs eliminadas.
         queryset = (
-            OrdenTrabajo.objects.filter(empresa_id=empresa_id)
+            OrdenTrabajo.objects.para_request(
+                self.request,
+                explicito=self.request.query_params.get(self.taller_query_param),
+            )
             .select_related(
                 'cliente',
                 'vehiculo',
@@ -102,7 +110,7 @@ class OrdenTrabajoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
             )
             .prefetch_related('servicios', 'repuestos', 'recepciones', 'fotos', 'recepciones__fotos', 'inspeccion__fotos')
         )
-        return self.filtrar_por_taller(self._filtrar_ordenes(queryset))
+        return self._filtrar_ordenes(queryset)
 
     def _filtrar_ordenes(self, queryset):
         """Aplica los filtros del panel de búsqueda del listado de órdenes."""

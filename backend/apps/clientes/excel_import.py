@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from apps.clientes.models import Cliente
-from apps.vehiculos.models import Vehiculo, VehiculoPropietario
+from apps.vehiculos.models import Vehiculo, VehiculoPropietario, vincular_empresa
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +355,7 @@ def importar_clientes_desde_xlsx(file, empresa_id):
                         'is_active': True,
                     },
                 )
-                vehiculo.empresas.add(empresa_id)
+                vincular_empresa(vehiculo, empresa_id)
 
                 VehiculoPropietario.objects.update_or_create(
                     vehiculo=vehiculo,

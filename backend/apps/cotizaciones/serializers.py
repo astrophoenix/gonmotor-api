@@ -192,7 +192,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
                     )
                 if cliente is not None and cliente.empresa_id != empresa_id:
                     raise serializers.ValidationError({'cliente': 'El cliente no pertenece a tu empresa.'})
-                if vehiculo is not None and not vehiculo.empresas.filter(pk=empresa_id).exists():
+                if vehiculo is not None and not vehiculo.vinculo_de(empresa_id):
                     raise serializers.ValidationError({'vehiculo': 'El vehículo no pertenece a tu empresa.'})
             self._derivar_cliente_vehiculo(attrs)
             if not attrs.get('cliente'):

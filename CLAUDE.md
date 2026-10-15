@@ -49,8 +49,8 @@ gonmotor-api/
 
 | Archivo | Rol |
 |---|---|
-| `apps/core/models.py` | `BaseModel` abstracto: `is_active`, `created_at`, `updated_at`. Todos los modelos de negocio heredan de él. |
-| `apps/core/mixins.py` | `FiltroTallerMixin` (recorte por taller activo) y `SoftDeleteDestroyMixin` (borrado lógico si hay historial, físico si no). |
+| `apps/core/models.py` | `BaseModel` (auditoría: `is_active`, `created_at`, `updated_at`; catálogos y acceso) y `SoftDeleteModel` → `BaseEmpresaModel` → `BaseTallerModel` (borrado lógico con `deleted_at`, managers `objects`/`all_objects`, QuerySet `para_request`/`de_empresa`/`de_talleres`). |
+| `apps/core/mixins.py` | `FiltroTallerMixin` (recorte por taller activo), `SoftDeleteDestroyMixin` (DELETE siempre lógico) y `ValidarTenantMixin` (serializers: FKs cliente/vehículo/taller del payload deben ser del tenant). |
 | `apps/authentication/utils.py` | **Fuente única del contexto tenant**: empresa, rol y taller de la petición. |
 | `apps/authentication/permissions.py` | `TienePermiso(recurso, accion)`, `TieneRecurso(recurso)`, `EsAdminDeEmpresa`. |
 | `apps/authentication/permisos_repo.py` | `MATRIZ_ROLES` (semilla), jerarquía de roles, lectura/escritura de permisos en BD. |
@@ -111,7 +111,6 @@ Funciones a usar: `get_empresa_id_desde_request`, `get_rol_desde_request`, `get_
 class XViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('<recurso>')]
     taller_filter_field = 'sucursal'          # solo si el modelo cuelga de un taller
-    delete_relation_fields = [...]            # relaciones que fuerzan soft delete
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
@@ -120,6 +119,7 @@ class XViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet)
         qs = X.objects.filter(empresa_id=empresa_id)
         return self.filtrar_por_taller(qs)
 ```
+Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicito=...)` (empresa + talleres validados, sin eliminados; ver `OrdenTrabajoViewSet`).
 - Sin empresa en contexto → `queryset.none()`; nunca devolver datos sin filtrar.
 - Al crear, `empresa` (y el taller activo) se asignan desde el contexto del request, normalmente en el `create()` del serializer, con `empresa` en `read_only_fields`; nunca desde el payload.
 - `FiltroTallerMixin` lo usan hoy los viewsets del flujo: citas, recepciones, inspecciones, cotizaciones y órdenes.
@@ -133,8 +133,19 @@ class XViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet)
 - Jerarquía `NIVELES_ROLES`: un usuario no puede otorgar un rol igual o superior al suyo (`puede_otorgar`).
 - Si añades un recurso nuevo: agrégalo a `RECURSOS`, a `MATRIZ_ROLES`, a `NOMBRES_RECURSOS` y protege el viewset con `TieneRecurso`.
 
-### Borrado
-- `SoftDeleteDestroyMixin`: si el registro tiene historial (`delete_relation_fields`) se marca `is_active=False`; si no, se borra. Responde 200 con `{status, action, entity, identifier, message}`.
+### Borrado lógico híbrido (`is_active` + `deleted_at`)
+| Estado | `is_active` | `deleted_at` | Visible | Bloquea duplicados |
+|---|---|---|---|---|
+| Operativo | True | NULL | sí | sí |
+| Suspendido | False | NULL | con `?estado=inactivo` | sí |
+| Eliminado | False | timestamp | no | no |
+
+- Bases: `SoftDeleteModel` (global: `Empresa`, `Vehiculo`), `BaseEmpresaModel` (`Cliente`, `Proveedor`, `Repuesto`, `Servicio`, `Taller`, `VehiculoEmpresa`), `BaseTallerModel` (`OrdenTrabajo`, `RecepcionVehiculo`, `InspeccionVehiculo`, `Cotizacion`; `Cita` y `Gasto` con `taller_field='taller'`). Catálogos de roles/permisos, perfiles y líneas de detalle siguen en `BaseModel` (borrado físico).
+- `objects` oculta eliminados y conserva suspendidos; `all_objects` lo incluye todo (numeración de documentos, admin). `delete()` de instancia o queryset es lógico; el físico solo con `hard_delete()`.
+- `SoftDeleteDestroyMixin`: DELETE siempre lógico. Responde 200 con `{status, action: 'soft_delete', entity, identifier, message}`.
+- Uniques de negocio: parciales con `condition=Q(deleted_at__isnull=True)`. Los números de documento (`numero_orden`, etc.) mantienen la unique completa: nunca se reutilizan.
+- No hay cascada lógica entre agregados: los documentos conservan su cliente/vehículo eliminado (el acceso por FK no filtra). Para cascada dentro de un agregado: `soft_delete_cascade`; efectos laterales: señal `core.models.post_soft_delete`.
+- **Vehículo**: es global (placa única); cada empresa activa/suspende/elimina su vínculo `VehiculoEmpresa`. Usar `Vehiculo.objects.de_empresa/operativos_en/por_estado_en(empresa_id)` y `vincular_empresa()`; nunca `filter(empresas=...)` ni `empresas.add/set`.
 - Los listados suelen aceptar `?estado=activo|inactivo`; los selectores de búsqueda envían `estado=activo`.
 
 ### Flujo del taller

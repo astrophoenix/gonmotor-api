@@ -369,6 +369,8 @@ MAX_DIAS_PERIODO = 730        # ventana máxima aceptada por ?fecha_desde/?fecha
 MAX_BUCKETS_DIARIO = 31       # granularidad diaria hasta 31 días
 MAX_BUCKETS_MENSUAL = 18      # después se agrega por mes (últimos 18 meses en la gráfica)
 MAX_FILAS_TABLA = 10
+DIAS_ALERTA_EN_TALLER = 3     # ?dias_en_taller por defecto: vehículos "demorados"
+MAX_DIAS_ALERTA_EN_TALLER = 365
 
 # Orden de presentación del embudo operativo (el orden alfabético de los
 # choices no comunica el flujo real de la orden).
@@ -522,6 +524,10 @@ class DashboardV2View(APIView):
       taller, alertas de inventario, órdenes abiertas y cotizaciones
       pendientes) **ignoran** el periodo porque describen el estado actual.
     - `sucursal` (id de `Taller`): recorta todos los consultables del taller.
+      Sin él se usa el taller activo (`X-Taller-ID`) con la misma política que
+      el resto de la API (`talleres_filtro_de_request`).
+    - `dias_en_taller` (entero ≥ 1, por defecto 3): umbral de días para contar
+      los vehículos que llevan demasiado tiempo dentro del taller.
 
     Contenido:
 
@@ -583,6 +589,9 @@ class DashboardV2View(APIView):
         error, sucursal = self._leer_sucursal(request, empresa_id)
         if error:
             return error
+        error, dias_en_taller = self._leer_dias_en_taller(request)
+        if error:
+            return error
 
         # ── Consultas base (tenant + sucursal opcional) ────────────────────
         ordenes = OrdenTrabajo.objects.filter(empresa_id=empresa_id, is_active=True)
@@ -606,9 +615,13 @@ class DashboardV2View(APIView):
         inspecciones = _con_sucursales(inspecciones, 'sucursal', talleres)
 
         # ── KPIs ───────────────────────────────────────────────────────────
-        vehiculos_en_taller = recepciones.filter(
+        en_taller_qs = recepciones.filter(
             fecha_salida__isnull=True
-        ).exclude(estado='NO_ACEPTADA').count()
+        ).exclude(estado='NO_ACEPTADA')
+        vehiculos_en_taller = en_taller_qs.count()
+        vehiculos_demorados = en_taller_qs.filter(
+            fecha_ingreso__lt=timezone.now() - timedelta(days=dias_en_taller)
+        ).count()
 
         ordenes_periodo_qs = _periodo(
             ordenes.exclude(estado=OrdenTrabajo.EstadoOrden.CANCELADO),
@@ -666,6 +679,8 @@ class DashboardV2View(APIView):
 
         kpis = {
             'vehiculos_en_taller': vehiculos_en_taller,
+            'vehiculos_demorados': vehiculos_demorados,
+            'dias_alerta_en_taller': dias_en_taller,
             'facturacion_mes': _dinero(facturacion_mes),
             'facturacion_mes_anterior': _dinero(facturacion_anterior),
             'variacion_facturacion_pct': variacion,
@@ -747,13 +762,18 @@ class DashboardV2View(APIView):
 
         # ── Distribuciones ─────────────────────────────────────────────────
         por_tipo = {
-            fila['tipo_trabajo']: fila['n']
+            fila['tipo_trabajo']: fila
             for fila in _periodo(ordenes, 'created_at', fecha_desde, fecha_hasta)
             .exclude(estado=OrdenTrabajo.EstadoOrden.CANCELADO)
-            .values('tipo_trabajo').annotate(n=Count('id'))
+            .values('tipo_trabajo').annotate(n=Count('id'), facturado=Sum('total'))
         }
         distribucion_tipo = [
-            {'clave': clave, 'etiqueta': etiqueta, 'ordenes': por_tipo[clave]}
+            {
+                'clave': clave,
+                'etiqueta': etiqueta,
+                'ordenes': por_tipo[clave]['n'],
+                'facturado': _dinero(por_tipo[clave]['facturado'] or Decimal('0')),
+            }
             for clave, etiqueta in OrdenTrabajo.TipoTrabajo.choices
             if clave in por_tipo
         ]
@@ -849,6 +869,12 @@ class DashboardV2View(APIView):
             for repuesto in repuestos_bajo_stock.order_by('stock_actual')[:5]
         ]
 
+        # Taller efectivo: el explícito o, si el alcance quedó en uno solo (taller
+        # activo de la cabecera o único permitido), ese; si no, «Todos».
+        taller_efectivo = sucursal
+        if taller_efectivo is None and talleres is not None and len(talleres) == 1:
+            taller_efectivo = Taller.objects.filter(pk=talleres[0], empresa_id=empresa_id).first()
+
         ahora = timezone.now()
         return Response({
             'generado_en': ahora.isoformat(),
@@ -860,8 +886,8 @@ class DashboardV2View(APIView):
                 'granularidad': granularidad,
             },
             'filtros': {
-                'sucursal': sucursal.pk if sucursal else None,
-                'sucursal_nombre': sucursal.nombre if sucursal else None,
+                'sucursal': taller_efectivo.pk if taller_efectivo else None,
+                'sucursal_nombre': taller_efectivo.nombre if taller_efectivo else None,
             },
             'kpis': kpis,
             'tendencia': tendencia,
@@ -898,6 +924,23 @@ class DashboardV2View(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             ), None
         return None, fecha
+
+    @staticmethod
+    def _leer_dias_en_taller(request):
+        """Devuelve `(None, dias)` o `(Response 400, None)`."""
+        valor = request.query_params.get('dias_en_taller')
+        if not valor:
+            return None, DIAS_ALERTA_EN_TALLER
+        try:
+            dias = int(valor)
+        except (TypeError, ValueError):
+            dias = 0
+        if not 1 <= dias <= MAX_DIAS_ALERTA_EN_TALLER:
+            return Response(
+                {'detail': f'El campo dias_en_taller debe ser un entero entre 1 y {MAX_DIAS_ALERTA_EN_TALLER}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            ), None
+        return None, dias
 
     @staticmethod
     def _leer_sucursal(request, empresa_id):

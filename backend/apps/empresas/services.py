@@ -88,7 +88,7 @@ def _siguiente_numero_libre(tipo, campos, taller, prefijo, digitos, contador):
     """
     siguiente = max(int(contador or 1), ultimo_numero_emitido(taller, tipo) + 1, 1)
     modelo = _modelo_documento(tipo)
-    while modelo.objects.filter(
+    while modelo.all_objects.filter(
         sucursal=taller,
         **{campos['numero']: f'{prefijo}{siguiente:0{digitos}d}'},
     ).exists():
@@ -146,7 +146,7 @@ def ultimo_numero_emitido(taller, tipo):
 
     modelo = _modelo_documento(tipo)
     prefijo = (getattr(taller, campos['prefijo']) or '').strip()
-    codigos = modelo.objects.filter(
+    codigos = modelo.all_objects.filter(
         sucursal=taller,
         **{f'{campos["numero"]}__isnull': False},
     ).values_list(campos['numero'], flat=True)

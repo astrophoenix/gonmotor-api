@@ -1,4 +1,6 @@
 from django.contrib import admin
+
+from apps.core.admin import SoftDeleteAdminMixin
 from .models import Cliente
 from apps.vehiculos.models import VehiculoPropietario
 
@@ -16,7 +18,7 @@ class VehiculoPropietarioInline(admin.TabularInline):
 
 
 @admin.register(Cliente)
-class ClienteAdmin(admin.ModelAdmin):
+class ClienteAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'identificacion',
         'nombre',

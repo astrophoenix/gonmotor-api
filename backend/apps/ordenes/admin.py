@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import (
     DetalleRepuestoInspeccion,
     DetalleRepuestoOrdenTrabajo,
@@ -14,7 +16,7 @@ from .models import (
 
 
 @admin.register(OrdenTrabajo)
-class OrdenTrabajoAdmin(admin.ModelAdmin):
+class OrdenTrabajoAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = ('numero_orden', 'empresa', 'cliente', 'vehiculo', 'estado', 'prioridad', 'total', 'created_at')
     list_filter = ('estado', 'prioridad', 'tipo_trabajo', 'empresa')
     search_fields = ('numero_orden', 'cliente__nombre', 'vehiculo__placa', 'empresa__nombre_comercial')
@@ -35,7 +37,7 @@ class DetalleRepuestoOrdenTrabajoAdmin(admin.ModelAdmin):
 
 
 @admin.register(InspeccionVehiculo)
-class InspeccionVehiculoAdmin(admin.ModelAdmin):
+class InspeccionVehiculoAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = ('id', 'orden_trabajo', 'recepcion', 'tipo_inspeccion', 'estado', 'created_at')
     list_filter = ('tipo_inspeccion', 'estado')
     search_fields = ('motivo_ingreso', 'codigos_dtc', 'orden_trabajo__numero_orden')
@@ -56,7 +58,7 @@ class DetalleRepuestoInspeccionAdmin(admin.ModelAdmin):
 
 
 @admin.register(RecepcionVehiculo)
-class RecepcionVehiculoAdmin(admin.ModelAdmin):
+class RecepcionVehiculoAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = ('orden_trabajo', 'ingreso_en_grua', 'tiene_extintor', 'tiene_botiquin')
     search_fields = ('orden_trabajo__numero_orden',)
 

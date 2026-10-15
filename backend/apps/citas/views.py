@@ -84,14 +84,6 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
     ordering = ['fecha_cita', 'hora_cita']
 
     delete_identifier_fields = ['fecha_cita']
-    delete_relation_fields = ['recepcion_generada']
-
-    def has_related_records(self, instance):
-        for field_name in self.delete_relation_fields:
-            value = getattr(instance, field_name, None)
-            if value is not None and bool(getattr(value, 'id', None)):
-                return True
-        return False
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)

@@ -3,10 +3,10 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseTallerModel
 
 
-class Gasto(BaseModel):
+class Gasto(BaseTallerModel):
     class Categoria(models.TextChoices):
         ARRIENDO = 'ARRIENDO', 'Arriendo'
         SUELDOS = 'SUELDOS', 'Sueldos/Nómina'
@@ -16,6 +16,8 @@ class Gasto(BaseModel):
         MANTENIMIENTO = 'MANTENIMIENTO', 'Mantenimiento local'
         TRANSPORTE = 'TRANSPORTE', 'Transporte/Gasolina'
         OTROS = 'OTROS', 'Otros'
+
+    taller_field = 'taller'
 
     empresa = models.ForeignKey(
         'empresas.Empresa',
@@ -54,6 +56,13 @@ class Gasto(BaseModel):
         verbose_name = 'Gasto'
         verbose_name_plural = 'Gastos'
         ordering = ['-fecha', '-created_at']
+        indexes = [
+            models.Index(
+                fields=['empresa', 'taller', '-fecha'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='gasto_tal_vivos_idx'
+            ),
+        ]
 
     def __str__(self):
         return f'Gasto {self.fecha} - {self.monto} ({self.get_categoria_display()})'

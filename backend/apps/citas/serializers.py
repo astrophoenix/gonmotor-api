@@ -110,7 +110,7 @@ class CitaSerializer(serializers.ModelSerializer):
                     {'cliente': 'El cliente no pertenece a tu empresa.'}
                 )
             vehiculo = attrs.get('vehiculo', instancia_vehiculo)
-            if vehiculo is not None and not vehiculo.empresas.filter(id=empresa_id).exists():
+            if vehiculo is not None and not vehiculo.vinculo_de(empresa_id):
                 raise serializers.ValidationError(
                     {'vehiculo': 'El vehículo no pertenece a tu empresa.'}
                 )

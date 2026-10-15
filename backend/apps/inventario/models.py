@@ -2,10 +2,10 @@ from decimal import Decimal
 
 from django.db import models
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseEmpresaModel
 
 
-class Repuesto(BaseModel):
+class Repuesto(BaseEmpresaModel):
     """Repuesto / insumo con control de stock del taller.
 
     Multi-tenant por empresa. Los precios son referenciales (no fijos):
@@ -125,9 +125,16 @@ class Repuesto(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['empresa', 'codigo'],
-                condition=models.Q(is_active=True),
-                name='repuesto_codigo_activo_por_empresa',
+                condition=models.Q(deleted_at__isnull=True),
+                name='repuesto_codigo_vivo_por_empresa',
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='repuesto_emp_vivos_idx',
+            ),
         ]
 
     def __str__(self):
@@ -213,7 +220,7 @@ class RepuestoImagen(models.Model):
             primera.save(update_fields=['es_principal'])
 
 
-class Servicio(BaseModel):
+class Servicio(BaseEmpresaModel):
     """Servicio / mano de obra del taller (catálogo de tareas estándar).
 
     No maneja stock. Se enfoca en tiempos estimados y en el alcance de cada
@@ -287,9 +294,16 @@ class Servicio(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['empresa', 'codigo'],
-                condition=models.Q(is_active=True),
-                name='servicio_codigo_activo_por_empresa',
+                condition=models.Q(deleted_at__isnull=True),
+                name='servicio_codigo_vivo_por_empresa',
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='servicio_emp_vivos_idx',
+            ),
         ]
 
     def __str__(self):

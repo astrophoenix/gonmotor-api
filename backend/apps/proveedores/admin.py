@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Proveedor
 
 
 @admin.register(Proveedor)
-class ProveedorAdmin(admin.ModelAdmin):
+class ProveedorAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'identificacion',
         'nombre',

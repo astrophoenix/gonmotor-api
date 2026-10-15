@@ -6,10 +6,10 @@ from django.db import models
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseTallerModel
 
 
-class Cita(BaseModel):
+class Cita(BaseTallerModel):
     """Gestión de citas programadas para el ingreso de vehículos al taller.
 
     Una cita agrupa empresa, cliente y vehículo con una fecha/hora acordada
@@ -33,6 +33,8 @@ class Cita(BaseModel):
         ESTETICA = 'ESTETICA', 'Enderezada, Pintura o Detailing'
         GARANTIA = 'GARANTIA', 'Garantía / Retorno'
         OTRO = 'OTRO', 'Otro'
+
+    taller_field = 'taller'
 
     # --- RELACIONES ---
     empresa = models.ForeignKey(
@@ -143,6 +145,11 @@ class Cita(BaseModel):
         indexes = [
             models.Index(fields=['empresa', 'fecha_cita'], name='cita_empresa_fecha_idx'),
             models.Index(fields=['taller', 'fecha_cita'], name='cita_taller_fecha_idx'),
+            models.Index(
+                fields=['empresa', 'taller', '-fecha_cita'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='cita_tal_vivos_idx'
+            ),
         ]
 
     def __str__(self):

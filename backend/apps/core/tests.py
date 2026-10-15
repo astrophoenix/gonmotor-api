@@ -793,3 +793,45 @@ class DashboardV2EndpointTest(TestCase):
         data = resp.json()
         self.assertEqual(data['recepciones'], [])
         self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('0'))
+
+    # ── ajustes del panel: facturado por tipo, demorados, taller activo ─────
+    def test_distribucion_tipo_incluye_facturado(self):
+        distribucion = self.client.get(ENDPOINT_V2).json()['distribucion']['tipo_trabajo']
+        por_tipo = {fila['clave']: fila for fila in distribucion}
+        # REPARACION del mes: 150.00 + 75.50 + 200.00 (la anulada no cuenta).
+        self.assertEqual(Decimal(str(por_tipo['REPARACION']['facturado'])), Decimal('425.50'))
+        self.assertEqual(Decimal(str(por_tipo['DIAGNOSTICO']['facturado'])), Decimal('40.00'))
+
+    def test_kpi_vehiculos_demorados_segun_dias(self):
+        RecepcionVehiculo.objects.filter(pk=self.rec_hoy.pk).update(
+            fecha_ingreso=timezone.now() - timedelta(days=15)
+        )
+        kpis = self.client.get(f'{ENDPOINT_V2}?dias_en_taller=10').json()['kpis']
+        self.assertEqual(kpis['dias_alerta_en_taller'], 10)
+        # Solo la de hace 15 días; la rechazada nunca cuenta como "en taller".
+        self.assertEqual(kpis['vehiculos_demorados'], 1)
+
+        kpis = self.client.get(ENDPOINT_V2).json()['kpis']
+        self.assertEqual(kpis['dias_alerta_en_taller'], 3)
+
+    def test_dias_en_taller_invalido_devuelve_400(self):
+        for valor in ('0', 'abc', '366'):
+            with self.subTest(valor=valor):
+                resp = self.client.get(f'{ENDPOINT_V2}?dias_en_taller={valor}')
+                self.assertEqual(resp.status_code, 400)
+
+    def test_taller_activo_por_cabecera_sin_parametro(self):
+        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller.pk))
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['filtros']['sucursal_nombre'], 'Taller Centro')
+        self.assertEqual(data['kpis']['vehiculos_en_taller'], 2)
+        self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('390.00'))
+
+    def test_cabecera_de_taller_de_otra_empresa_no_devuelve_datos(self):
+        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller_ajeno.pk))
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['recepciones'], [])
+        self.assertEqual(data['kpis']['vehiculos_en_taller'], 0)
+        self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('0'))

@@ -71,9 +71,8 @@ class EnviarRecordatorioVehiculoView(APIView):
             )
         empresa = _empresa_o_400(empresa_id)
 
-        vehiculo = Vehiculo.objects.filter(
+        vehiculo = Vehiculo.objects.operativos_en(empresa.pk).filter(
             pk=serializer.validated_data['vehiculo_id'],
-            empresas=empresa,
         ).first()
         if not vehiculo:
             return Response(

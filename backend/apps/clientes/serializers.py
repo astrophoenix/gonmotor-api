@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db import transaction
 import json
 from .models import Cliente
-from apps.vehiculos.models import Vehiculo, VehiculoPropietario
+from apps.vehiculos.models import Vehiculo, VehiculoEmpresa, VehiculoPropietario, vincular_empresa
 from apps.vehiculos.serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.cotizaciones.models import Cotizacion
@@ -97,19 +97,19 @@ class ClienteSerializer(serializers.ModelSerializer):
 
             vehiculo = None
             if vehiculo_id:
-                try:
-                    vehiculo = Vehiculo.objects.get(id=vehiculo_id)
-                except Vehiculo.DoesNotExist:
-                    pass
+                # Por id solo vehículos ya vinculados a la empresa activa.
+                vehiculo = Vehiculo.objects.de_empresa(empresa_id).filter(id=vehiculo_id).first()
 
             if not vehiculo and placa:
+                # Por placa se reutiliza el vehículo físico aunque sea de otra
+                # empresa (la placa es única en el sistema): se vincula abajo.
                 vehiculo = Vehiculo.objects.filter(placa=placa).first()
 
             if vehiculo:
-                # Reactiva el vehículo si fue desactivado (soft delete).
-                if not vehiculo.is_active:
-                    vehiculo.is_active = True
-                    vehiculo.save(update_fields=['is_active'])
+                # Reactiva (o crea) el vínculo con la empresa si estaba
+                # suspendido o eliminado.
+                if empresa_id:
+                    vincular_empresa(vehiculo, empresa_id)
                 if eliminar_imagen and not imagen and vehiculo.imagen:
                     vehiculo.imagen.delete(save=False)
                     vehiculo.imagen = None
@@ -128,7 +128,7 @@ class ClienteSerializer(serializers.ModelSerializer):
                 vehiculo = serializer.save()
 
             if empresa_id:
-                vehiculo.empresas.add(empresa_id)
+                vincular_empresa(vehiculo, empresa_id)
 
             VehiculoPropietario.objects.update_or_create(
                 vehiculo=vehiculo,
@@ -165,7 +165,8 @@ class ClienteSerializer(serializers.ModelSerializer):
                 tiene_ordenes = OrdenTrabajo.objects.filter(vehiculo=vehiculo).exists()
                 
                 if not tiene_cotizaciones and not tiene_ordenes:
-                    vehiculo.delete()
+                    # Se quita solo de esta empresa (borrado lógico del vínculo).
+                    VehiculoEmpresa.objects.filter(vehiculo=vehiculo, empresa_id=empresa_id).delete()
 
     def _parsear_vehiculos_data(self, validated_data, request):
         vehiculos_data = validated_data.pop('vehiculos', [])

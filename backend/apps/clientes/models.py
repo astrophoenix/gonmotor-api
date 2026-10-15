@@ -1,8 +1,8 @@
 from django.db import models
-from apps.core.models import BaseModel
+from apps.core.models import BaseEmpresaModel
 
 # Create your models here.
-class Cliente(BaseModel):
+class Cliente(BaseEmpresaModel):
     TIPO_IDENTIFICACION = [
         ('C', 'Cédula'),
         ('R', 'RUC'),
@@ -57,13 +57,22 @@ class Cliente(BaseModel):
         verbose_name_plural = "Clientes"
         ordering = ['-created_at']  # Muestra los clientes más recientes primero
 
-        # Un mismo RUC/Cédula no se duplica dentro de la MISMA empresa,
+        # Un mismo RUC/Cédula no se duplica dentro de la MISMA empresa (entre
+        # registros no eliminados),
         # pero SI puede existir en OTRAS empresas distintas.
         constraints = [
             models.UniqueConstraint(
-                fields=['empresa', 'identificacion'], 
-                name='unique_cliente_per_empresa'
+                fields=['empresa', 'identificacion'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='unique_cliente_vivo_per_empresa'
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='cliente_emp_vivos_idx'
+            ),
         ]
 
     def __str__(self):

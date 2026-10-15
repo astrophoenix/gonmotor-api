@@ -1,5 +1,6 @@
 import logging
 
+from rest_framework import serializers as drf_serializers
 from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
@@ -56,15 +57,15 @@ class FiltroTallerMixin:
 
 class SoftDeleteDestroyMixin:
     """
-    Estandariza la eliminación de registros con Soft Delete / Hard Delete.
+    Estandariza la eliminación de registros: el borrado es SIEMPRE lógico.
 
     Algoritmo:
         1. Extrae el identificador visible del registro (nombre, placa, etc.).
            Si el atributo no existe, se utiliza el ID.
-        2. Comprueba si el registro tiene relaciones operativas o financieras
-           asociadas (órdenes, facturas, vehículos, etc.).
-           - Con historial  -> Soft Delete (is_active = False).
-           - Sin historial  -> Hard Delete (instance.delete()).
+        2. Elimina lógicamente (`is_active=False` + `deleted_at=now()`, ver
+           `SoftDeleteModel.delete`). El registro deja de aparecer en los
+           listados y libera sus campos únicos; el historial que lo referencia
+           se conserva intacto. El borrado físico solo existe vía `hard_delete()`.
         3. Retorna HTTP 200 con un mensaje en español personalizado.
         4. Captura cualquier error inesperado, lo registra en logs y retorna
            HTTP 500 con un mensaje amigable.
@@ -75,20 +76,14 @@ class SoftDeleteDestroyMixin:
             El primer campo que devuelva un valor no vacío se utiliza.
             Por defecto: ['nombre'].
 
-        delete_relation_fields: list[str]
-            Nombres de managers / relaciones a inspeccionar con .exists().
-            Si alguna contiene registros, se realiza Soft Delete.
-            Por defecto: [] (siempre Hard Delete a menos que se sobreescriba
-            has_related_records).
-
     Métodos sobrescribibles:
         get_entity_name(instance): nombre singular de la entidad (ej. "cliente").
         get_delete_identifier(instance): identificador visible del registro.
-        has_related_records(instance): True si el registro tiene relaciones.
+        perform_soft_delete(instance): ejecuta el borrado lógico (p. ej. el
+            vehículo elimina su vínculo con la empresa, no el vehículo global).
     """
 
     delete_identifier_fields = ['nombre']
-    delete_relation_fields = []
 
     def get_entity_name(self, instance):
         return str(instance._meta.verbose_name).lower()
@@ -100,13 +95,8 @@ class SoftDeleteDestroyMixin:
                 return str(value)
         return str(instance.pk)
 
-    def has_related_records(self, instance):
-        for field_name in self.delete_relation_fields:
-            manager = getattr(instance, field_name, None)
-            if manager is not None and hasattr(manager, 'exists'):
-                if manager.exists():
-                    return True
-        return False
+    def perform_soft_delete(self, instance):
+        instance.delete()
 
     def destroy(self, request, *args, **kwargs):
         identifier = None
@@ -117,15 +107,8 @@ class SoftDeleteDestroyMixin:
             entity_name = self.get_entity_name(instance)
             identifier = self.get_delete_identifier(instance)
 
-            # raise Exception("Error forzado para pruebas de manejo de errores.")
-
-            if self.has_related_records(instance):
-                instance.is_active = False
-                instance.save(update_fields=['is_active'])
-                action_type = 'soft_delete'
-            else:
-                instance.delete()
-                action_type = 'hard_delete'
+            self.perform_soft_delete(instance)
+            action_type = 'soft_delete'
 
             return Response(
                 {
@@ -161,3 +144,76 @@ class SoftDeleteDestroyMixin:
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ValidarTenantMixin:
+    """Valida que las FKs del payload pertenezcan al tenant de la sesión.
+
+    Mixin de serializer (va antes de ``serializers.ModelSerializer``). Evita
+    escrituras cruzadas entre empresas: un id de cliente, vehículo o taller de
+    otra empresa enviado en el payload se rechaza con 400 en vez de quedar
+    enlazado al documento.
+
+    - ``tenant_campos_empresa``: FKs a modelos con ``empresa_id`` directo; deben
+      ser de la empresa activa y estar operativos (no suspendidos).
+    - ``tenant_campos_vehiculo``: FKs a ``Vehiculo``; deben tener vínculo
+      operativo con la empresa activa.
+    - ``tenant_campo_taller``: FK al taller; debe estar entre los talleres
+      permitidos del usuario (empresa + alcance del rol).
+
+    Un valor igual al que ya tiene la instancia no se revalida: editar un
+    documento antiguo no falla porque su cliente se haya eliminado después.
+
+    Se engancha en ``to_internal_value`` (no en ``validate``) para que un
+    ``validate()`` propio del serializer no lo anule.
+    """
+
+    tenant_campos_empresa = ('cliente',)
+    tenant_campos_vehiculo = ('vehiculo',)
+    tenant_campo_taller = 'sucursal'
+
+    def _sin_cambio(self, campo, valor):
+        if self.instance is None or isinstance(self.instance, (list, tuple)):
+            return False
+        return getattr(self.instance, f'{campo}_id', None) == getattr(valor, 'pk', valor)
+
+    def to_internal_value(self, data):
+        attrs = super().to_internal_value(data)
+        request = self.context.get('request')
+        if request is None:
+            return attrs
+
+        from apps.authentication.utils import get_contexto_desde_request, talleres_permitidos
+        from apps.vehiculos.models import Vehiculo
+
+        contexto = get_contexto_desde_request(request)
+        if not contexto.hay_contexto:
+            raise drf_serializers.ValidationError(
+                'No hay una empresa activa para la sesión.'
+            )
+
+        errores = {}
+        for campo in self.tenant_campos_empresa:
+            valor = attrs.get(campo)
+            if valor is None or self._sin_cambio(campo, valor):
+                continue
+            if valor.empresa_id != contexto.empresa_id or not getattr(valor, 'esta_operativo', True):
+                errores[campo] = 'No pertenece a la empresa activa o no está disponible.'
+
+        for campo in self.tenant_campos_vehiculo:
+            valor = attrs.get(campo)
+            if valor is None or self._sin_cambio(campo, valor):
+                continue
+            if not Vehiculo.objects.operativos_en(contexto.empresa_id).filter(pk=valor.pk).exists():
+                errores[campo] = 'El vehículo no está registrado o activo en la empresa.'
+
+        campo = self.tenant_campo_taller
+        taller = attrs.get(campo) if campo else None
+        if taller is not None and not self._sin_cambio(campo, taller):
+            permitidos = talleres_permitidos(getattr(request, 'user', None), contexto)
+            if not permitidos.filter(pk=taller.pk).exists():
+                errores[campo] = 'No tienes acceso a ese taller.'
+
+        if errores:
+            raise drf_serializers.ValidationError(errores)
+        return attrs

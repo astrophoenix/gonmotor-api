@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Repuesto, RepuestoImagen, Servicio
 
 
@@ -10,7 +12,7 @@ class RepuestoImagenInline(admin.TabularInline):
 
 
 @admin.register(Repuesto)
-class RepuestoAdmin(admin.ModelAdmin):
+class RepuestoAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = ('codigo', 'nombre', 'categoria', 'marca', 'stock_actual', 'stock_minimo', 'precio_venta', 'is_active')
     list_filter = ('categoria', 'iva_porcentaje_defecto', 'is_active', 'empresa')
     search_fields = ('codigo', 'nombre', 'marca', 'numero_parte', 'proveedor')
@@ -28,7 +30,7 @@ class RepuestoImagenAdmin(admin.ModelAdmin):
 
 
 @admin.register(Servicio)
-class ServicioAdmin(admin.ModelAdmin):
+class ServicioAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = ('codigo', 'nombre', 'categoria', 'tiempo_estimado_minutos', 'precio_referencial', 'is_active')
     list_filter = ('categoria', 'is_active', 'empresa')
     search_fields = ('codigo', 'nombre', 'descripcion')

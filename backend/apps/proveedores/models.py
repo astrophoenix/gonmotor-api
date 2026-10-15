@@ -1,9 +1,9 @@
 from django.db import models
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseEmpresaModel
 
 
-class Proveedor(BaseModel):
+class Proveedor(BaseEmpresaModel):
     TIPO_IDENTIFICACION = [
         ('C', 'Cédula'),
         ('R', 'RUC'),
@@ -58,13 +58,22 @@ class Proveedor(BaseModel):
         verbose_name_plural = "Proveedores"
         ordering = ['-created_at']
 
-        # La misma identificación no se duplica dentro de la MISMA empresa,
+        # La misma identificación no se duplica dentro de la MISMA empresa (entre
+        # registros no eliminados),
         # pero SI puede existir en OTRAS empresas distintas.
         constraints = [
             models.UniqueConstraint(
                 fields=['empresa', 'identificacion'],
-                name='unique_proveedor_per_empresa'
+                condition=models.Q(deleted_at__isnull=True),
+                name='unique_proveedor_vivo_per_empresa'
             )
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='proveedor_emp_vivos_idx'
+            ),
         ]
 
     def __str__(self):

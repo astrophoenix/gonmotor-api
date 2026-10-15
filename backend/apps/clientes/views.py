@@ -33,7 +33,6 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
 
     delete_identifier_fields = ['nombre']
-    delete_relation_fields = ['ordenes_trabajo', 'vehiculos_asociados', 'cotizaciones']
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'identificacion', 'email', 'telefono']

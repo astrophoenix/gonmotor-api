@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Cita
 
 
 @admin.register(Cita)
-class CitaAdmin(admin.ModelAdmin):
+class CitaAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'fecha_cita',
         'hora_cita',

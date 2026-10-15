@@ -1,5 +1,12 @@
 from django.db import models
-from apps.core.models import BaseModel
+from apps.core.models import (
+    AllObjectsManager,
+    BaseEmpresaModel,
+    BaseModel,
+    SoftDeleteModel,
+    TenantSoftDeleteManager,
+    TenantSoftDeleteQuerySet,
+)
 from django_countries.fields import CountryField
 from django.core.validators import MinValueValidator, MaxValueValidator
 import datetime
@@ -32,7 +39,54 @@ GRUPO_BLUEPRINT_MAP = {
     'MAGR': 'especial',
     'MCAM': 'especial',
 }
-class Vehiculo(BaseModel):
+class VehiculoQuerySet(TenantSoftDeleteQuerySet):
+    def de_empresa(self, empresa_id):
+        """Vehículos con vínculo **no eliminado** a la empresa.
+
+        El vehículo físico es global (placa única); cada empresa lo "elimina"
+        borrando lógicamente su `VehiculoEmpresa`, sin afectar a las demás.
+        Incluye vínculos suspendidos: el estado por empresa se filtra con
+        `operativos_en` / `suspendidos_en`.
+        """
+        if not empresa_id:
+            return self.none()
+        return self.filter(
+            pk__in=VehiculoEmpresa.objects.filter(empresa_id=empresa_id).values('vehiculo_id')
+        )
+
+    def operativos_en(self, empresa_id):
+        """Vehículo activo globalmente y con vínculo activo en la empresa."""
+        if not empresa_id:
+            return self.none()
+        return self.filter(
+            is_active=True,
+            deleted_at__isnull=True,
+            pk__in=VehiculoEmpresa.objects.operativos()
+            .filter(empresa_id=empresa_id).values('vehiculo_id'),
+        )
+
+    def suspendidos_en(self, empresa_id):
+        """Vínculo suspendido en la empresa o vehículo suspendido globalmente."""
+        if not empresa_id:
+            return self.none()
+        return self.de_empresa(empresa_id).filter(
+            models.Q(is_active=False)
+            | models.Q(
+                pk__in=VehiculoEmpresa.objects.suspendidos()
+                .filter(empresa_id=empresa_id).values('vehiculo_id')
+            )
+        )
+
+    def por_estado_en(self, empresa_id, estado):
+        """`?estado=activo|inactivo` del listado, evaluado en la empresa activa."""
+        if estado == 'inactivo':
+            return self.suspendidos_en(empresa_id)
+        if estado == 'activo':
+            return self.operativos_en(empresa_id)
+        return self.de_empresa(empresa_id)
+
+
+class Vehiculo(SoftDeleteModel):
 
     #🚗 Opciones del tipo de transmisión con TextChoices
     class TipoTransmision(models.TextChoices):
@@ -80,7 +134,6 @@ class Vehiculo(BaseModel):
     placa = models.CharField(
         verbose_name="Placa",
         max_length=10,
-        unique=True,
         help_text="Ejemplo: PBA1234 (Sin guiones)"
     )
     vin = models.CharField(
@@ -171,17 +224,32 @@ class Vehiculo(BaseModel):
         null=True,
         help_text="JPG, PNG o WebP. Máximo 2MB. Se optimiza automáticamente."
     )
+    # Las empresas que trabajan con el vehículo. El vínculo tiene estado
+    # propio (VehiculoEmpresa): es lo que cada empresa suspende o elimina.
+    # Para escribir usar `vincular_empresa` / `desvincular_empresa`.
     empresas = models.ManyToManyField(
         'empresas.Empresa',
+        through='vehiculos.VehiculoEmpresa',
         related_name='vehiculos',
         blank=True,
         verbose_name="Empresas"
     )
 
+    objects = TenantSoftDeleteManager.from_queryset(VehiculoQuerySet)()
+    all_objects = AllObjectsManager.from_queryset(VehiculoQuerySet)()
+
     class Meta:
         verbose_name = "Vehículo"
         verbose_name_plural = "Vehículos"
         ordering = ['-created_at']
+        constraints = [
+            # La placa identifica al vehículo físico en todo el sistema.
+            models.UniqueConstraint(
+                fields=['placa'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='vehiculo_placa_viva_unica',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.placa} - {self.marca} {self.modelo}"
@@ -195,6 +263,87 @@ class Vehiculo(BaseModel):
         if self.placa:
             self.placa = self.placa.strip().upper()
         super().save(*args, **kwargs)
+
+    def vinculo_de(self, empresa_id):
+        """Vínculo no eliminado con la empresa (o None)."""
+        return VehiculoEmpresa.objects.filter(vehiculo=self, empresa_id=empresa_id).first()
+
+    def activo_en(self, empresa_id):
+        vinculo = self.vinculo_de(empresa_id)
+        return bool(vinculo and vinculo.is_active and self.esta_operativo)
+
+
+class VehiculoEmpresa(BaseEmpresaModel):
+    """Vínculo vehículo–empresa con estado propio.
+
+    Suspender o eliminar un vehículo desde una empresa actúa sobre este
+    vínculo; el vehículo físico (y su historial en otras empresas) no cambia.
+    Reutiliza la tabla del antiguo M2M automático.
+    """
+    vehiculo = models.ForeignKey(
+        Vehiculo,
+        on_delete=models.CASCADE,
+        related_name='vinculos_empresa',
+    )
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        related_name='vinculos_vehiculo',
+    )
+
+    class Meta:
+        db_table = 'vehiculos_vehiculo_empresas'
+        verbose_name = "Vínculo Vehículo-Empresa"
+        verbose_name_plural = "Vínculos Vehículo-Empresa"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['vehiculo', 'empresa'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='vehiculo_empresa_vivo_unico',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', 'vehiculo'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='vehemp_emp_vivos_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.vehiculo_id} @ {self.empresa_id}"
+
+
+def vincular_empresa(vehiculo, empresa_id, *, activar=True):
+    """Crea o restaura el vínculo del vehículo con la empresa.
+
+    Sustituye a `vehiculo.empresas.add()`: si el vínculo fue eliminado se
+    restaura (no se duplica) y, con `activar`, un vínculo suspendido se reactiva.
+    """
+    vinculo = VehiculoEmpresa.objects.filter(vehiculo=vehiculo, empresa_id=empresa_id).first()
+    if vinculo is None:
+        eliminado = (
+            VehiculoEmpresa.all_objects.eliminados()
+            .filter(vehiculo=vehiculo, empresa_id=empresa_id)
+            .order_by('-deleted_at')
+            .first()
+        )
+        if eliminado is None:
+            return VehiculoEmpresa.objects.create(vehiculo=vehiculo, empresa_id=empresa_id)
+        eliminado.restaurar()
+        return eliminado
+    if activar and not vinculo.is_active:
+        vinculo.is_active = True
+        vinculo.save(update_fields=['is_active', 'updated_at'])
+    return vinculo
+
+
+def sincronizar_empresas(vehiculo, empresa_ids):
+    """Equivalente a `vehiculo.empresas.set()` con borrado lógico de los sobrantes."""
+    empresa_ids = {int(getattr(e, 'pk', e)) for e in empresa_ids}
+    for empresa_id in empresa_ids:
+        vincular_empresa(vehiculo, empresa_id, activar=False)
+    VehiculoEmpresa.objects.filter(vehiculo=vehiculo).exclude(empresa_id__in=empresa_ids).delete()
 
 
 class VehiculoPropietario(BaseModel):

@@ -127,10 +127,14 @@ class ProveedorApiTest(APITestCase):
         resp = self.client.post(f'/api/proveedores/{self.activo.id}/reactivar/')
         self.assertEqual(resp.status_code, 400)
 
-    def test_eliminar_proveedor_sin_relaciones_hace_hard_delete(self):
+    def test_eliminar_proveedor_es_borrado_logico(self):
         resp = self.client.delete(f'/api/proveedores/{self.activo.id}/')
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['action'], 'soft_delete')
         self.assertFalse(Proveedor.objects.filter(id=self.activo.id).exists())
+        eliminado = Proveedor.all_objects.get(id=self.activo.id)
+        self.assertFalse(eliminado.is_active)
+        self.assertIsNotNone(eliminado.deleted_at)
 
     def test_exportar_pdf(self):
         resp = self.client.get('/api/proveedores/exportar-pdf/')

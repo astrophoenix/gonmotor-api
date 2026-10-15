@@ -3,7 +3,7 @@ import re
 from functools import reduce
 
 from rest_framework import viewsets, permissions, filters, status
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Exists, OuterRef, Q, Prefetch
 from django_countries import countries
 from django.utils import translation
 from rest_framework.renderers import JSONRenderer
@@ -13,7 +13,7 @@ from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
-from .models import Vehiculo, VehiculoPropietario
+from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
 from apps.core.mixins import SoftDeleteDestroyMixin
 from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
@@ -70,7 +70,6 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('vehiculos')]
 
     delete_identifier_fields = ['placa']
-    delete_relation_fields = ['ordenes_trabajo', 'propietarios']
 
     filter_backends = [PlacaNormalizableSearchFilter, filters.OrderingFilter]
     search_fields = [
@@ -81,8 +80,6 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         'modelo',
         'propietarios__cliente__nombre',
         'propietarios__cliente__identificacion',
-        'empresas__nombre_comercial',
-        'empresas__ruc'
     ]
     ordering_fields = ['placa', 'marca', 'created_at']
     ordering = ['-created_at']
@@ -92,25 +89,33 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             return VehiculoNestedSerializer
         return VehiculoSerializer
 
+    def perform_soft_delete(self, instance):
+        # El vehículo es global: se elimina el vínculo con la empresa activa;
+        # para las demás empresas que lo usan no cambia nada.
+        empresa_id = get_empresa_id_desde_request(self.request)
+        VehiculoEmpresa.objects.filter(vehiculo=instance, empresa_id=empresa_id).delete()
+
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
 
         if not empresa_id:
             return Vehiculo.objects.none()
 
-        queryset = Vehiculo.objects.filter(empresas=empresa_id)
-
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
 
+        # El estado (activo/suspendido) es el del vínculo con la empresa activa.
         # Las acciones de mutación (editar/reactivar/eliminar) deben acceder
-        # también a registros desactivados; solo list/retrieve ocultan inactivos.
+        # también a registros suspendidos; solo list/retrieve los ocultan.
         estado = self.request.query_params.get('estado')
-        if estado == 'inactivo':
-            queryset = queryset.filter(is_active=False)
-        elif estado == 'activo':
-            queryset = queryset.filter(is_active=True)
-        elif self.action in ['list', 'retrieve'] and not include_inactive:
-            queryset = queryset.filter(is_active=True)
+        if estado not in ('activo', 'inactivo'):
+            estado = 'activo' if self.action in ['list', 'retrieve'] and not include_inactive else None
+        queryset = Vehiculo.objects.por_estado_en(empresa_id, estado).annotate(
+            activo_en_empresa=Exists(
+                VehiculoEmpresa.objects.operativos().filter(
+                    vehiculo=OuterRef('pk'), empresa_id=empresa_id
+                )
+            )
+        )
 
         anio = self.request.query_params.get('anio')
         if anio:
@@ -138,7 +143,6 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
                     ).select_related('cliente'),
                     to_attr='propietarios_actuales',
                 ),
-                'empresas'
             ).distinct()
 
         return queryset.distinct()
@@ -181,7 +185,12 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 def _vehiculo_export_queryset(request, empresa_id):
     """Aplica los mismos filtros del listado (search, estado, anio, tipo) a las
     exportaciones PDF/Excel."""
-    queryset = Vehiculo.objects.filter(empresas=empresa_id)
+    estado = request.query_params.get('estado')
+    # Misma semántica que el listado: sin filtro de estado solo se exportan
+    # los vehículos activos en la empresa.
+    queryset = Vehiculo.objects.por_estado_en(
+        empresa_id, estado if estado == 'inactivo' else 'activo'
+    )
 
     search = request.query_params.get('search')
     if search:
@@ -193,8 +202,6 @@ def _vehiculo_export_queryset(request, empresa_id):
             'modelo',
             'propietarios__cliente__nombre',
             'propietarios__cliente__identificacion',
-            'empresas__nombre_comercial',
-            'empresas__ruc',
         ]
         for term in [t for t in search.replace(',', ' ').split() if t]:
             conditions = [Q(**{f'{field}__icontains': term}) for field in search_fields]
@@ -202,16 +209,6 @@ def _vehiculo_export_queryset(request, empresa_id):
             if normalized:
                 conditions.append(Q(placa__icontains=normalized))
             queryset = queryset.filter(reduce(operator.or_, conditions))
-
-    estado = request.query_params.get('estado')
-    if estado == 'inactivo':
-        queryset = queryset.filter(is_active=False)
-    elif estado == 'activo':
-        queryset = queryset.filter(is_active=True)
-    else:
-        # Misma semántica que el listado: sin filtro de estado solo se
-        # exportan los vehículos activos.
-        queryset = queryset.filter(is_active=True)
 
     anio = request.query_params.get('anio')
     if anio:
@@ -226,7 +223,13 @@ def _vehiculo_export_queryset(request, empresa_id):
     if tipo:
         queryset = queryset.filter(tipo=tipo)
 
-    return queryset.distinct()
+    return queryset.distinct().annotate(
+        activo_en_empresa=Exists(
+            VehiculoEmpresa.objects.operativos().filter(
+                vehiculo=OuterRef('pk'), empresa_id=empresa_id
+            )
+        )
+    )
 
 
 class VehiculoPdfExportView(APIView):
@@ -262,16 +265,13 @@ class VehiculoPdfExportView(APIView):
                     Paragraph(vehiculo.modelo or '', cell_style),
                     Paragraph(str(vehiculo.anio) if vehiculo.anio else '', cell_style),
                     Paragraph(cliente_nombre or 'Sin dueño', cell_style),
-                    Paragraph('Activo' if vehiculo.is_active else 'Inactivo', cell_style),
+                    Paragraph('Activo' if vehiculo.activo_en_empresa and vehiculo.is_active else 'Inactivo', cell_style),
                 ]
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera_empresa = queryset.first().empresas.first()
-                if primera_empresa:
-                    empresa = primera_empresa
-                    taller = primera_empresa.talleres.first()
+            # Encabezado con la empresa de la sesión (un vehículo compartido
+            # puede estar vinculado a otras empresas).
+            empresa = Empresa.objects.filter(pk=empresa_id).first()
+            taller = empresa.talleres.first() if empresa else None
 
             usuario_nombre = ''
             if request.user and request.user.is_authenticated:
@@ -329,13 +329,10 @@ class VehiculoExcelExportView(APIView):
                 ),
             )
 
-            empresa = None
-            taller = None
-            if queryset.exists():
-                primera_empresa = queryset.first().empresas.first()
-                if primera_empresa:
-                    empresa = primera_empresa
-                    taller = primera_empresa.talleres.first()
+            # Encabezado con la empresa de la sesión (un vehículo compartido
+            # puede estar vinculado a otras empresas).
+            empresa = Empresa.objects.filter(pk=empresa_id).first()
+            taller = empresa.talleres.first() if empresa else None
 
             usuario_nombre = ''
             if request.user and request.user.is_authenticated:
@@ -350,7 +347,7 @@ class VehiculoExcelExportView(APIView):
                     vehiculo.modelo or '',
                     str(vehiculo.anio) if vehiculo.anio else '',
                     cliente_nombre or 'Sin dueño',
-                    'Activo' if vehiculo.is_active else 'Inactivo',
+                    'Activo' if vehiculo.activo_en_empresa and vehiculo.is_active else 'Inactivo',
                 ]
 
             config = ExcelExportConfig(

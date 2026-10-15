@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Vehiculo, VehiculoPropietario
+
+from apps.core.admin import SoftDeleteAdminMixin
+from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
+
+
+class VehiculoEmpresaInline(admin.TabularInline):
+    model = VehiculoEmpresa
+    extra = 0
+    fields = ('empresa', 'is_active', 'deleted_at')
+    readonly_fields = ('deleted_at',)
 
 
 class VehiculoPropietarioInline(admin.TabularInline):
@@ -11,7 +20,7 @@ class VehiculoPropietarioInline(admin.TabularInline):
 
 
 @admin.register(Vehiculo)
-class VehiculoAdmin(admin.ModelAdmin):
+class VehiculoAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'placa',
         'marca',
@@ -37,8 +46,7 @@ class VehiculoAdmin(admin.ModelAdmin):
         'empresas__ruc'
     )
     readonly_fields = ('created_at', 'updated_at')
-    inlines = [VehiculoPropietarioInline]
-    filter_horizontal = ('empresas',)
+    inlines = [VehiculoEmpresaInline, VehiculoPropietarioInline]
 
     fieldsets = (
         ('Identificación del Vehículo', {
@@ -50,9 +58,6 @@ class VehiculoAdmin(admin.ModelAdmin):
                 ('color', 'transmision', 'combustible', 'tipo', 'pais_origen'),
                 'kilometraje_actual'
             )
-        }),
-        ('Empresas', {
-            'fields': ('empresas',)
         }),
         ('Detalles Adicionales', {
             'fields': ('observaciones', 'is_active', 'created_at', 'updated_at')

@@ -2,10 +2,10 @@ from datetime import time
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from apps.core.models import BaseModel
+from apps.core.models import BaseEmpresaModel, SoftDeleteModel
 
 
-class Empresa(BaseModel):
+class Empresa(SoftDeleteModel):
     """
     Representa al Negocio / Razón Social principal (Cliente SaaS).
     """
@@ -20,8 +20,7 @@ class Empresa(BaseModel):
         verbose_name="Razón Social"
     )
     ruc = models.CharField(
-        max_length=13, 
-        unique=True, 
+        max_length=13,
         verbose_name="RUC"
     )
     email_contacto = models.EmailField(
@@ -43,12 +42,20 @@ class Empresa(BaseModel):
     class Meta:
         verbose_name = "Empresa"
         verbose_name_plural = "Empresas"
+        constraints = [
+            # Un RUC eliminado lógicamente no bloquea registrarlo de nuevo.
+            models.UniqueConstraint(
+                fields=['ruc'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='empresa_ruc_vivo_unico',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.nombre_comercial} ({self.ruc})"
 
 
-class Taller(BaseModel):
+class Taller(BaseEmpresaModel):
     """
     Representa un Taller físico de la Empresa.
     """
@@ -157,8 +164,8 @@ class Taller(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['empresa', 'codigo_sucursal'],
-                condition=models.Q(is_active=True),
-                name='una_sucursal_activa_por_empresa_codigo'
+                condition=models.Q(deleted_at__isnull=True),
+                name='una_sucursal_viva_por_empresa_codigo'
             ),
             models.CheckConstraint(
                 condition=models.Q(hora_cierre__gt=models.F('hora_apertura')),

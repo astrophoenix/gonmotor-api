@@ -3,10 +3,10 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
-from apps.core.models import BaseModel
+from apps.core.models import BaseModel, BaseTallerModel
 
 
-class Cotizacion(BaseModel):
+class Cotizacion(BaseTallerModel):
     class EstadoCotizacion(models.TextChoices):
         PENDIENTE = 'PENDIENTE', 'Pendiente'
         ENVIADA = 'ENVIADA', 'Enviada al Cliente'
@@ -115,6 +115,13 @@ class Cotizacion(BaseModel):
             models.UniqueConstraint(
                 fields=['empresa', 'sucursal', 'numero_cotizacion'],
                 name='cotizacion_empresa_sucursal_numero_unico'
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['empresa', 'sucursal', '-created_at'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='cotizacion_tal_vivos_idx'
             ),
         ]
 

@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
 
 
 @admin.register(Cotizacion)
-class CotizacionAdmin(admin.ModelAdmin):
+class CotizacionAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         'numero_cotizacion',
         'empresa',
