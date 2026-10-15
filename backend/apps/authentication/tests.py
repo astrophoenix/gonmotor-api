@@ -776,8 +776,9 @@ class AccesoEmpresaTests(EscenarioMixin, APITestCase):
 	def test_no_puedes_quitarte_tu_propio_acceso(self):
 		mi = self._con_rol('ADMIN_EMPRESA')
 		cliente = self._cliente(mi)
+		relacion = UsuarioEmpresa.objects.get(user=mi, empresa=self.empresa_a)
 		resp = cliente.patch(
-			f'/api/auth/empleados/{mi.pk}/',
+			f'/api/auth/empleados/{relacion.pk}/',
 			{'tiene_acceso': False},
 			format='json',
 		)
@@ -1350,7 +1351,12 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		sistema = User.objects.create_superuser(username='sistema-root', password='x')
 		resp2 = self._cliente(sistema).post(
 			'/api/empresas/',
-			{'nombre_comercial': 'Taller Nuevo', 'razon_social': 'NUEVA SA', 'ruc': '9999999999001'},
+			{
+				'nombre_comercial': 'Taller Nuevo',
+				'razon_social': 'NUEVA SA',
+				'ruc': '9999999999001',
+				'email_contacto': 'nueva@ejemplo.com',
+			},
 			format='json',
 		)
 		self.assertEqual(resp2.status_code, 201, resp2.content)
@@ -1469,7 +1475,120 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 			self.assertIn('nombre_comercial', empresa)
 			self.assertIn('ruc', empresa)
 			self.assertEqual(empresa['rol'], 'ADMIN_SISTEMA')
+		# Tokens sin empresa para entrar a la gestión de empresas.
+		self.assertTrue(resp.data['es_admin_saas'])
+		self.assertIn('access', resp.data)
+		self.assertIsNone(resp.data['user']['empresa_id'])
+		self.assertTrue(resp.data['user']['es_superusuario'])
 
+	def test_admin_saas_sin_empresas_puede_ingresar(self):
+		Empresa.objects.all().update(is_active=False)
+		User.objects.create_superuser(username='saas0', email='saas0@ejemplo.com', password='x')
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'saas0', 'password': 'x'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.content)
+		self.assertTrue(resp.data['es_admin_saas'])
+		self.assertEqual(resp.data['empresas'], [])
+		self.assertIn('access', resp.data)
+
+	def test_usuario_normal_no_recibe_tokens_al_elegir_empresa(self):
+		_asignar(self.usuario, self.empresa_b, 'MECANICO', [self.b1])
+		resp = self.client.post(
+			'/api/auth/login/',
+			{'username': 'ana', 'password': 'x'},
+			format='json',
+		)
+		self.assertTrue(resp.data['requires_company_selection'])
+		self.assertNotIn('access', resp.data)
+		self.assertNotIn('es_admin_saas', resp.data)
+
+
+
+class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
+	"""`select-company` canjea el token firmado del login, nunca un user_id."""
+
+	endpoint = '/api/auth/select-company/'
+
+	def setUp(self):
+		super().setUp()
+		_asignar(self.usuario, self.empresa_b, 'MECANICO', [self.b1])
+
+	def _token_login(self, username='ana'):
+		resp = self.client.post(
+			'/api/auth/login/', {'username': username, 'password': 'x'}, format='json'
+		)
+		self.assertTrue(resp.data['requires_company_selection'])
+		self.assertNotIn('user_id', resp.data)
+		return resp.data['selection_token']
+
+	def test_canjea_token_por_jwt_de_la_empresa(self):
+		token = self._token_login()
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_b.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.assertIn('access', resp.data)
+		self.assertEqual(resp.data['user']['empresa_id'], self.empresa_b.pk)
+
+	def test_user_id_sin_token_no_emite_jwt(self):
+		root = User.objects.create_superuser(username='root-x', password='secreta')
+		resp = self.client.post(
+			self.endpoint, {'user_id': root.pk, 'empresa_id': self.empresa_a.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 401, resp.content)
+		self.assertNotIn('access', resp.data)
+
+	def test_token_alterado_o_ajeno_se_rechaza(self):
+		token = self._token_login()
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token[:-2] + 'xx', 'empresa_id': self.empresa_a.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 401)
+		# Token válido pero a una empresa sin relación: 403.
+		otra = Empresa.objects.create(nombre_comercial='Otra', ruc='1790000000999', email_contacto='o@x.com')
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token, 'empresa_id': otra.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 403)
+
+	def test_token_expira(self):
+		from unittest import mock
+		from apps.authentication import serializers as auth_serializers
+
+		token = self._token_login()
+		with mock.patch.object(auth_serializers, 'SELECCION_EMPRESA_MAX_AGE', -1):
+			resp = self.client.post(
+				self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+			)
+		self.assertEqual(resp.status_code, 401)
+
+	def test_cambio_de_password_invalida_el_token(self):
+		token = self._token_login()
+		self.usuario.set_password('nueva-clave')
+		self.usuario.save()
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 401)
+
+	def test_empresa_id_invalido(self):
+		token = self._token_login()
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token, 'empresa_id': 'abc'}, format='json'
+		)
+		self.assertEqual(resp.status_code, 400)
+
+	def test_superusuario_entra_a_empresa_sin_relacion(self):
+		User.objects.create_superuser(username='saas-sel', password='x')
+		token = self._token_login('saas-sel')
+		resp = self.client.post(
+			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+		)
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.assertEqual(resp.data['user']['rol'], 'ADMIN_SISTEMA')
 
 
 class LoginMensajesErrorTests(EscenarioMixin, APITestCase):

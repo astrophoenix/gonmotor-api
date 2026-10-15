@@ -165,3 +165,91 @@ class NumeracionDocumentosTests(TestCase):
         self.assertEqual(generar_codigo_secuencial(self.central, 'recepcion'), 'REC-00001')
         self.assertEqual(generar_codigo_secuencial(self.central, 'cotizacion'), 'COT-00002')
         self.assertEqual(generar_codigo_secuencial(self.sucursal, 'cotizacion'), 'COT-00001')
+
+class EmpresaCrudAdminSaaSTests(TestCase):
+    """`/api/empresas/`: CRUD exclusivo del administrador del SaaS."""
+
+    endpoint = '/api/empresas/'
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from rest_framework.test import APIClient
+
+        from apps.authentication.models import UsuarioEmpresa
+
+        self.activa = Empresa.objects.create(
+            nombre_comercial='Alfa Motors', ruc='1790000000001', email_contacto='alfa@ejemplo.com'
+        )
+        self.inactiva = Empresa.objects.create(
+            nombre_comercial='Beta Autos', ruc='1790000000002',
+            email_contacto='beta@ejemplo.com', is_active=False,
+        )
+        self.saas = APIClient()
+        self.saas.force_authenticate(
+            User.objects.create_superuser(username='saas', password='x')
+        )
+        dueno = User.objects.create_user(username='dueno', password='x')
+        UsuarioEmpresa.objects.create(user=dueno, empresa=self.activa, rol='ADMIN_EMPRESA')
+        self.dueno = APIClient()
+        self.dueno.force_authenticate(dueno)
+        self.dueno.defaults['HTTP_X_EMPRESA_ID'] = str(self.activa.pk)
+
+    def _payload(self, **extra):
+        return {
+            'nombre_comercial': 'Gamma Taller',
+            'razon_social': 'GAMMA S.A.',
+            'ruc': '1790000000003',
+            'telefono': '0991234567',
+            'email_contacto': 'Gamma@Ejemplo.com',
+            'is_active': True,
+            **extra,
+        }
+
+    def test_solo_admin_saas_accede(self):
+        self.assertEqual(self.dueno.get(self.endpoint).status_code, 403)
+        self.assertEqual(self.dueno.post(self.endpoint, self._payload(), format='json').status_code, 403)
+        self.assertEqual(
+            self.dueno.patch(f'{self.endpoint}{self.activa.pk}/', {'nombre_comercial': 'X'}, format='json').status_code,
+            403,
+        )
+
+    def test_lista_activas_e_inactivas_con_filtros(self):
+        resp = self.saas.get(self.endpoint)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['count'], 2)
+        resp = self.saas.get(self.endpoint, {'estado': 'inactivo'})
+        self.assertEqual([e['id'] for e in resp.data['results']], [self.inactiva.pk])
+        resp = self.saas.get(self.endpoint, {'search': '0000000001'})
+        self.assertEqual([e['id'] for e in resp.data['results']], [self.activa.pk])
+
+    def test_crea_y_edita(self):
+        resp = self.saas.post(self.endpoint, self._payload(), format='json')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data['email_contacto'], 'gamma@ejemplo.com')
+        resp = self.saas.patch(
+            f"{self.endpoint}{resp.data['id']}/", {'is_active': False, 'telefono': '022345678'}, format='json'
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertFalse(resp.data['is_active'])
+
+    def test_valida_ruc(self):
+        resp = self.saas.post(self.endpoint, self._payload(ruc='123'), format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('ruc', resp.data)
+        resp = self.saas.post(self.endpoint, self._payload(ruc=self.inactiva.ruc), format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Ya existe', str(resp.data['ruc']))
+        # Editar sin cambiar el RUC no choca consigo misma.
+        resp = self.saas.patch(
+            f'{self.endpoint}{self.activa.pk}/', {'ruc': self.activa.ruc}, format='json'
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_eliminar_es_logico_y_libera_el_ruc(self):
+        resp = self.saas.delete(f'{self.endpoint}{self.activa.pk}/')
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['action'], 'soft_delete')
+        self.assertTrue(Empresa.all_objects.filter(pk=self.activa.pk, deleted_at__isnull=False).exists())
+        self.assertEqual(self.saas.get(self.endpoint).data['count'], 1)
+        resp = self.saas.post(self.endpoint, self._payload(ruc=self.activa.ruc), format='json')
+        self.assertEqual(resp.status_code, 201, resp.content)

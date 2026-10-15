@@ -1,19 +1,39 @@
+from django.db.models import Q
 from rest_framework import viewsets, permissions
-from rest_framework.exceptions import PermissionDenied
 
-from apps.authentication.permissions import TieneRecurso
-from apps.authentication.utils import get_contexto_desde_request
+from apps.authentication.permissions import EsAdminSaaS
+from apps.core.mixins import SoftDeleteDestroyMixin
 from .models import Empresa
 from .serializers import EmpresaSerializer
 
 
-class EmpresaViewSet(viewsets.ModelViewSet):
-    queryset = Empresa.objects.filter(is_active=True).order_by('nombre_comercial')
-    serializer_class = EmpresaSerializer
-    permission_classes = [permissions.IsAuthenticated, TieneRecurso('empresa')]
+class EmpresaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+    """CRUD de empresas (tenants) exclusivo del administrador del SaaS.
 
-    def perform_create(self, serializer):
-        contexto = get_contexto_desde_request(self.request)
-        if contexto.hay_contexto and contexto.rol != 'ADMIN_SISTEMA':
-            raise PermissionDenied('Solo el administrador del sistema puede dar de alta una empresa.')
-        super().perform_create(serializer)
+    No depende del tenant activo: el superusuario gestiona todas las empresas.
+    El DELETE es lógico; una empresa inactiva o eliminada deja de estar
+    disponible en el login de sus usuarios.
+    """
+
+    serializer_class = EmpresaSerializer
+    permission_classes = [permissions.IsAuthenticated, EsAdminSaaS]
+    delete_identifier_fields = ['nombre_comercial', 'ruc']
+
+    def get_queryset(self):
+        qs = Empresa.objects.all().order_by('nombre_comercial', 'id')
+
+        estado = self.request.query_params.get('estado', '').strip().lower()
+        if estado == 'activo':
+            qs = qs.filter(is_active=True)
+        elif estado == 'inactivo':
+            qs = qs.filter(is_active=False)
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(
+                Q(nombre_comercial__icontains=search)
+                | Q(razon_social__icontains=search)
+                | Q(ruc__icontains=search)
+                | Q(email_contacto__icontains=search)
+            )
+        return qs

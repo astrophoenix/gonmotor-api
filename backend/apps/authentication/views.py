@@ -12,7 +12,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.renderers import JSONRenderer
 from reportlab.platypus import Paragraph
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
-from .serializers import _user_payload, _taller_sesion_nombre
+from .serializers import _user_payload, _taller_sesion_nombre, usuario_de_token_seleccion
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -67,56 +67,54 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 class SelectCompanyView(APIView):
     """
-    Endpoint invocado desde el frontend tras el login si el usuario 
+    Endpoint invocado desde el frontend tras el login si el usuario
     tiene acceso a múltiples empresas (RUCs distintos).
+
+    No requiere JWT (aún no hay sesión), pero sí el `selection_token` firmado y
+    de vida corta que entrega el login: el usuario se deduce de ese token, nunca
+    de un id enviado por el cliente.
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
-        user_id = request.data.get('user_id')
-        empresa_id = request.data.get('empresa_id')
-
-        if not user_id or not empresa_id:
+        try:
+            empresa_id = int(request.data.get('empresa_id'))
+        except (TypeError, ValueError):
             return Response(
-                {"detail": "Se requieren 'user_id' y 'empresa_id'."},
+                {"detail": "Se requiere un 'empresa_id' válido."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            # Se busca la asignación activa del usuario a la empresa elegida
-            relacion = UsuarioEmpresa.objects.select_related('empresa', 'user').get(
-                user_id=user_id,
-                empresa_id=empresa_id,
-                is_active=True,
-                tiene_acceso=True,
-                empresa__is_active=True
+        user = usuario_de_token_seleccion(request.data.get('selection_token'))
+        if user is None:
+            return Response(
+                {"detail": "La sesión de selección expiró. Inicia sesión nuevamente."},
+                status=status.HTTP_401_UNAUTHORIZED
             )
-            user = relacion.user
+
+        sin_acceso = Response(
+            {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+        relacion = UsuarioEmpresa.objects.select_related('empresa').filter(
+            user=user,
+            empresa_id=empresa_id,
+            is_active=True,
+            tiene_acceso=True,
+            empresa__is_active=True
+        ).first()
+        if relacion is not None:
             empresa = relacion.empresa
             rol = relacion.rol
-        except UsuarioEmpresa.DoesNotExist:
+        elif user.is_superuser:
             # Los superusuarios pueden entrar a cualquier empresa activa aunque
             # no tengan una asignación explícita en UsuarioEmpresa.
-            try:
-                user = User.objects.get(pk=user_id)
-            except User.DoesNotExist:
-                return Response(
-                    {"detail": "El usuario no existe."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            if not user.is_superuser:
-                return Response(
-                    {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            try:
-                empresa = Empresa.objects.get(pk=empresa_id, is_active=True)
-            except Empresa.DoesNotExist:
-                return Response(
-                    {"detail": "No tienes acceso o la empresa seleccionada no está activa."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            empresa = Empresa.objects.filter(pk=empresa_id, is_active=True).first()
+            if empresa is None:
+                return sin_acceso
             rol = 'ADMIN_SISTEMA'
+        else:
+            return sin_acceso
 
         # Generar tokens inyectando la empresa y rol seleccionados
         refresh = RefreshToken.for_user(user)

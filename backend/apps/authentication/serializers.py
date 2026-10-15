@@ -4,7 +4,9 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.contrib.auth.password_validation import validate_password
+from django.core import signing
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.crypto import constant_time_compare, salted_hmac
 from django.db.models import Q
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
@@ -101,24 +103,74 @@ def _user_payload(user, empresa, rol, request=None):
         avatar_url = profile.avatar.url
         if request is not None:
             avatar_url = request.build_absolute_uri(avatar_url)
-    contexto = contexto_de_usuario(user, empresa.id)
-    talleres_count = talleres_permitidos(user, contexto).count() if contexto.hay_contexto else 0
-    return {
+    base = {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "rol": rol,
+        "es_superusuario": user.is_superuser,
+        "telefono": telefono,
+        "avatar": avatar_url,
+    }
+    if empresa is None:
+        # Sesión del administrador del SaaS sin empresa elegida (gestión de empresas).
+        return {
+            **base,
+            "empresa_id": None,
+            "empresa_nombre": '',
+            "taller_nombre": '',
+            "taller_id": None,
+            "talleres_count": 0,
+            "es_admin_talleres": False,
+        }
+    contexto = contexto_de_usuario(user, empresa.id)
+    talleres_count = talleres_permitidos(user, contexto).count() if contexto.hay_contexto else 0
+    return {
+        **base,
         "empresa_id": empresa.id,
         "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
         "taller_nombre": _taller_sesion_nombre(user, empresa),
         "taller_id": _taller_sesion_id(user, empresa),
         "talleres_count": talleres_count,
         "es_admin_talleres": es_admin_talleres(contexto),
-        "telefono": telefono,
-        "avatar": avatar_url,
     }
+
+# --- Token de selección de empresa ---------------------------------------
+# El login multiempresa no entrega JWT hasta que el usuario elige empresa; en su
+# lugar emite este token firmado y de vida corta que `select-company` canjea.
+# Así el endpoint no confía en un `user_id` enviado por el cliente.
+SELECCION_EMPRESA_SALT = 'gonmotor.auth.seleccion-empresa'
+SELECCION_EMPRESA_MAX_AGE = 300  # segundos
+
+
+def _huella_password(user):
+    """Huella del hash de contraseña: cambiarla invalida los tokens emitidos."""
+    return salted_hmac(SELECCION_EMPRESA_SALT, user.password).hexdigest()[:16]
+
+
+def emitir_token_seleccion(user):
+    return signing.dumps(
+        {'uid': user.pk, 'pwd': _huella_password(user)}, salt=SELECCION_EMPRESA_SALT
+    )
+
+
+def usuario_de_token_seleccion(token):
+    """Usuario activo dueño del token, o None si es inválido, expiró o caducó."""
+    if not token or not isinstance(token, str):
+        return None
+    try:
+        datos = signing.loads(
+            token, salt=SELECCION_EMPRESA_SALT, max_age=SELECCION_EMPRESA_MAX_AGE
+        )
+    except signing.BadSignature:  # incluye SignatureExpired
+        return None
+    user = User.objects.filter(pk=datos.get('uid'), is_active=True).first()
+    if user is None or not constant_time_compare(datos.get('pwd', ''), _huella_password(user)):
+        return None
+    return user
+
 
 def _es_cuenta_desactivada(username, password):
     """True si las credenciales son correctas pero la cuenta está inactiva.
@@ -157,13 +209,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         self.user = user
 
-        # Superusuarios: ven TODAS las empresas activas del sistema.
+        # Administrador del SaaS (superusuario): siempre elige entre ir a una
+        # empresa (todas las activas, aunque sea una o ninguna) o gestionar
+        # empresas. Para lo segundo recibe tokens sin empresa en sus claims.
         if user.is_superuser:
             empresas_qs = Empresa.objects.filter(is_active=True).order_by('nombre_comercial')
-            if not empresas_qs.exists():
-                raise serializers.ValidationError({
-                    "detail": "No hay empresas activas registradas en el sistema."
-                })
             empresas_list = [
                 {
                     "id": emp.id,
@@ -174,20 +224,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 }
                 for emp in empresas_qs
             ]
-            # Si solo hay una empresa, el superusuario entra directo a ella.
-            if len(empresas_list) == 1:
-                emp = empresas_qs.first()
-                refresh = self.get_token_with_empresa(user, emp.id, 'ADMIN_SISTEMA')
-                return {
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
-                    'requires_company_selection': False,
-                    'user': _user_payload(user, emp, 'ADMIN_SISTEMA', self.context.get('request')),
-                }
+            refresh = self.get_token(user)
+            refresh['rol'] = 'ADMIN_SISTEMA'
             return {
                 "requires_company_selection": True,
-                "user_id": user.id,
-                "empresas": empresas_list
+                "es_admin_saas": True,
+                "selection_token": emitir_token_seleccion(user),
+                "empresas": empresas_list,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": _user_payload(user, None, 'ADMIN_SISTEMA', self.context.get('request')),
             }
 
         relaciones = UsuarioEmpresa.objects.filter(
@@ -229,7 +275,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         return {
             "requires_company_selection": True,
-            "user_id": user.id,
+            "selection_token": emitir_token_seleccion(user),
             "empresas": empresas_list
         }
 

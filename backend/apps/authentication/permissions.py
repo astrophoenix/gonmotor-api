@@ -52,6 +52,15 @@ class EsAdminDeEmpresa(permissions.BasePermission):
         return 'modificar' in permisos.get('empresa', ())
 
 
+class EsAdminSaaS(permissions.BasePermission):
+    """Solo el administrador del SaaS (superusuario), sin importar el tenant."""
+
+    message = 'Solo el administrador del sistema puede gestionar empresas.'
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_superuser)
+
+
 def TieneRecurso(recurso):
     """Permiso sobre un recurso: lectura = 'ver', escritura = 'modificar'.
 
