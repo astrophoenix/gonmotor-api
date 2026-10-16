@@ -6,6 +6,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
@@ -98,7 +99,7 @@ class ProveedorViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         return Response({
             'status': 'success',
-            'id': instance.id,
+            'id': id_publico(instance),
             'is_active': instance.is_active,
             'message': f"El proveedor '{instance.nombre}' fue reactivado correctamente.",
         })

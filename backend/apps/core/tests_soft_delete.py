@@ -223,7 +223,7 @@ class ApiSoftDeleteTest(TestCase):
     def test_borrar_y_recrear_cliente_con_misma_identificacion(self):
         cliente = _cliente(self.empresa, '1700000030')
 
-        resp = self.client.delete(f'/api/clientes/{cliente.pk}/')
+        resp = self.client.delete(f'/api/clientes/{cliente.uuid}/')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['action'], 'soft_delete')
 
@@ -241,17 +241,17 @@ class ApiSoftDeleteTest(TestCase):
             empresa=self.empresa, sucursal=self.taller, cliente=cliente, vehiculo=vehiculo, numero_orden='OT-9'
         )
 
-        resp = self.client.delete(f'{OT_URL}{orden.pk}/')
+        resp = self.client.delete(f'{OT_URL}{orden.uuid}/')
 
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(OrdenTrabajo.all_objects.get(pk=orden.pk).esta_eliminado)
-        self.assertEqual(self.client.get(f'{OT_URL}{orden.pk}/').status_code, 404)
+        self.assertEqual(self.client.get(f'{OT_URL}{orden.uuid}/').status_code, 404)
 
     def test_vehiculo_compartido_se_elimina_solo_en_una_empresa(self):
         vehiculo = Vehiculo.objects.create(placa='SHR0001', marca='Kia', modelo='Rio')
         vehiculo.empresas.add(self.empresa, self.otra)
 
-        resp = self.client.delete(f'/api/vehiculos/{vehiculo.pk}/')
+        resp = self.client.delete(f'/api/vehiculos/{vehiculo.uuid}/')
         self.assertEqual(resp.status_code, 200)
 
         vehiculo.refresh_from_db()
@@ -261,19 +261,19 @@ class ApiSoftDeleteTest(TestCase):
 
         self._como(self.otra)
         ids = [v['id'] for v in self.client.get('/api/vehiculos/').data['results']]
-        self.assertIn(vehiculo.pk, ids)
+        self.assertIn(str(vehiculo.uuid), ids)
 
     def test_recrear_placa_eliminada_vuelve_a_vincular(self):
         vehiculo = Vehiculo.objects.create(placa='REL0001', marca='Kia', modelo='Rio')
         vehiculo.empresas.add(self.empresa)
-        self.client.delete(f'/api/vehiculos/{vehiculo.pk}/')
+        self.client.delete(f'/api/vehiculos/{vehiculo.uuid}/')
 
         resp = self.client.post('/api/vehiculos/', {
             'placa': 'rel0001', 'marca': 'Kia', 'modelo': 'Rio',
         }, format='json')
 
         self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertEqual(resp.data['id'], vehiculo.pk)
+        self.assertEqual(resp.data['id'], str(vehiculo.uuid))
         self.assertTrue(resp.data['is_active'])
         self.assertEqual(VehiculoEmpresa.objects.filter(vehiculo=vehiculo, empresa=self.empresa).count(), 1)
 
@@ -281,7 +281,7 @@ class ApiSoftDeleteTest(TestCase):
         vehiculo = Vehiculo.objects.create(placa='SUS0001', marca='Kia', modelo='Rio')
         vehiculo.empresas.add(self.empresa, self.otra)
 
-        resp = self.client.patch(f'/api/vehiculos/{vehiculo.pk}/', {'is_active': False}, format='json')
+        resp = self.client.patch(f'/api/vehiculos/{vehiculo.uuid}/', {'is_active': False}, format='json')
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertFalse(resp.data['is_active'])
         self.assertTrue(vehiculo.activo_en(self.otra.pk))
@@ -290,7 +290,7 @@ class ApiSoftDeleteTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('inactive_duplicate', resp.data)
 
-        resp = self.client.patch(f'/api/vehiculos/{vehiculo.pk}/', {'is_active': True}, format='json')
+        resp = self.client.patch(f'/api/vehiculos/{vehiculo.uuid}/', {'is_active': True}, format='json')
         self.assertTrue(resp.data['is_active'])
 
     def test_ot_rechaza_fks_de_otra_empresa(self):
@@ -300,12 +300,12 @@ class ApiSoftDeleteTest(TestCase):
         vehiculo.empresas.add(self.empresa)
         vehiculo_otra = Vehiculo.objects.create(placa='LEAK002', marca='Kia', modelo='Rio')
         vehiculo_otra.empresas.add(self.otra)
-        base = {'cliente': cliente.pk, 'vehiculo': vehiculo.pk, 'estado': 'PENDIENTE',
+        base = {'cliente': str(cliente.uuid), 'vehiculo': str(vehiculo.uuid), 'estado': 'PENDIENTE',
                 'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO'}
 
         casos = {
-            'cliente': {**base, 'cliente': cliente_otra.pk},
-            'vehiculo': {**base, 'vehiculo': vehiculo_otra.pk},
+            'cliente': {**base, 'cliente': str(cliente_otra.uuid)},
+            'vehiculo': {**base, 'vehiculo': str(vehiculo_otra.uuid)},
             'sucursal': {**base, 'sucursal': self.taller_otra.pk},
         }
         for campo, payload in casos.items():
@@ -323,7 +323,7 @@ class ApiSoftDeleteTest(TestCase):
         cliente.delete()
 
         resp = self.client.post(OT_URL, {
-            'cliente': cliente.pk, 'vehiculo': vehiculo.pk, 'estado': 'PENDIENTE',
+            'cliente': str(cliente.uuid), 'vehiculo': str(vehiculo.uuid), 'estado': 'PENDIENTE',
             'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO',
         }, format='json')
 

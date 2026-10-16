@@ -38,7 +38,7 @@ class ClientePropietarioSerializerTest(TestCase):
         return s.save()
 
     def test_create_with_cliente(self):
-        v = self._create(cliente_id=self.cliente1.id)
+        v = self._create(cliente_id=str(self.cliente1.uuid))
         rel = v.propietarios.get(es_actual=True)
         self.assertEqual(rel.cliente_id, self.cliente1.id)
         self.assertTrue(rel.es_actual)
@@ -49,10 +49,10 @@ class ClientePropietarioSerializerTest(TestCase):
         self.assertFalse(v.propietarios.filter(es_actual=True).exists())
 
     def test_update_switch_cliente_marks_previous_inactive(self):
-        v = self._create(cliente_id=self.cliente1.id)
+        v = self._create(cliente_id=str(self.cliente1.uuid))
         s = VehiculoNestedSerializer(
             instance=v,
-            data={'cliente_id': self.cliente2.id},
+            data={'cliente_id': str(self.cliente2.uuid)},
             partial=True,
         )
         self.assertTrue(s.is_valid(), s.errors)
@@ -61,7 +61,7 @@ class ClientePropietarioSerializerTest(TestCase):
         self.assertTrue(v.propietarios.filter(es_actual=True, cliente_id=self.cliente2.id).exists())
 
     def test_update_clear_cliente(self):
-        v = self._create(cliente_id=self.cliente1.id)
+        v = self._create(cliente_id=str(self.cliente1.uuid))
         s = VehiculoNestedSerializer(
             instance=v,
             data={'cliente_id': ''},
@@ -230,4 +230,4 @@ class VehiculoNoExponeEmpresasTests(TestCase):
         listado = client.get('/api/vehiculos/').json()['results']
         self.assertEqual([v['placa'] for v in listado], ['EMP0001'])
         self.assertNotIn('empresas', listado[0])
-        self.assertNotIn('empresas', client.get(f'/api/vehiculos/{vehiculo.pk}/').json())
+        self.assertNotIn('empresas', client.get(f'/api/vehiculos/{vehiculo.uuid}/').json())

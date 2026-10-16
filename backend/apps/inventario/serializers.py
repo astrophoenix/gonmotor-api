@@ -1,8 +1,10 @@
 from rest_framework import serializers
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 
 from .models import Repuesto, RepuestoImagen, Servicio
+from apps.core.serializers import ModelSerializerPublico
 
 
 def url_imagen_absoluta(request, url):
@@ -14,7 +16,7 @@ def url_imagen_absoluta(request, url):
     return url
 
 
-class RepuestoImagenSerializer(serializers.ModelSerializer):
+class RepuestoImagenSerializer(ModelSerializerPublico):
     MAX_BYTES = 5 * 1024 * 1024
 
     class Meta:
@@ -98,7 +100,7 @@ class _CatalogoUnicoMixin:
         if inactivo:
             raise serializers.ValidationError({
                 'inactive_duplicate': {
-                    'id': inactivo.pk,
+                    'id': id_publico(inactivo),
                     'codigo': codigo,
                     'nombre': getattr(inactivo, 'nombre', ''),
                     'message': (
@@ -117,7 +119,7 @@ class _CatalogoUnicoMixin:
         return super().create(validated_data)
 
 
-class RepuestoSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
+class RepuestoSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
     stock_bajo = serializers.BooleanField(read_only=True)
     imagenes = RepuestoImagenSerializer(many=True, read_only=True)
     imagen_principal = serializers.SerializerMethodField()
@@ -166,7 +168,7 @@ class RepuestoSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
         return attrs
 
 
-class ServicioSerializer(_CatalogoUnicoMixin, serializers.ModelSerializer):
+class ServicioSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
     class Meta:
         model = Servicio
         fields = [

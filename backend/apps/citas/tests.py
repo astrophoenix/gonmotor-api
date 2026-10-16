@@ -78,8 +78,8 @@ class AgendaCitasBase(TestCase):
     def payload(self, **kwargs):
         datos = {
             'taller': self.taller.pk,
-            'cliente': self.cliente.pk,
-            'vehiculo': self.vehiculo.pk,
+            'cliente': str(self.cliente.uuid),
+            'vehiculo': str(self.vehiculo.uuid),
             'fecha_cita': self.manana.isoformat(),
             'hora_cita': '09:00',
             'duracion_minutos': 60,
@@ -131,8 +131,8 @@ class HorarioAtencionTest(AgendaCitasBase):
         resp = self.crear(
             taller=None,
             hora_cita='03:00',
-            cliente=cliente.pk,
-            vehiculo=vehiculo.pk,
+            cliente=str(cliente.uuid),
+            vehiculo=str(vehiculo.uuid),
         )
         self.assertEqual(resp.status_code, 201, resp.content)
 
@@ -451,7 +451,7 @@ class CompartirIcsTest(AgendaCitasBase):
 
     def test_enlace_no_entrega_citas_inactivas(self):
         creada = self.crear().json()
-        Cita.objects.filter(pk=creada['id']).update(is_active=False)
+        Cita.objects.filter(uuid=creada['id']).update(is_active=False)
 
         resp = APIClient().get(creada['enlace_ics'])
         self.assertEqual(resp.status_code, 404)
@@ -547,7 +547,7 @@ class SoloFuturoTest(AgendaCitasBase):
         )
 
         resp = self.client.patch(
-            f'{LISTADO}{pasada.pk}/',
+            f'{LISTADO}{pasada.uuid}/',
             {'estado': 'NO_ASISTIO', 'notas_internas': 'No se presentó.'},
             format='json',
         )
@@ -568,7 +568,7 @@ class SoloFuturoTest(AgendaCitasBase):
         )
 
         resp = self.client.patch(
-            f'{LISTADO}{pasada.pk}/',
+            f'{LISTADO}{pasada.uuid}/',
             {'fecha_cita': pasada.fecha_cita.isoformat(), 'hora_cita': '09:00'},
             format='json',
         )
@@ -828,7 +828,7 @@ class CitaConversionNumeracionTests(TestCase):
                 'duplicate key value violates unique constraint "recepcion_empresa_sucursal_numero_unico"'
             ),
         ):
-            respuesta = client.post(f'/api/citas/{cita.id}/convertir_a_recepcion/', {}, format='json')
+            respuesta = client.post(f'/api/citas/{cita.uuid}/convertir_a_recepcion/', {}, format='json')
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertIn('numerar la recepción', str(respuesta.json()))
@@ -889,7 +889,7 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.pk))
         data = resp.json()
         self.assertEqual(data['count'], 1)
-        self.assertEqual(data['results'][0]['id'], central.id)
+        self.assertEqual(data['results'][0]['id'], str(central.uuid))
 
     def test_excluye_citas_sin_taller(self):
         self._cita(None)
@@ -903,7 +903,7 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         resp = client.get(LISTADO)
         data = resp.json()
         self.assertEqual(data['count'], 1)
-        self.assertEqual(data['results'][0]['id'], central.id)
+        self.assertEqual(data['results'][0]['id'], str(central.uuid))
 
     def test_no_admin_sin_talleres_no_ve_nada(self):
         self._cita(self.taller)

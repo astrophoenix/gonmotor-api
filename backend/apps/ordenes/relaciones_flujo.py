@@ -13,6 +13,8 @@ from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.response import Response
 
+from apps.core.ids_publicos import id_publico, por_id_publico, referencia_corta
+
 from .models import InspeccionVehiculo, OrdenTrabajo, RecepcionVehiculo
 
 TIPOS_FLUJO = ('cita', 'recepcion', 'inspeccion', 'cotizacion', 'orden')
@@ -35,40 +37,48 @@ def _error(detalle, campo='detail'):
 # ---------------------------------------------------------------------------
 
 
+def _etiqueta_cita(cita):
+    """Las citas no tienen número de documento: se identifican por su horario."""
+    if cita.fecha_cita:
+        hora = f" {cita.hora_cita.strftime('%H:%M')}" if cita.hora_cita else ''
+        return f"Cita {cita.fecha_cita.strftime('%d/%m/%Y')}{hora}"
+    return f'Cita {referencia_corta(cita)}'
+
+
 def _item_cita(cita):
     return {
-        'id': cita.id,
-        'label': f'Cita #{cita.id}',
-        'numero': f'#{cita.id}',
+        'id': id_publico(cita),
+        'label': _etiqueta_cita(cita),
+        'numero': _etiqueta_cita(cita),
         'estado': cita.estado,
         'estadoDisplay': cita.get_estado_display(),
         'fecha': cita.fecha_cita.isoformat() if cita.fecha_cita else '',
         'hora': cita.hora_cita.strftime('%H:%M') if cita.hora_cita else '',
-        'url': f'/crud/citas/?id={cita.id}',
+        'url': f'/crud/citas/?id={id_publico(cita)}',
         'canDelete': True,
     }
 
 
 def _item_recepcion(recepcion):
     return {
-        'id': recepcion.id,
+        'id': id_publico(recepcion),
         'label': recepcion.numero_recepcion,
         'numero': recepcion.numero_recepcion,
         'estado': recepcion.estado,
         'estadoDisplay': recepcion.get_estado_display(),
-        'url': f'/crud/recepciones/ver/?id={recepcion.id}',
+        'url': f'/crud/recepciones/ver/?id={id_publico(recepcion)}',
         'canDelete': True,
     }
 
 
 def _item_inspeccion(inspeccion):
     return {
-        'id': inspeccion.id,
-        'label': inspeccion.numero_inspeccion or f'#{inspeccion.id}',
-        'numero': inspeccion.numero_inspeccion or f'#{inspeccion.id}',
+        'id': id_publico(inspeccion),
+        'label': inspeccion.numero_inspeccion or referencia_corta(inspeccion),
+        'numero': inspeccion.numero_inspeccion or referencia_corta(inspeccion),
         'estado': inspeccion.estado,
         'estadoDisplay': inspeccion.get_estado_display(),
-        'url': f'/crud/inspecciones/ver/?id={inspeccion.id}',
+        'url': f'/crud/inspecciones/ver/?id={id_publico(inspeccion)}',
         'canDelete': not bool(inspeccion.orden_trabajo_id),
         'deleteReason': 'La inspección está ligada a una orden.' if inspeccion.orden_trabajo_id else '',
     }
@@ -76,12 +86,12 @@ def _item_inspeccion(inspeccion):
 
 def _item_orden(orden):
     return {
-        'id': orden.id,
+        'id': id_publico(orden),
         'label': orden.numero_orden,
         'numero': orden.numero_orden,
         'estado': orden.estado,
         'estadoDisplay': orden.get_estado_display(),
-        'url': f'/crud/ordenes/ver/?id={orden.id}',
+        'url': f'/crud/ordenes/ver/?id={id_publico(orden)}',
         'canDelete': True,
     }
 
@@ -101,14 +111,14 @@ def _item_cotizacion(cotizacion):
     else:
         motivo = ''
     return {
-        'id': cotizacion.id,
-        'label': cotizacion.numero_cotizacion or f'#{cotizacion.id}',
-        'numero': cotizacion.numero_cotizacion or f'#{cotizacion.id}',
+        'id': id_publico(cotizacion),
+        'label': cotizacion.numero_cotizacion or referencia_corta(cotizacion),
+        'numero': cotizacion.numero_cotizacion or referencia_corta(cotizacion),
         'estado': cotizacion.estado,
         'estadoDisplay': cotizacion.get_estado_display(),
         'created_at': cotizacion.created_at.isoformat() if cotizacion.created_at else None,
         'total': str(cotizacion.total or 0),
-        'url': f'/crud/cotizaciones/ver/?id={cotizacion.id}',
+        'url': f'/crud/cotizaciones/ver/?id={id_publico(cotizacion)}',
         'canDelete': not convertida,
         'deleteReason': motivo,
     }
@@ -302,12 +312,10 @@ def _validar_cotizacion_libre(cotizacion):
 
 
 def _buscar_relacionada(tipo, entidad_id, empresa_id):
+    """Entidad del flujo por su ID público (UUID), dentro de la empresa."""
     app_label, model_name = MODELO_POR_TIPO[tipo]
-    return (
-        apps.get_model(app_label, model_name)
-        .objects.filter(pk=entidad_id, empresa_id=empresa_id)
-        .first()
-    )
+    modelo = apps.get_model(app_label, model_name)
+    return por_id_publico(modelo.objects.filter(empresa_id=empresa_id), entidad_id).first()
 
 
 # ---------------------------------------------------------------------------

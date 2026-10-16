@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework.renderers import JSONRenderer
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request, talleres_filtro_de_request
 from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
@@ -110,7 +111,7 @@ def _serializar_recepcion(recepcion):
     vehiculo = recepcion.vehiculo
     cliente = recepcion.cliente
     return {
-        'id': recepcion.id,
+        'id': id_publico(recepcion),
         'numero_recepcion': recepcion.numero_recepcion,
         'fecha_ingreso': recepcion.fecha_ingreso.isoformat() if recepcion.fecha_ingreso else None,
         'hora': timezone.localtime(recepcion.fecha_ingreso).strftime('%H:%M') if recepcion.fecha_ingreso else None,
@@ -129,7 +130,7 @@ def _serializar_orden(orden):
     vehiculo = orden.vehiculo
     cliente = orden.cliente
     return {
-        'id': orden.id,
+        'id': id_publico(orden),
         'numero_orden': orden.numero_orden,
         'estado': orden.estado,
         'estado_display': orden.get_estado_display(),
@@ -332,7 +333,7 @@ class DashboardView(APIView):
         # ── Repuestos con stock bajo ────────────────────────────────────────
         stock_bajo = [
             {
-                'id': repuesto.id,
+                'id': id_publico(repuesto),
                 'codigo': repuesto.codigo,
                 'nombre': repuesto.nombre,
                 'categoria': repuesto.categoria,
@@ -440,7 +441,7 @@ def _serializar_cita(cita, hoy):
     vehiculo = cita.vehiculo
     cliente = cita.cliente
     return {
-        'id': cita.id,
+        'id': id_publico(cita),
         'fecha_cita': cita.fecha_cita.isoformat(),
         'hora': cita.hora_cita.strftime('%H:%M'),
         'estado': cita.estado,
@@ -453,7 +454,7 @@ def _serializar_cita(cita, hoy):
         'sucursal': cita.taller.nombre if cita.taller_id else None,
         'es_hoy': cita.fecha_cita == hoy,
         'convertida': bool(cita.recepcion_generada_id),
-        'recepcion_id': cita.recepcion_generada_id,
+        'recepcion_id': id_publico(cita.recepcion_generada),
     }
 
 
@@ -823,7 +824,7 @@ class DashboardV2View(APIView):
             InspeccionVehiculo.objects.filter(
                 recepcion_id__in=ids_recepcion,
                 is_active=True,
-            ).values_list('recepcion_id', 'id')
+            ).values_list('recepcion_id', 'uuid')
         ) if ids_recepcion else {}
 
         # ── Tabla: citas del periodo ───────────────────────────────────────
@@ -856,7 +857,7 @@ class DashboardV2View(APIView):
         # ── Repuestos con stock bajo ───────────────────────────────────────
         stock_bajo = [
             {
-                'id': repuesto.id,
+                'id': id_publico(repuesto),
                 'codigo': repuesto.codigo,
                 'nombre': repuesto.nombre,
                 'categoria': repuesto.categoria,

@@ -671,9 +671,9 @@ class DashboardV2EndpointTest(TestCase):
 
         self.assertEqual(len(citas), 3)
         self.assertEqual([fila['hora'] for fila in citas], ['10:00', '11:30', '16:00'])
-        convertida = next(fila for fila in citas if fila['id'] == self.cita_convertida.pk)
+        convertida = next(fila for fila in citas if fila['id'] == str(self.cita_convertida.uuid))
         self.assertTrue(convertida['convertida'])
-        self.assertEqual(convertida['recepcion_id'], self.rec_aceptada.pk)
+        self.assertEqual(convertida['recepcion_id'], str(self.rec_aceptada.uuid))
 
     def test_ordenes_criticas_ordenadas_por_urgencia(self):
         ordenes = self.client.get(ENDPOINT_V2).json()['ordenes_activas']

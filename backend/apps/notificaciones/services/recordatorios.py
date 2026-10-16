@@ -19,6 +19,7 @@ from datetime import timedelta
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.core.ids_publicos import id_publico
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario
 from .mensajes import construir_mensaje_mantenimiento, construir_mensaje_prueba
 from .telefonos import normalizar_celular
@@ -147,7 +148,7 @@ def ejecutar_para_empresa(*, empresa, preferencia, preview=False, user=None, veh
 
     Args:
         preview: si es True, NO envía nada; solo devuelve los candidatos.
-        vehiculos_ids: lista opcional de ids para acotar el envío.
+        vehiculos_ids: lista opcional de IDs públicos (UUID) para acotar el envío.
 
     Returns:
         dict con pendientes, enviados, errores y modo de simulación.
@@ -166,8 +167,8 @@ def ejecutar_para_empresa(*, empresa, preferencia, preview=False, user=None, veh
 
     candidatos = vehiculos_proximos_mantenimiento(empresa.pk, preferencia)
     if vehiculos_ids:
-        ids_set = set(int(i) for i in vehiculos_ids)
-        candidatos = [c for c in candidatos if c['vehiculo'].pk in ids_set]
+        ids_set = {str(i) for i in vehiculos_ids}
+        candidatos = [c for c in candidatos if str(c['vehiculo'].uuid) in ids_set]
 
     if preview:
         return {
@@ -179,7 +180,7 @@ def ejecutar_para_empresa(*, empresa, preferencia, preview=False, user=None, veh
             'modo': resumen_configuracion()['modo'],
             'candidatos': [
                 {
-                    'vehiculo_id': c['vehiculo'].pk,
+                    'vehiculo_id': id_publico(c['vehiculo']),
                     'placa': c['vehiculo'].placa,
                     'vehiculo': f"{c['vehiculo'].marca} {c['vehiculo'].modelo}",
                     'cliente': c['cliente'].nombre,

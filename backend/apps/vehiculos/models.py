@@ -1,4 +1,5 @@
 from django.db import models
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import (
     AllObjectsManager,
     BaseEmpresaModel,
@@ -86,7 +87,7 @@ class VehiculoQuerySet(TenantSoftDeleteQuerySet):
         return self.de_empresa(empresa_id)
 
 
-class Vehiculo(SoftDeleteModel):
+class Vehiculo(UuidPublicoModel, SoftDeleteModel):
 
     #🚗 Opciones del tipo de transmisión con TextChoices
     class TipoTransmision(models.TextChoices):

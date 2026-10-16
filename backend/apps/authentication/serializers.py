@@ -16,6 +16,7 @@ from .models import UserProfile
 from .models import UsuarioEmpresa
 
 from .permisos_repo import nombre_rol
+from apps.core.serializers import ModelSerializerPublico
 
 
 def _taller_sesion_nombre(user, empresa):
@@ -448,7 +449,7 @@ class UserProfileUpdateSerializer(serializers.Serializer):
         return instance
 
 
-class UserProfileSerializer(serializers.ModelSerializer):
+class UserProfileSerializer(ModelSerializerPublico):
     """Perfil global.
 
     `rol`, `empresa` y `talleres` viven en `UsuarioEmpresa`, no en el perfil:
@@ -481,7 +482,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return value
 
 
-class UserAdminSerializer(serializers.ModelSerializer):
+class UserAdminSerializer(ModelSerializerPublico):
     """
     Serializer para el CRUD administrativo de usuarios.
     """
@@ -659,7 +660,7 @@ class EmpleadoWriteSerializer(serializers.Serializer):
         }
 
 
-class EmpleadoReadSerializer(serializers.ModelSerializer):
+class EmpleadoReadSerializer(ModelSerializerPublico):
     user = serializers.SerializerMethodField()
     talleres = serializers.SerializerMethodField()
     rol_display = serializers.SerializerMethodField()

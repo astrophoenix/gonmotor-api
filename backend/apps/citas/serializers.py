@@ -2,6 +2,7 @@ from django.db import transaction
 from django.urls import reverse
 from rest_framework import serializers
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import ValidarUsuariosEmpresaMixin
 
@@ -14,6 +15,7 @@ from .services import (
     resolver_taller_de_cita,
     verificar_disponibilidad,
 )
+from apps.core.serializers import ModelSerializerPublico
 
 # Estados en los que la cita ya no admite edición (porque generó recepción o se cerró).
 ESTADOS_FINALES = [
@@ -23,7 +25,7 @@ ESTADOS_FINALES = [
 ]
 
 
-class CitaSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
+class CitaSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
     campos_usuario = ('asesor',)
 
     estado_display = serializers.CharField(read_only=True, source='get_estado_display')
@@ -70,7 +72,7 @@ class CitaSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
 
     def get_enlace_ics(self, obj):
         """URL pública (firmada) para descargar la cita en formato .ics."""
-        ruta = reverse('cita-compartir-ics', kwargs={'token': token_enlace_ics(obj.pk)})
+        ruta = reverse('cita-compartir-ics', kwargs={'token': token_enlace_ics(obj.uuid)})
         request = self.context.get('request')
         if request is None:
             return ruta
@@ -232,7 +234,7 @@ class CitaSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
         rep = super().to_representation(instance)
         if instance.vehiculo_id:
             rep['vehiculo'] = {
-                'id': instance.vehiculo_id,
+                'id': id_publico(instance.vehiculo),
                 'placa': instance.vehiculo.placa,
                 'marca': instance.vehiculo.marca,
                 'modelo': instance.vehiculo.modelo,
@@ -241,7 +243,7 @@ class CitaSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
             }
         if instance.cliente_id:
             rep['cliente'] = {
-                'id': instance.cliente_id,
+                'id': id_publico(instance.cliente),
                 'nombre': instance.cliente.nombre,
                 'identificacion': instance.cliente.identificacion,
                 'telefono': instance.cliente.telefono,

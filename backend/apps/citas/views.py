@@ -9,8 +9,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.ids_publicos import filtrar_por_id_publico, id_publico, por_id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
+from apps.core.mixins import FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.empresas.models import Taller
 
 from .ics import SALT_ENLACE_CITA_ICS, respuesta_ics
@@ -43,8 +44,8 @@ class CompartirCitaIcs(APIView):
             raise Http404('Enlace de cita no válido.')
 
         cita = (
-            Cita.objects.select_related('cliente', 'vehiculo', 'taller')
-            .filter(pk=cita_id, is_active=True)
+            por_id_publico(Cita.objects.select_related('cliente', 'vehiculo', 'taller'), cita_id)
+            .filter(is_active=True)
             .first()
         )
         if cita is None:
@@ -66,7 +67,7 @@ class CitaPagination(PageNumberPagination):
     max_page_size = 500
 
 
-class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet):
+class CitaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CitaSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('citas')]
     pagination_class = CitaPagination
@@ -95,10 +96,6 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
             .select_related('cliente', 'vehiculo', 'taller', 'asesor', 'recepcion_generada')
         )
 
-        numero = self.request.query_params.get('numero', '').strip()
-        if numero.isdigit():
-            queryset = queryset.filter(pk=int(numero))
-
         fecha = self.request.query_params.get('fecha')
         if fecha:
             queryset = queryset.filter(fecha_cita=fecha)
@@ -109,7 +106,7 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
 
         recepcion_generada = self.request.query_params.get('recepcion_generada')
         if recepcion_generada:
-            queryset = queryset.filter(recepcion_generada_id=recepcion_generada)
+            queryset = filtrar_por_id_publico(queryset, 'recepcion_generada', recepcion_generada)
         elif self.request.query_params.get('sin_recepcion') in ('1', 'true', 'True'):
             queryset = queryset.filter(recepcion_generada__isnull=True)
 
@@ -171,9 +168,13 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
         cita_excluida = None
         cita_param = request.query_params.get('cita')
         if cita_param:
-            if not Cita.objects.filter(pk=cita_param, empresa_id=empresa_id).exists():
+            cita_excluida = (
+                por_id_publico(Cita.objects.filter(empresa_id=empresa_id), cita_param)
+                .values_list('pk', flat=True)
+                .first()
+            )
+            if cita_excluida is None:
                 raise serializers.ValidationError({'cita': ['La cita no pertenece a tu empresa.']})
-            cita_excluida = cita_param
 
         hora = None
         duracion = None
@@ -228,8 +229,8 @@ class CitaViewSet(SoftDeleteDestroyMixin, FiltroTallerMixin, viewsets.ModelViewS
                 'Intenta convertir la cita de nuevo.'
             )
         return Response({
-            'id': cita.id,
+            'id': id_publico(cita),
             'estado': cita.estado,
-            'recepcion_id': recepcion.id,
+            'recepcion_id': id_publico(recepcion),
             'numero_recepcion': recepcion.numero_recepcion,
         })

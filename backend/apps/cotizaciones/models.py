@@ -3,10 +3,11 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseModel, BaseTallerModel
 
 
-class Cotizacion(BaseTallerModel):
+class Cotizacion(UuidPublicoModel, BaseTallerModel):
     class EstadoCotizacion(models.TextChoices):
         PENDIENTE = 'PENDIENTE', 'Pendiente'
         ENVIADA = 'ENVIADA', 'Enviada al Cliente'
@@ -355,7 +356,7 @@ class Cotizacion(BaseTallerModel):
         return ot
 
 
-class DetalleServicioCotizacion(BaseModel):
+class DetalleServicioCotizacion(UuidPublicoModel, BaseModel):
     """Mano de obra o servicios estimativos."""
 
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='servicios')
@@ -381,7 +382,7 @@ class DetalleServicioCotizacion(BaseModel):
         return f'{self.descripcion} - {self.cotizacion.numero_cotizacion}'
 
 
-class DetalleRepuestoCotizacion(BaseModel):
+class DetalleRepuestoCotizacion(UuidPublicoModel, BaseModel):
     """Repuestos requeridos para la cotización."""
 
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='repuestos')

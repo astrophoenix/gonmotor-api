@@ -24,9 +24,13 @@ CRLF = '\r\n'
 ESTADO_CANCELADO = 'CANCELADA'
 
 
-def token_enlace_ics(cita_id):
-    """Token opaco y no manipulable que da acceso a la descarga de la cita."""
-    return signing.dumps(cita_id, salt=SALT_ENLACE_CITA_ICS)
+def token_enlace_ics(cita_uuid):
+    """Token firmado (no manipulable) que da acceso a la descarga de la cita.
+
+    La firma no cifra: el contenido es legible, por eso lleva el UUID público
+    y no la pk interna.
+    """
+    return signing.dumps(str(cita_uuid), salt=SALT_ENLACE_CITA_ICS)
 
 
 def escapar_texto(valor):
@@ -112,7 +116,7 @@ def construir_ics(cita):
     """Devuelve el contenido completo del archivo .ics de la cita."""
     cancelada = cita.estado == ESTADO_CANCELADO
     campos = [
-        ('UID', f'cita-{cita.pk}@gonmotor'),
+        ('UID', f'cita-{cita.uuid}@gonmotor'),
         ('DTSTAMP', timezone.now().strftime('%Y%m%dT%H%M%SZ')),
         ('DTSTART', _inicio(cita).strftime('%Y%m%dT%H%M%S')),
         ('DTEND', _fin(cita).strftime('%Y%m%dT%H%M%S')),

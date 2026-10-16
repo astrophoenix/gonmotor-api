@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.models import UsuarioEmpresa
 from apps.authentication.permisos_repo import nombre_rol
 from apps.authentication.utils import (
@@ -25,6 +26,7 @@ from .models import (
     OrdenTrabajo,
     RecepcionVehiculo,
 )
+from apps.core.serializers import ModelSerializerPublico
 
 
 def conservar_sucursal(validated_data):
@@ -48,7 +50,7 @@ def url_imagen_absoluta(request, url):
     return url
 
 
-class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
     campos_usuario = ('mecanico_asignado',)
 
@@ -108,7 +110,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
         return super().update(instance, validated_data)
 
 
-class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
 
     class Meta:
@@ -153,7 +155,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializ
         return super().update(instance, validated_data)
 
 
-class DetalleServicioInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleServicioInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'inspeccion'
 
     servicio_codigo = serializers.SerializerMethodField()
@@ -203,7 +205,7 @@ class DetalleServicioInspeccionSerializer(ValidarDocumentoPadreMixin, serializer
         return rep
 
 
-class DetalleRepuestoInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleRepuestoInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'inspeccion'
 
     repuesto_codigo = serializers.SerializerMethodField()
@@ -253,7 +255,7 @@ class DetalleRepuestoInspeccionSerializer(ValidarDocumentoPadreMixin, serializer
         return rep
 
 
-class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'inspeccion'
 
     class Meta:
@@ -292,7 +294,7 @@ class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSeri
         return rep
 
 
-class FotoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class FotoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
 
     class Meta:
@@ -331,7 +333,7 @@ class FotoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializers.ModelSe
         return rep
 
 
-class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, ModelSerializerPublico):
     campos_usuario = ('responsable',)
     servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
     repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
@@ -585,7 +587,7 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
         vigentes = [c for c in cotizaciones if c.estado in Cotizacion.ESTADOS_VIGENTES]
         rep['tiene_cotizacion_activa'] = bool(vigentes)
         cotizacion_activa = vigentes[-1] if vigentes else None
-        rep['cotizacion_activa_id'] = cotizacion_activa.id if cotizacion_activa else None
+        rep['cotizacion_activa_id'] = id_publico(cotizacion_activa)
         rep['cotizacion_activa_estado'] = cotizacion_activa.estado if cotizacion_activa else None
         rep['numero_cotizacion'] = (
             cotizacion_activa.numero_cotizacion if cotizacion_activa else None
@@ -595,7 +597,7 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
         rep['cotizacion_estado_display'] = (
             ultima_cotizacion.get_estado_display() if ultima_cotizacion else None
         )
-        rep['cotizacion_id'] = ultima_cotizacion.id if ultima_cotizacion else None
+        rep['cotizacion_id'] = id_publico(ultima_cotizacion)
         rep['cotizacion_numero'] = (
             ultima_cotizacion.numero_cotizacion if ultima_cotizacion else None
         )
@@ -616,12 +618,12 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
             rv = rec.vehiculo if rec.vehiculo_id else None
             rc = rec.cliente if rec.cliente_id else None
             rep['recepcion'] = {
-                'id': rec.id,
+                'id': id_publico(rec),
                 'numero_recepcion': rec.numero_recepcion,
                 'estado': rec.estado,
                 'estado_display': rec.get_estado_display(),
                 'vehiculo': {
-                    'id': rv.id,
+                    'id': id_publico(rv),
                     'placa': rv.placa,
                     'marca': rv.marca,
                     'modelo': rv.modelo,
@@ -636,7 +638,7 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
                     ),
                 } if rv else None,
                 'cliente': {
-                    'id': rc.id,
+                    'id': id_publico(rc),
                     'nombre': rc.nombre,
                     'identificacion': rc.identificacion,
                     'telefono': rc.telefono,
@@ -656,14 +658,14 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
         cliente_obj = instance.cliente if instance.cliente_id else None
         vehiculo_obj = instance.vehiculo if instance.vehiculo_id else None
         rep['cliente'] = {
-            'id': cliente_obj.id,
+            'id': id_publico(cliente_obj),
             'nombre': cliente_obj.nombre,
             'identificacion': cliente_obj.identificacion,
             'telefono': cliente_obj.telefono,
             'email': cliente_obj.email,
         } if cliente_obj else None
         rep['vehiculo'] = {
-            'id': vehiculo_obj.id,
+            'id': id_publico(vehiculo_obj),
             'placa': vehiculo_obj.placa,
             'marca': vehiculo_obj.marca,
             'modelo': vehiculo_obj.modelo,
@@ -680,7 +682,7 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
         return rep
 
 
-class FotoRecepcionSerializer(serializers.ModelSerializer):
+class FotoRecepcionSerializer(ModelSerializerPublico):
     tipo_vista_display = serializers.CharField(source='get_tipo_vista_display', read_only=True)
 
     class Meta:
@@ -695,7 +697,7 @@ class FotoRecepcionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, ModelSerializerPublico):
     campos_usuario = ('recibido_por',)
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
     fotos = FotoRecepcionSerializer(many=True, read_only=True)
@@ -718,7 +720,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
     def get_cotizaciones_generadas(self, instance):
         return [
             {
-                'id': cotizacion.id,
+                'id': id_publico(cotizacion),
                 'numero_cotizacion': cotizacion.numero_cotizacion,
                 'estado': cotizacion.estado,
                 'estado_display': cotizacion.get_estado_display(),
@@ -747,7 +749,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
         if instance.vehiculo_id:
             request = self.context.get('request')
             rep['vehiculo'] = {
-                'id': instance.vehiculo_id,
+                'id': id_publico(instance.vehiculo),
                 'placa': instance.vehiculo.placa,
                 'numero_motor': instance.vehiculo.numero_motor,
                 'marca': instance.vehiculo.marca,
@@ -765,7 +767,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
             }
         if instance.cliente_id:
             rep['cliente'] = {
-                'id': instance.cliente_id,
+                'id': id_publico(instance.cliente),
                 'nombre': instance.cliente.nombre,
                 'identificacion': instance.cliente.identificacion,
                 'telefono': instance.cliente.telefono,
@@ -904,7 +906,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
         return instance
 
 
-class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, ModelSerializerPublico):
     campos_usuario = ('asesor', 'mecanico_principal')
     servicios = DetalleServicioOrdenTrabajoSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoOrdenTrabajoSerializer(many=True, read_only=True)
@@ -992,7 +994,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
         rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
         if instance.vehiculo_id:
             rep['vehiculo'] = {
-                'id': instance.vehiculo_id,
+                'id': id_publico(instance.vehiculo),
                 'placa': instance.vehiculo.placa,
                 'marca': instance.vehiculo.marca,
                 'modelo': instance.vehiculo.modelo,
@@ -1007,7 +1009,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
             }
         if instance.cliente_id:
             rep['cliente'] = {
-                'id': instance.cliente_id,
+                'id': id_publico(instance.cliente),
                 'nombre': instance.cliente.nombre,
                 'identificacion': instance.cliente.identificacion,
                 'telefono': instance.cliente.telefono,
@@ -1024,7 +1026,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
         )
         rep['recepciones'] = [
             {
-                'id': r.id,
+                'id': id_publico(r),
                 'numero_recepcion': r.numero_recepcion,
                 'tipo_recepcion': r.tipo_recepcion,
                 'fecha_ingreso': r.fecha_ingreso,
@@ -1033,7 +1035,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
                 'motivo_ingreso': r.motivo_ingreso,
                 'fotos': [
                     {
-                        'id': f.id,
+                        'id': id_publico(f),
                         'tipo_vista': f.tipo_vista,
                         'tipo_vista_display': f.get_tipo_vista_display(),
                         'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
@@ -1047,7 +1049,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
         inspeccion = getattr(instance, 'inspeccion', None)
         rep['inspeccion'] = (
             {
-                'id': inspeccion.id,
+                'id': id_publico(inspeccion),
                 'numero_inspeccion': inspeccion.numero_inspeccion,
                 'tipo_inspeccion': inspeccion.tipo_inspeccion,
                 'tipo_inspeccion_display': inspeccion.get_tipo_inspeccion_display(),
@@ -1058,7 +1060,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
                 'recomendaciones': inspeccion.recomendaciones,
                 'fotos': [
                     {
-                        'id': f.id,
+                        'id': id_publico(f),
                         'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
                         'descripcion': f.descripcion,
                         'created_at': f.created_at,
@@ -1087,7 +1089,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, se
         rep['cotizacion_estado_display'] = (
             cotizacion.get_estado_display() if cotizacion else None
         )
-        rep['cotizacion_id'] = cotizacion.id if cotizacion else None
+        rep['cotizacion_id'] = id_publico(cotizacion)
         rep['cotizacion_numero'] = (
             cotizacion.numero_cotizacion if cotizacion else None
         )

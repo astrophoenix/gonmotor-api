@@ -23,6 +23,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.ids_publicos import id_publico, referencia_corta
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.clientes.models import Cliente
 from apps.cotizaciones.models import Cotizacion
@@ -85,7 +86,7 @@ def _detalle_vehiculo(vehiculo):
 def _resultado(tipo, objeto, titulo, subtitulo=None, meta=None, estado=None):
     return {
         'tipo': tipo,
-        'id': objeto.id if objeto is not None else None,
+        'id': id_publico(objeto),
         'titulo': titulo or '—',
         'subtitulo': subtitulo,
         'meta': meta,
@@ -260,7 +261,7 @@ def _buscar_inspecciones(empresa_id, q, talleres=None):
     for inspeccion in queryset:
         cliente = inspeccion.cliente or (inspeccion.recepcion.cliente if inspeccion.recepcion_id else None)
         vehiculo = inspeccion.vehiculo or (inspeccion.recepcion.vehiculo if inspeccion.recepcion_id else None)
-        numero = inspeccion.numero_inspeccion or f'Inspección #{inspeccion.id}'
+        numero = inspeccion.numero_inspeccion or f'Inspección {referencia_corta(inspeccion)}'
         resultados.append(_resultado(
             'inspecciones',
             inspeccion,

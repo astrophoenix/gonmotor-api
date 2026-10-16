@@ -22,6 +22,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.core.ids_publicos import id_publico
 from apps.empresas.models import Taller
 from apps.ordenes.models import RecepcionVehiculo
 
@@ -278,7 +279,7 @@ def disponibilidad(taller, fecha, cita_excluida=None, hora=None, duracion_minuto
         'fecha': fecha.isoformat(),
         'aplicable': taller is not None,
         'taller': (
-            {'id': taller.pk, 'nombre': taller.nombre} if taller else None
+            {'id': id_publico(taller), 'nombre': taller.nombre} if taller else None
         ),
         'horario': (
             {

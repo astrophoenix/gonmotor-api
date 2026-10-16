@@ -1,8 +1,9 @@
 from django.db import models
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseEmpresaModel
 
 # Create your models here.
-class Cliente(BaseEmpresaModel):
+class Cliente(UuidPublicoModel, BaseEmpresaModel):
     TIPO_IDENTIFICACION = [
         ('C', 'Cédula'),
         ('R', 'RUC'),

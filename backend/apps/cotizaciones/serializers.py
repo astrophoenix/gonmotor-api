@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from rest_framework import serializers
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
@@ -12,6 +13,7 @@ from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarUsuariosEmpresaM
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
+from apps.core.serializers import ModelSerializerPublico
 
 
 def _texto_plano(value):
@@ -57,7 +59,7 @@ def url_imagen_absoluta(request, url):
     return url
 
 
-class DetalleServicioCotizacionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleServicioCotizacionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'cotizacion'
 
     class Meta:
@@ -78,7 +80,7 @@ class DetalleServicioCotizacionSerializer(ValidarDocumentoPadreMixin, serializer
         read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
-class DetalleRepuestoCotizacionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+class DetalleRepuestoCotizacionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'cotizacion'
 
     class Meta:
@@ -99,7 +101,7 @@ class DetalleRepuestoCotizacionSerializer(ValidarDocumentoPadreMixin, serializer
         read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
-class CotizacionSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
+class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
     campos_usuario = ('asesor', 'aceptada_por')
 
     servicios = DetalleServicioCotizacionSerializer(many=True, read_only=True)
@@ -350,7 +352,7 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSeriali
         rep['orden_trabajo_estado'] = orden.estado if orden else None
         rep['orden_trabajo_estado_display'] = orden.get_estado_display() if orden else None
         rep['orden_generada_numero'] = orden_generada.numero_orden if orden_generada else None
-        rep['orden_generada_id'] = orden_generada.id if orden_generada else None
+        rep['orden_generada_id'] = id_publico(orden_generada)
         rep['es_convertible'] = (
             instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA
             and instance.orden_trabajo_origen_id is None

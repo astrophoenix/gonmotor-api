@@ -338,8 +338,8 @@ class CotizacionAsesorApiTests(APITestCase):
         resp = self.client.post(
             '/api/cotizaciones/',
             {
-                'cliente': self.cliente.id,
-                'vehiculo': self.vehiculo.id,
+                'cliente': str(self.cliente.uuid),
+                'vehiculo': str(self.vehiculo.uuid),
                 'asesor': self.asesor.id,
                 'validez_dias': 15,
             },
@@ -354,7 +354,7 @@ class CotizacionAsesorApiTests(APITestCase):
     def test_crear_sin_asesor_y_luego_asignarlo(self):
         resp = self.client.post(
             '/api/cotizaciones/',
-            {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id, 'validez_dias': 15},
+            {'cliente': str(self.cliente.uuid), 'vehiculo': str(self.vehiculo.uuid), 'validez_dias': 15},
             format='json',
         )
         self.assertEqual(resp.status_code, 201, resp.content)
@@ -376,7 +376,7 @@ class CotizacionAsesorApiTests(APITestCase):
             vehiculo=self.vehiculo,
             asesor=self.asesor,
         )
-        resp = self.client.patch(f'/api/cotizaciones/{cot.id}/', {'asesor': None}, format='json')
+        resp = self.client.patch(f'/api/cotizaciones/{cot.uuid}/', {'asesor': None}, format='json')
         self.assertEqual(resp.status_code, 200, resp.content)
         cot.refresh_from_db()
         self.assertIsNone(cot.asesor_id)
@@ -386,7 +386,7 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
     """Un vehículo puede tener varias cotizaciones vigentes independientes."""
 
     def _crear(self, **extra):
-        datos = {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id}
+        datos = {'cliente': str(self.cliente.uuid), 'vehiculo': str(self.vehiculo.uuid)}
         datos.update(extra)
         return self.client.post('/api/cotizaciones/', datos, format='json')
 
@@ -403,8 +403,8 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
             vehiculo=self.vehiculo,
             numero_recepcion='REC-MULTI-COT',
         )
-        primera = self._crear(recepcion_origen=recepcion.pk)
-        segunda = self._crear(recepcion_origen=recepcion.pk)
+        primera = self._crear(recepcion_origen=str(recepcion.uuid))
+        segunda = self._crear(recepcion_origen=str(recepcion.uuid))
 
         self.assertEqual(primera.status_code, 201, primera.content)
         self.assertEqual(segunda.status_code, 201, segunda.content)
@@ -422,7 +422,7 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
             vehiculo=self.vehiculo,
             numero_inspeccion='INS-SIN-ITEMS',
         )
-        respuesta = self._crear(inspeccion_origen=inspeccion.pk)
+        respuesta = self._crear(inspeccion_origen=str(inspeccion.uuid))
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertEqual(Cotizacion.objects.filter(inspeccion_origen=inspeccion).count(), 0)
@@ -438,8 +438,8 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
             numero_inspeccion='INS-MULTI-COT',
         )
         DetalleServicioInspeccion.objects.create(inspeccion=inspeccion, descripcion='Cambio de aceite')
-        primera = self._crear(inspeccion_origen=inspeccion.pk)
-        segunda = self._crear(inspeccion_origen=inspeccion.pk)
+        primera = self._crear(inspeccion_origen=str(inspeccion.uuid))
+        segunda = self._crear(inspeccion_origen=str(inspeccion.uuid))
 
         self.assertEqual(primera.status_code, 201, primera.content)
         self.assertEqual(segunda.status_code, 201, segunda.content)
@@ -468,7 +468,7 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
         otro = Vehiculo.objects.create(placa='ASE-0002', marca='Kia', modelo='Rio')
         otro.empresas.add(self.empresa)
         self.assertEqual(self._crear().status_code, 201)
-        respuesta = self._crear(vehiculo=otro.id)
+        respuesta = self._crear(vehiculo=str(otro.uuid))
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
 
     def test_cotizaciones_sin_vehiculo_no_se_bloquean(self):
@@ -507,12 +507,12 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
         self._crear()
         otro = Vehiculo.objects.create(placa='ASE-0003', marca='Toyota', modelo='Hilux')
         otro.empresas.add(self.empresa)
-        editable = self._crear(vehiculo=otro.id)
+        editable = self._crear(vehiculo=str(otro.uuid))
         self.assertEqual(editable.status_code, 201, editable.content)
 
         respuesta = self.client.patch(
             f"/api/cotizaciones/{editable.json()['id']}/",
-            {'vehiculo': self.vehiculo.id},
+            {'vehiculo': str(self.vehiculo.uuid)},
             format='json',
         )
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
@@ -522,16 +522,16 @@ class CotizacionesMultiplesPorVehiculoTests(CotizacionAsesorApiTests):
         primera = self._crear()
         segunda = self._crear(vehiculo=None)
         self.assertEqual(segunda.status_code, 201, segunda.content)
-        primera_cot = Cotizacion.objects.get(pk=primera.json()['id'])
+        primera_cot = Cotizacion.objects.get(uuid=primera.json()['id'])
         self.assertEqual(primera_cot.vehiculo_id, self.vehiculo.id)
 
     def test_filtro_por_vehiculo(self):
         creada = self._crear()
         otro = Vehiculo.objects.create(placa='ASE-0004', marca='Mazda', modelo='3')
         otro.empresas.add(self.empresa)
-        self.assertEqual(self._crear(vehiculo=otro.id).status_code, 201)
+        self.assertEqual(self._crear(vehiculo=str(otro.uuid)).status_code, 201)
 
-        respuesta = self.client.get(f'/api/cotizaciones/?vehiculo={self.vehiculo.id}')
+        respuesta = self.client.get(f'/api/cotizaciones/?vehiculo={self.vehiculo.uuid}')
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         ids = [item['id'] for item in respuesta.json()['results']]
         self.assertIn(creada.json()['id'], ids)
@@ -548,7 +548,7 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
     def _cotizacion_con_detalles(self):
         creada = self.client.post(
             '/api/cotizaciones/',
-            {'cliente': self.cliente.id, 'vehiculo': self.vehiculo.id, 'validez_dias': 15},
+            {'cliente': str(self.cliente.uuid), 'vehiculo': str(self.vehiculo.uuid), 'validez_dias': 15},
             format='json',
         )
         self.assertEqual(creada.status_code, 201, creada.content)
@@ -588,7 +588,7 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
         self.assertEqual(respuesta['Content-Type'], 'application/pdf')
         self.assertTrue(b''.join(respuesta.streaming_content).startswith(b'%PDF'))
 
-        cotizacion = Cotizacion.objects.get(pk=cotizacion_id)
+        cotizacion = Cotizacion.objects.get(uuid=cotizacion_id)
         self.assertIn(
             cotizacion.numero_cotizacion,
             respuesta['Content-Disposition'],
@@ -604,14 +604,14 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
             Cotizacion.EstadoCotizacion.VENCIDA,
         ):
             with self.subTest(estado=estado):
-                Cotizacion.objects.filter(pk=cotizacion_id).update(estado=estado)
+                Cotizacion.objects.filter(uuid=cotizacion_id).update(estado=estado)
                 respuesta = self.client.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
                 self.assertEqual(respuesta.status_code, 200)
 
     def test_pdf_sin_detalles_no_falla(self):
         creada = self.client.post(
             '/api/cotizaciones/',
-            {'cliente': self.cliente.id, 'vehiculo': None, 'validez_dias': 10},
+            {'cliente': str(self.cliente.uuid), 'vehiculo': None, 'validez_dias': 10},
             format='json',
         )
         respuesta = self.client.get(f"/api/cotizaciones/{creada.json()['id']}/exportar-pdf/")
@@ -642,5 +642,5 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
             numero_cotizacion='COT-AJENA-1',
         )
 
-        respuesta = self.client.get(f'/api/cotizaciones/{ajena.pk}/exportar-pdf/')
+        respuesta = self.client.get(f'/api/cotizaciones/{ajena.uuid}/exportar-pdf/')
         self.assertEqual(respuesta.status_code, 404)

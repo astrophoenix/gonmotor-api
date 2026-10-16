@@ -32,25 +32,25 @@ class ClienteEstadoFilterTest(APITestCase):
     def test_listado_sin_filtro_muestra_activos_e_inactivos(self):
         resp = self.client.get('/api/clientes/')
         ids = [c['id'] for c in resp.json()['results']]
-        self.assertIn(self.activo.id, ids)
-        self.assertIn(self.inactivo.id, ids)
+        self.assertIn(str(self.activo.uuid), ids)
+        self.assertIn(str(self.inactivo.uuid), ids)
 
     def test_filtro_estado_inactivo(self):
         resp = self.client.get('/api/clientes/', {'estado': 'inactivo'})
         ids = [c['id'] for c in resp.json()['results']]
-        self.assertEqual(ids, [self.inactivo.id])
+        self.assertEqual(ids, [str(self.inactivo.uuid)])
 
     def test_filtro_estado_activo(self):
         resp = self.client.get('/api/clientes/', {'estado': 'activo'})
         ids = [c['id'] for c in resp.json()['results']]
-        self.assertEqual(ids, [self.activo.id])
+        self.assertEqual(ids, [str(self.activo.uuid)])
 
     def test_reactivar_cliente(self):
-        resp = self.client.post(f'/api/clientes/{self.inactivo.id}/reactivar/')
+        resp = self.client.post(f'/api/clientes/{self.inactivo.uuid}/reactivar/')
         self.assertEqual(resp.status_code, 200)
         self.inactivo.refresh_from_db()
         self.assertTrue(self.inactivo.is_active)
 
     def test_reactivar_cliente_activo_devuelve_400(self):
-        resp = self.client.post(f'/api/clientes/{self.activo.id}/reactivar/')
+        resp = self.client.post(f'/api/clientes/{self.activo.uuid}/reactivar/')
         self.assertEqual(resp.status_code, 400)

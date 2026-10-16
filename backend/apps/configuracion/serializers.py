@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.empresas.models import Empresa, Taller
 from apps.empresas.services import TIPOS_VALIDOS, ultimo_numero_emitido
+from apps.core.serializers import ModelSerializerPublico
 
 _ETIQUETAS_SECUENCIA = {
     'recepcion': 'Recepción',
@@ -13,7 +14,7 @@ _ETIQUETAS_SECUENCIA = {
 }
 
 
-class TallerConfigSerializer(serializers.ModelSerializer):
+class TallerConfigSerializer(ModelSerializerPublico):
     """Serializa las sucursales / talleres de la empresa en sesión.
 
     Incluye la numeración de documentos: prefijos, contadores y dígitos
@@ -248,7 +249,7 @@ class TallerConfigSerializer(serializers.ModelSerializer):
         return self._get_ejemplo(obj, 'ot')
 
 
-class EmpresaConfigSerializer(serializers.ModelSerializer):
+class EmpresaConfigSerializer(ModelSerializerPublico):
     """Serializa los datos fiscales y corporativos de la empresa del taller."""
 
     class Meta:

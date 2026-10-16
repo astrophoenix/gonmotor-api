@@ -9,9 +9,11 @@ from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
-from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin
+from apps.core.ids_publicos import filtrar_por_id_publico, referencia_corta
+from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
     PdfExportService,
@@ -69,7 +71,7 @@ def _validar_origen_inspeccion(inspeccion):
     _validar_origen_cotizacion(inspeccion=inspeccion)
 
 
-class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
+class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     taller_filter_field = 'sucursal'
@@ -109,7 +111,7 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         def row_builder(cotizacion, cell_style):
             asesor = cotizacion.asesor
             return [
-                celda_texto(cotizacion.numero_cotizacion or f'#{cotizacion.id}', cell_style),
+                celda_texto(cotizacion.numero_cotizacion or referencia_corta(cotizacion), cell_style),
                 celda_texto(cotizacion.vehiculo.placa if cotizacion.vehiculo else None, cell_style),
                 celda_texto(cotizacion.cliente.nombre if cotizacion.cliente else None, cell_style),
                 celda_texto((asesor.get_full_name() or asesor.username) if asesor else None, cell_style),
@@ -168,9 +170,7 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
 
         # Filtro por vehículo: lo usa la cotización para detectar si el auto ya
         # tiene una cotización vigente antes de crear otra.
-        vehiculo = params.get('vehiculo')
-        if vehiculo and vehiculo.isdigit():
-            queryset = queryset.filter(vehiculo_id=int(vehiculo))
+        queryset = filtrar_por_id_publico(queryset, 'vehiculo', params.get('vehiculo'))
 
         # Rango de fechas sobre la fecha de creación (comparación por día,
         # ambos extremos incluidos) para que no dependa de la zona horaria.
@@ -209,7 +209,7 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
         return Response({
-            'id': cotizacion.id,
+            'id': id_publico(cotizacion),
             'numero_cotizacion': cotizacion.numero_cotizacion,
             'cantidad_servicios': cotizacion.servicios.count(),
             'cantidad_repuestos': cotizacion.repuestos.count(),
@@ -226,7 +226,7 @@ class CotizacionViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
         return Response({
-            'id': ot.id,
+            'id': id_publico(ot),
             'numero_orden': ot.numero_orden,
             'estado': cotizacion.estado,
         })
@@ -273,7 +273,7 @@ def _check_cotizacion_editable(cotizacion):
         )
 
 
-class DetalleServicioCotizacionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleServicioCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioCotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]
@@ -296,7 +296,7 @@ class DetalleServicioCotizacionViewSet(FiltroDocumentoPadreMixin, viewsets.Model
         super().perform_destroy(instance)
 
 
-class DetalleRepuestoCotizacionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleRepuestoCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoCotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]

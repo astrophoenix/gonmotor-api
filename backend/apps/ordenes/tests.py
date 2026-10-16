@@ -279,7 +279,7 @@ class InspeccionListadoFiltrosTests(TestCase):
 
         item = next(i for i in self._listar()['results'] if i['numero_inspeccion'] == 'INS-FIL-0002')
 
-        self.assertEqual(item['orden_trabajo'], orden.id)
+        self.assertEqual(item['orden_trabajo'], str(orden.uuid))
         self.assertEqual(item['orden_trabajo_numero'], 'OT-FIL-0001')
         self.assertEqual(item['orden_trabajo_estado'], 'EN_PROCESO')
         self.assertTrue(item['orden_trabajo_estado_display'])
@@ -369,7 +369,7 @@ class InspeccionKilometrajeDiagnosticoTests(TestCase):
 
     def _actualizar(self, payload):
         return self.client.patch(
-            f'/api/ordenes/inspecciones/{self.inspeccion.id}/',
+            f'/api/ordenes/inspecciones/{self.inspeccion.uuid}/',
             data=payload,
             format='json',
         )
@@ -576,8 +576,8 @@ class OrdenTrabajoEstadosTests(TestCase):
         response = client.post(
             '/api/ordenes/ordenes-trabajo/',
             {
-                'cliente': self.cliente.id,
-                'vehiculo': self.vehiculo.id,
+                'cliente': str(self.cliente.uuid),
+                'vehiculo': str(self.vehiculo.uuid),
                 'estado': 'PENDIENTE',
                 'prioridad': 'MEDIA',
                 'tipo_trabajo': 'MANTENIMIENTO',
@@ -586,7 +586,7 @@ class OrdenTrabajoEstadosTests(TestCase):
             HTTP_X_EMPRESA_ID=str(self.empresa.id),
         )
         self.assertEqual(response.status_code, 201, response.data)
-        creada = OrdenTrabajo.objects.get(pk=response.data['id'])
+        creada = OrdenTrabajo.objects.get(uuid=response.data['id'])
         self.assertEqual(creada.empresa_id, self.empresa.id)
         self.assertTrue(creada.numero_orden)
         self.assertIsNone(creada.cotizacion_origen_id)
@@ -643,44 +643,44 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
 
     def _actualizar(self, tipo, entidad_id, accion):
         return self.client.post(
-            f'/api/recepciones/{self.recepcion.pk}/relaciones/',
+            f'/api/recepciones/{self.recepcion.uuid}/relaciones/',
             {'tipo': tipo, 'id': entidad_id, 'accion': accion},
             format='json',
         )
 
     def test_get_devuelve_relaciones_y_capacidades(self):
-        self._actualizar('cita', self.cita.pk, 'vincular')
-        self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
-        self._actualizar('orden', self.orden.pk, 'vincular')
-        respuesta = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/')
+        self._actualizar('cita', str(self.cita.uuid), 'vincular')
+        self._actualizar('cotizacion', str(self.cotizacion.uuid), 'vincular')
+        self._actualizar('orden', str(self.orden.uuid), 'vincular')
+        respuesta = self.client.get(f'/api/recepciones/{self.recepcion.uuid}/relaciones/')
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         datos = respuesta.json()
-        self.assertEqual(datos['relaciones']['cita'][0]['id'], self.cita.pk)
-        self.assertEqual(datos['relaciones']['cotizacion'][0]['id'], self.cotizacion.pk)
-        self.assertEqual(datos['relaciones']['orden'][0]['id'], self.orden.pk)
+        self.assertEqual(datos['relaciones']['cita'][0]['id'], str(self.cita.uuid))
+        self.assertEqual(datos['relaciones']['cotizacion'][0]['id'], str(self.cotizacion.uuid))
+        self.assertEqual(datos['relaciones']['orden'][0]['id'], str(self.orden.uuid))
         self.assertTrue(datos['puede_agregar']['inspeccion'])
         self.assertTrue(datos['puede_agregar']['cotizacion'])
 
     def test_vincula_y_desvincula_cita_sin_borrarla(self):
-        vincular = self._actualizar('cita', self.cita.pk, 'vincular')
+        vincular = self._actualizar('cita', str(self.cita.uuid), 'vincular')
         self.assertEqual(vincular.status_code, 200, vincular.content)
         self.cita.refresh_from_db()
         self.assertEqual(self.cita.recepcion_generada_id, self.recepcion.pk)
         self.assertEqual(self.cita.estado, 'PROGRAMADA')
 
-        desvincular = self._actualizar('cita', self.cita.pk, 'desvincular')
+        desvincular = self._actualizar('cita', str(self.cita.uuid), 'desvincular')
         self.assertEqual(desvincular.status_code, 200, desvincular.content)
         self.cita.refresh_from_db()
         self.assertIsNone(self.cita.recepcion_generada_id)
 
     def test_vincula_y_desvincula_cotizacion_sin_borrarla(self):
-        vincular = self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
+        vincular = self._actualizar('cotizacion', str(self.cotizacion.uuid), 'vincular')
         self.assertEqual(vincular.status_code, 200, vincular.content)
         self.cotizacion.refresh_from_db()
         self.assertEqual(self.cotizacion.recepcion_origen_id, self.recepcion.pk)
 
-        desvincular = self._actualizar('cotizacion', self.cotizacion.pk, 'desvincular')
+        desvincular = self._actualizar('cotizacion', str(self.cotizacion.uuid), 'desvincular')
         self.assertEqual(desvincular.status_code, 200, desvincular.content)
         self.cotizacion.refresh_from_db()
         self.assertIsNone(self.cotizacion.recepcion_origen_id)
@@ -694,15 +694,15 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
             vehiculo=self.vehiculo,
             numero_cotizacion='COT-REL-0002',
         )
-        primera_resp = self._actualizar('cotizacion', self.cotizacion.pk, 'vincular')
-        segunda_resp = self._actualizar('cotizacion', segunda.pk, 'vincular')
+        primera_resp = self._actualizar('cotizacion', str(self.cotizacion.uuid), 'vincular')
+        segunda_resp = self._actualizar('cotizacion', str(segunda.uuid), 'vincular')
 
         self.assertEqual(primera_resp.status_code, 200, primera_resp.content)
         self.assertEqual(segunda_resp.status_code, 200, segunda_resp.content)
-        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/').json()
+        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.uuid}/relaciones/').json()
         self.assertEqual(
             {item['id'] for item in relaciones['relaciones']['cotizacion']},
-            {self.cotizacion.pk, segunda.pk},
+            {str(self.cotizacion.uuid), str(segunda.uuid)},
         )
         self.assertTrue(relaciones['puede_agregar']['cotizacion'])
 
@@ -725,9 +725,9 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
             numero_cotizacion='COT-REL-0002',
         )
 
-        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.pk}/relaciones/').json()
-        self.assertIn(cotizacion.pk, [item['id'] for item in relaciones['relaciones']['cotizacion']])
-        respuesta = self._actualizar('cotizacion', cotizacion.pk, 'desvincular')
+        relaciones = self.client.get(f'/api/recepciones/{self.recepcion.uuid}/relaciones/').json()
+        self.assertIn(str(cotizacion.uuid), [item['id'] for item in relaciones['relaciones']['cotizacion']])
+        respuesta = self._actualizar('cotizacion', str(cotizacion.uuid), 'desvincular')
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         cotizacion.refresh_from_db()
@@ -737,12 +737,12 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
         self.assertEqual(inspeccion.recepcion_id, self.recepcion.pk)
 
     def test_vincula_y_desvincula_orden_sin_borrarla(self):
-        vincular = self._actualizar('orden', self.orden.pk, 'vincular')
+        vincular = self._actualizar('orden', str(self.orden.uuid), 'vincular')
         self.assertEqual(vincular.status_code, 200, vincular.content)
         self.recepcion.refresh_from_db()
         self.assertEqual(self.recepcion.orden_trabajo_id, self.orden.pk)
 
-        desvincular = self._actualizar('orden', self.orden.pk, 'desvincular')
+        desvincular = self._actualizar('orden', str(self.orden.uuid), 'desvincular')
         self.assertEqual(desvincular.status_code, 200, desvincular.content)
         self.recepcion.refresh_from_db()
         self.assertIsNone(self.recepcion.orden_trabajo_id)
@@ -762,8 +762,8 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
             motivo_ingreso='Segunda inspección',
             numero_inspeccion='INS-REL-0002',
         )
-        self.assertEqual(self._actualizar('inspeccion', primera.pk, 'vincular').status_code, 200)
-        respuesta = self._actualizar('inspeccion', segunda.pk, 'vincular')
+        self.assertEqual(self._actualizar('inspeccion', str(primera.uuid), 'vincular').status_code, 200)
+        respuesta = self._actualizar('inspeccion', str(segunda.uuid), 'vincular')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         segunda.refresh_from_db()
         self.assertIsNone(segunda.recepcion_id)
@@ -871,7 +871,7 @@ class ListadoPdfFlujoApiTests(_BaseRelacionesFlujoApiTests):
                 self.assertEqual(anonimo.get(url).status_code, 401)
 
     def test_el_pdf_de_una_cotizacion_sigue_disponible(self):
-        respuesta = self.client.get(f'/api/cotizaciones/{self.cotizacion.pk}/exportar-pdf/')
+        respuesta = self.client.get(f'/api/cotizaciones/{self.cotizacion.uuid}/exportar-pdf/')
         self.assertEqual(respuesta.status_code, 200)
         self.assertIn('COT-GRA-0001', respuesta['Content-Disposition'])
 
@@ -945,7 +945,7 @@ class ListadoExportLimiteApiTests(_BaseRelacionesFlujoApiTests):
 
 class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
     def _url(self, inspeccion=None):
-        return f'/api/ordenes/inspecciones/{(inspeccion or self.inspeccion).pk}/relaciones/'
+        return f'/api/ordenes/inspecciones/{(inspeccion or self.inspeccion).uuid}/relaciones/'
 
     def test_get_expone_recepcion_cotizacion_y_orden(self):
         respuesta = self.client.get(self._url())
@@ -956,13 +956,13 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
     def test_vincula_recepcion_y_cotizacion(self):
         self.assertEqual(
-            self._post(self._url(), 'recepcion', self.recepcion.pk).status_code, 200
+            self._post(self._url(), 'recepcion', str(self.recepcion.uuid)).status_code, 200
         )
         self.inspeccion.refresh_from_db()
         self.assertEqual(self.inspeccion.recepcion_id, self.recepcion.pk)
 
         self.assertEqual(
-            self._post(self._url(), 'cotizacion', self.cotizacion.pk).status_code, 200
+            self._post(self._url(), 'cotizacion', str(self.cotizacion.uuid)).status_code, 200
         )
         self.cotizacion.refresh_from_db()
         self.assertEqual(self.cotizacion.inspeccion_origen_id, self.inspeccion.pk)
@@ -974,8 +974,8 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
             vehiculo=self.vehiculo,
             numero_inspeccion='INS-GRA-0002',
         )
-        self._post(self._url(self.inspeccion), 'recepcion', self.recepcion.pk)
-        respuesta = self._post(self._url(otra), 'recepcion', self.recepcion.pk)
+        self._post(self._url(self.inspeccion), 'recepcion', str(self.recepcion.uuid))
+        respuesta = self._post(self._url(otra), 'recepcion', str(self.recepcion.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         otra.refresh_from_db()
         self.assertIsNone(otra.recepcion_id)
@@ -984,7 +984,7 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         # Una cotización con orden_trabajo_origen se considera "convertida"
         self.cotizacion.orden_trabajo_origen = self.orden
         self.cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        respuesta = self._post(self._url(), 'cotizacion', self.cotizacion.pk)
+        respuesta = self._post(self._url(), 'cotizacion', str(self.cotizacion.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.cotizacion.refresh_from_db()
         self.assertIsNone(self.cotizacion.inspeccion_origen_id)
@@ -997,8 +997,8 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
             fecha_cita=timezone.localdate(),
             hora_cita='09:30',
         )
-        self._post(self._url(), 'recepcion', self.recepcion.pk)
-        respuesta = self._post(self._url(), 'cita', cita.pk)
+        self._post(self._url(), 'recepcion', str(self.recepcion.uuid))
+        respuesta = self._post(self._url(), 'cita', str(cita.uuid))
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         cita.refresh_from_db()
         self.assertEqual(cita.recepcion_generada_id, self.recepcion.pk)
@@ -1011,13 +1011,13 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
             fecha_cita=timezone.localdate(),
             hora_cita='09:30',
         )
-        respuesta = self._post(self._url(), 'cita', cita.pk)
+        respuesta = self._post(self._url(), 'cita', str(cita.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
 
     def test_desvincula_orden_desde_inspeccion(self):
         self.inspeccion.orden_trabajo = self.orden
         self.inspeccion.save(update_fields=['orden_trabajo'])
-        respuesta = self._post(self._url(), 'orden', self.orden.pk, accion='desvincular')
+        respuesta = self._post(self._url(), 'orden', str(self.orden.uuid), accion='desvincular')
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         self.inspeccion.refresh_from_db()
         self.assertIsNone(self.inspeccion.orden_trabajo_id)
@@ -1025,7 +1025,7 @@ class InspeccionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
 class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
     def _url(self, cotizacion=None):
-        return f'/api/cotizaciones/{(cotizacion or self.cotizacion).pk}/relaciones/'
+        return f'/api/cotizaciones/{(cotizacion or self.cotizacion).uuid}/relaciones/'
 
     def test_get_expone_recepcion_inspeccion_y_orden(self):
         respuesta = self.client.get(self._url())
@@ -1035,18 +1035,18 @@ class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         self.assertTrue(datos['puede_agregar']['recepcion'])
 
     def test_vincula_y_desvincula_recepcion(self):
-        vincular = self._post(self._url(), 'recepcion', self.recepcion.pk)
+        vincular = self._post(self._url(), 'recepcion', str(self.recepcion.uuid))
         self.assertEqual(vincular.status_code, 200, vincular.content)
         self.cotizacion.refresh_from_db()
         self.assertEqual(self.cotizacion.recepcion_origen_id, self.recepcion.pk)
 
-        desvincular = self._post(self._url(), 'recepcion', self.recepcion.pk, accion='desvincular')
+        desvincular = self._post(self._url(), 'recepcion', str(self.recepcion.uuid), accion='desvincular')
         self.assertEqual(desvincular.status_code, 200, desvincular.content)
         self.cotizacion.refresh_from_db()
         self.assertIsNone(self.cotizacion.recepcion_origen_id)
 
     def test_vincula_orden_en_ambos_sentidos(self):
-        respuesta = self._post(self._url(), 'orden', self.orden.pk)
+        respuesta = self._post(self._url(), 'orden', str(self.orden.uuid))
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         self.cotizacion.refresh_from_db()
         self.orden.refresh_from_db()
@@ -1054,13 +1054,13 @@ class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         self.assertEqual(self.orden.cotizacion_origen_id, self.cotizacion.pk)
 
         relaciones = self.client.get(self._url()).json()['relaciones']['orden']
-        self.assertEqual([item['id'] for item in relaciones], [self.orden.pk])
+        self.assertEqual([item['id'] for item in relaciones], [str(self.orden.uuid)])
 
     def test_no_vincula_orden_que_ya_tiene_cotizacion_origen(self):
         self.orden.cotizacion_origen = self.cotizacion
         self.orden.save(update_fields=['cotizacion_origen'])
         otra = self._nueva_cotizacion('COT-GRA-0002')
-        respuesta = self._post(self._url(otra), 'orden', self.orden.pk)
+        respuesta = self._post(self._url(otra), 'orden', str(self.orden.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         otra.refresh_from_db()
         self.assertIsNone(otra.orden_trabajo_origen_id)
@@ -1073,16 +1073,16 @@ class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
         datos = self.client.get(self._url()).json()
         recepcion = datos['relaciones']['recepcion'][0]
-        self.assertEqual(recepcion['id'], self.recepcion.pk)
+        self.assertEqual(recepcion['id'], str(self.recepcion.uuid))
         self.assertFalse(recepcion['canDelete'])
         self.assertFalse(datos['puede_agregar']['recepcion'])
 
     def test_no_quita_el_vinculo_de_una_cotizacion_convertida(self):
-        self._post(self._url(), 'orden', self.orden.pk)
+        self._post(self._url(), 'orden', str(self.orden.uuid))
         # La cotización ya generó una orden -> no se puede desvincular
         self.cotizacion.orden_trabajo_origen = self.orden
         self.cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        respuesta = self._post(self._url(), 'orden', self.orden.pk, accion='desvincular')
+        respuesta = self._post(self._url(), 'orden', str(self.orden.uuid), accion='desvincular')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.orden.refresh_from_db()
         self.assertEqual(self.orden.cotizacion_origen_id, self.cotizacion.pk)
@@ -1100,7 +1100,7 @@ class CotizacionRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
 class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
     def _url(self, orden=None):
-        return f'/api/ordenes/ordenes-trabajo/{(orden or self.orden).pk}/relaciones/'
+        return f'/api/ordenes/ordenes-trabajo/{(orden or self.orden).uuid}/relaciones/'
 
     def test_get_deriva_recepciones_e_inspeccion(self):
         self.recepcion.orden_trabajo = self.orden
@@ -1111,10 +1111,10 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
 
         datos = self.client.get(self._url()).json()
         self.assertEqual(
-            [item['id'] for item in datos['relaciones']['recepcion']], [self.recepcion.pk]
+            [item['id'] for item in datos['relaciones']['recepcion']], [str(self.recepcion.uuid)]
         )
         self.assertEqual(
-            [item['id'] for item in datos['relaciones']['inspeccion']], [self.inspeccion.pk]
+            [item['id'] for item in datos['relaciones']['inspeccion']], [str(self.inspeccion.uuid)]
         )
         self.assertTrue(datos['puede_agregar']['cita'])
 
@@ -1127,7 +1127,7 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         )
         self.recepcion.orden_trabajo = otra
         self.recepcion.save(update_fields=['orden_trabajo'])
-        respuesta = self._post(self._url(), 'recepcion', self.recepcion.pk)
+        respuesta = self._post(self._url(), 'recepcion', str(self.recepcion.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.recepcion.refresh_from_db()
         self.assertEqual(self.recepcion.orden_trabajo_id, otra.pk)
@@ -1142,7 +1142,7 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
             fecha_cita=timezone.localdate(),
             hora_cita='11:00',
         )
-        respuesta = self._post(self._url(), 'cita', cita.pk)
+        respuesta = self._post(self._url(), 'cita', str(cita.uuid))
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         cita.refresh_from_db()
         self.assertEqual(cita.recepcion_generada_id, self.recepcion.pk)
@@ -1155,7 +1155,7 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
             fecha_cita=timezone.localdate(),
             hora_cita='11:00',
         )
-        respuesta = self._post(self._url(), 'cita', cita.pk)
+        respuesta = self._post(self._url(), 'cita', str(cita.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
 
     def test_rechaza_relacion_con_otra_empresa(self):
@@ -1165,16 +1165,16 @@ class OrdenRelacionesFlujoApiTests(_BaseRelacionesFlujoApiTests):
         otra_empresa = Empresa.objects.create(nombre_comercial='Taller Otro', ruc='999999999999')
         otro_cliente = Cliente.objects.create(empresa=otra_empresa, nombre='Cliente Otro')
         cotizacion = self._cotizacion_externa(otra_empresa, otro_cliente)
-        respuesta = self._post(self._url(), 'cotizacion', cotizacion.pk)
+        respuesta = self._post(self._url(), 'cotizacion', str(cotizacion.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertIn('empresa actual', respuesta.content.decode())
 
     def test_rechaza_tipo_y_accion_invalidos(self):
-        respuesta = self._post(self._url(), 'vehiculo', self.vehiculo.pk)
+        respuesta = self._post(self._url(), 'vehiculo', str(self.vehiculo.uuid))
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         respuesta = self.client.post(
             self._url(),
-            {'tipo': 'cotizacion', 'id': self.cotizacion.pk, 'accion': 'borrar'},
+            {'tipo': 'cotizacion', 'id': str(self.cotizacion.uuid), 'accion': 'borrar'},
             format='json',
         )
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
@@ -1337,7 +1337,7 @@ class InspeccionReaperturaApiTests(TestCase):
         )
 
     def _url(self):
-        return f'/api/ordenes/inspecciones/{self.inspeccion.id}/'
+        return f'/api/ordenes/inspecciones/{self.inspeccion.uuid}/'
 
     def _cotizacion(self, estado):
         return self.Cotizacion.objects.create(
@@ -1467,8 +1467,8 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
 
     def _payload(self):
         return {
-            'cliente': self.cliente.id,
-            'vehiculo': self.vehiculo.id,
+            'cliente': str(self.cliente.uuid),
+            'vehiculo': str(self.vehiculo.uuid),
             'tipo_recepcion': self.tipo,
             'estado': 'NO_ACEPTADA',
             'motivo_no_recepcion': 'El cliente no desea firmar',
@@ -1480,7 +1480,7 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         respuesta = self.client.post('/api/recepciones/', self._payload(), format='json')
 
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        creada = RecepcionVehiculo.objects.get(pk=respuesta.data['id'])
+        creada = RecepcionVehiculo.objects.get(uuid=respuesta.data['id'])
         self.assertEqual(creada.sucursal_id, self.taller_activo.pk)
         self.assertNotEqual(creada.sucursal_id, self.taller_primero.pk)
 
@@ -1491,7 +1491,7 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         respuesta = self.client.post('/api/recepciones/', self._payload(), format='multipart')
 
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        self.assertTrue(RecepcionVehiculo.objects.get(pk=respuesta.data['id']).is_active)
+        self.assertTrue(RecepcionVehiculo.objects.get(uuid=respuesta.data['id']).is_active)
 
     def test_el_detalle_del_registro_creado_es_visible_en_el_taller_activo(self):
         creada = self.client.post('/api/recepciones/', self._payload(), format='json').data
@@ -1549,7 +1549,7 @@ class RecepcionFirmarApiTests(TestCase):
         self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.pk)
 
     def _url(self, pk=None):
-        return f'/api/recepciones/{pk or self.recepcion.pk}/firmar/'
+        return f'/api/recepciones/{pk or self.recepcion.uuid}/firmar/'
 
     def test_firma_no_aceptada_pasa_directo_a_aceptada(self):
         respuesta = self.client.post(
@@ -1583,6 +1583,22 @@ class RecepcionFirmarApiTests(TestCase):
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
 
+
+    def test_firmar_y_crear_inspeccion_desde_la_recepcion(self):
+        from .models import InspeccionVehiculo
+
+        firma = self.client.post(
+            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+        )
+        self.assertEqual(firma.status_code, 200, firma.content)
+        type(self.recepcion).objects.filter(pk=self.recepcion.pk).update(motivo_ingreso='Mantenimiento de 10.000 km')
+
+        respuesta = self.client.post(f'/api/recepciones/{self.recepcion.uuid}/crear-inspeccion/')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        inspeccion = InspeccionVehiculo.objects.get(uuid=respuesta.json()['id'])
+        self.assertEqual(inspeccion.recepcion_id, self.recepcion.pk)
+        self.assertEqual(respuesta.json()['recepcion']['id'], str(self.recepcion.uuid))
 
 class BackfillSucursalDocumentosTests(TestCase):
     """La migración de backfill asigna taller a los documentos huérfanos
@@ -1703,8 +1719,8 @@ class OrdenSucursalConservadaTests(TestCase):
     def _payload(self, **extra):
         return {
             'sucursal': None,
-            'cliente': self.cliente.id,
-            'vehiculo': self.vehiculo.id,
+            'cliente': str(self.cliente.uuid),
+            'vehiculo': str(self.vehiculo.uuid),
             'estado': 'PENDIENTE',
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
@@ -1717,7 +1733,7 @@ class OrdenSucursalConservadaTests(TestCase):
         resp = self.client.post('/api/ordenes/ordenes-trabajo/', self._payload(), format='json')
 
         self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertEqual(OrdenTrabajo.objects.get(pk=resp.data['id']).sucursal_id, self.taller_activo.pk)
+        self.assertEqual(OrdenTrabajo.objects.get(uuid=resp.data['id']).sucursal_id, self.taller_activo.pk)
 
     def test_editar_con_sucursal_null_conserva_el_taller(self):
         from .models import OrdenTrabajo
@@ -1731,7 +1747,7 @@ class OrdenSucursalConservadaTests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200, resp.data)
-        orden = OrdenTrabajo.objects.get(pk=creada['id'])
+        orden = OrdenTrabajo.objects.get(uuid=creada['id'])
         self.assertEqual(orden.sucursal_id, self.taller_activo.pk)
         self.assertEqual(orden.observaciones, 'Editada')
 
@@ -1790,7 +1806,7 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
 
     def _entregar(self, **extra):
         return self.client.patch(
-            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            f'/api/ordenes/ordenes-trabajo/{self.orden.uuid}/',
             {'estado': 'ENTREGADO', **extra},
             format='json',
         )
@@ -1819,7 +1835,7 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
         self._entregar()
         nueva = timezone.now().replace(microsecond=0) - timedelta(days=1)
         resp = self.client.patch(
-            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            f'/api/ordenes/ordenes-trabajo/{self.orden.uuid}/',
             {'fecha_entrega': nueva.isoformat()},
             format='json',
         )
@@ -1829,7 +1845,7 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
 
     def test_orden_no_entregada_no_toca_la_recepcion(self):
         resp = self.client.patch(
-            f'/api/ordenes/ordenes-trabajo/{self.orden.pk}/',
+            f'/api/ordenes/ordenes-trabajo/{self.orden.uuid}/',
             {'estado': 'COMPLETADO'},
             format='json',
         )

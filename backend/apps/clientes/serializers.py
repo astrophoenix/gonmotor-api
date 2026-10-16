@@ -2,20 +2,22 @@ from rest_framework import serializers
 from django.db import transaction
 import json
 from .models import Cliente
+from apps.core.ids_publicos import id_publico, por_id_publico
 from apps.vehiculos.models import Vehiculo, VehiculoEmpresa, VehiculoPropietario, vincular_empresa
 from apps.vehiculos.serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.cotizaciones.models import Cotizacion
 from apps.ordenes.models import OrdenTrabajo
+from apps.core.serializers import ModelSerializerPublico
 
 
-class VehiculoResumenSerializer(serializers.ModelSerializer):
+class VehiculoResumenSerializer(ModelSerializerPublico):
     class Meta:
         model = Vehiculo
         fields = ['id', 'placa', 'marca', 'modelo', 'color', 'imagen']
 
 
-class ClienteListSerializer(serializers.ModelSerializer):
+class ClienteListSerializer(ModelSerializerPublico):
     vehiculos_count = serializers.IntegerField(read_only=True)
     vehiculos = serializers.SerializerMethodField()
 
@@ -47,7 +49,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
         ]
 
 
-class ClienteSerializer(serializers.ModelSerializer):
+class ClienteSerializer(ModelSerializerPublico):
     vehiculos = serializers.JSONField(required=False, write_only=True)
     is_active = serializers.BooleanField(required=False, default=True)
 
@@ -97,8 +99,8 @@ class ClienteSerializer(serializers.ModelSerializer):
 
             vehiculo = None
             if vehiculo_id:
-                # Por id solo vehículos ya vinculados a la empresa activa.
-                vehiculo = Vehiculo.objects.de_empresa(empresa_id).filter(id=vehiculo_id).first()
+                # Por ID público solo vehículos ya vinculados a la empresa activa.
+                vehiculo = por_id_publico(Vehiculo.objects.de_empresa(empresa_id), vehiculo_id).first()
 
             if not vehiculo and placa:
                 # Por placa se reutiliza el vehículo físico aunque sea de otra
@@ -219,7 +221,7 @@ class ClienteSerializer(serializers.ModelSerializer):
                 if existe_inactivo:
                     raise serializers.ValidationError({
                         'inactive_duplicate': {
-                            'id': existe_inactivo.id,
+                            'id': id_publico(existe_inactivo),
                             'identificacion': identificacion,
                             'nombre': existe_inactivo.nombre,
                             'message': (

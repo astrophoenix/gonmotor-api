@@ -2,9 +2,10 @@ from rest_framework import serializers
 
 from .models import PreferenciaMantenimiento, RegistroMensajeWhatsApp
 from .services.telefonos import normalizar_celular
+from apps.core.serializers import ModelSerializerPublico
 
 
-class RegistroMensajeWhatsAppSerializer(serializers.ModelSerializer):
+class RegistroMensajeWhatsAppSerializer(ModelSerializerPublico):
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
     origen_display = serializers.CharField(source='get_origen_display', read_only=True)
     vehiculo_resumen = serializers.SerializerMethodField()
@@ -37,7 +38,7 @@ class RegistroMensajeWhatsAppSerializer(serializers.ModelSerializer):
         return f"{obj.vehiculo.placa} - {obj.vehiculo.marca} {obj.vehiculo.modelo}"
 
 
-class PreferenciaMantenimientoSerializer(serializers.ModelSerializer):
+class PreferenciaMantenimientoSerializer(ModelSerializerPublico):
     class Meta:
         model = PreferenciaMantenimiento
         fields = [
@@ -54,7 +55,7 @@ class PreferenciaMantenimientoSerializer(serializers.ModelSerializer):
 
 
 class EnviarRecordatorioSerializer(serializers.Serializer):
-    vehiculo_id = serializers.IntegerField()
+    vehiculo_id = serializers.UUIDField()
 
 
 class EnviarPruebaSerializer(serializers.Serializer):
@@ -73,7 +74,7 @@ class EnviarPruebaSerializer(serializers.Serializer):
 class EjecutarRecordatoriosSerializer(serializers.Serializer):
     preview = serializers.BooleanField(default=False)
     vehiculos_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+        child=serializers.UUIDField(),
         required=False,
         allow_empty=True,
     )

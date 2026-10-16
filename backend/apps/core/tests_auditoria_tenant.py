@@ -147,7 +147,7 @@ class AuditoriaTenantTests(TestCase):
     def test_no_crea_detalle_en_cotizacion_de_otra_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         respuesta = client.post('/api/cotizaciones/servicios/', {
-            'cotizacion': self.cot_b.pk, 'codigo': 'X', 'descripcion': 'Intruso',
+            'cotizacion': str(self.cot_b.uuid), 'codigo': 'X', 'descripcion': 'Intruso',
             'precio_unitario': '1.00',
         }, format='json')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
@@ -156,7 +156,7 @@ class AuditoriaTenantTests(TestCase):
     def test_no_crea_servicio_en_orden_de_otra_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         respuesta = client.post('/api/ordenes/ot-servicios/', {
-            'orden_trabajo': self.ot_b.pk, 'descripcion': 'Intruso', 'precio_unitario': '1.00',
+            'orden_trabajo': str(self.ot_b.uuid), 'descripcion': 'Intruso', 'precio_unitario': '1.00',
         }, format='json')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.assertFalse(DetalleServicioOrdenTrabajo.objects.filter(orden_trabajo=self.ot_b).exists())
@@ -164,7 +164,7 @@ class AuditoriaTenantTests(TestCase):
     def test_no_crea_repuesto_en_orden_de_otra_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         respuesta = client.post('/api/ordenes/ot-repuestos/', {
-            'orden_trabajo': self.ot_b.pk, 'codigo_repuesto': 'X', 'descripcion': 'Intruso',
+            'orden_trabajo': str(self.ot_b.uuid), 'codigo_repuesto': 'X', 'descripcion': 'Intruso',
             'cantidad': 1, 'precio_unitario': '1.00',
         }, format='json')
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
@@ -173,7 +173,7 @@ class AuditoriaTenantTests(TestCase):
     def test_no_reasigna_cotizacion_a_cliente_de_otra_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         respuesta = client.patch(
-            f'/api/cotizaciones/{self.cot_a.pk}/', {'cliente': self.cliente_b.pk}, format='json'
+            f'/api/cotizaciones/{self.cot_a.uuid}/', {'cliente': str(self.cliente_b.uuid)}, format='json'
         )
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.cot_a.refresh_from_db()
@@ -183,20 +183,20 @@ class AuditoriaTenantTests(TestCase):
 
     def test_lineas_de_orden_de_otro_taller_no_se_listan(self):
         client = self._cliente(self.asesor_a1, self.empresa_a.pk)
-        respuesta = client.get('/api/ordenes/ot-servicios/', {'orden': self.ot_a2.pk})
+        respuesta = client.get('/api/ordenes/ot-servicios/', {'orden': str(self.ot_a2.uuid)})
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json()['results'], [])
 
     def test_linea_de_orden_de_otro_taller_no_se_modifica(self):
         client = self._cliente(self.asesor_a1, self.empresa_a.pk)
         respuesta = client.patch(
-            f'/api/ordenes/ot-servicios/{self.linea_a2.pk}/', {'descripcion': 'Cambiado'}, format='json'
+            f'/api/ordenes/ot-servicios/{self.linea_a2.uuid}/', {'descripcion': 'Cambiado'}, format='json'
         )
         self.assertEqual(respuesta.status_code, 404)
 
     def test_fotos_de_orden_de_otro_taller_no_se_ven(self):
         client = self._cliente(self.asesor_a1, self.empresa_a.pk)
-        respuesta = client.get(f'/api/ordenes/orden-fotos/{self.foto_a2.pk}/')
+        respuesta = client.get(f'/api/ordenes/orden-fotos/{self.foto_a2.uuid}/')
         self.assertEqual(respuesta.status_code, 404)
 
     # --- Rol sin permiso -----------------------------------------------------
@@ -241,10 +241,10 @@ class AuditoriaTenantTests(TestCase):
     def test_no_asigna_asesor_de_otra_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         casos = (
-            (f'/api/citas/{self.cita_a.pk}/', 'asesor'),
-            (f'/api/cotizaciones/{self.cot_a.pk}/', 'asesor'),
-            (f'/api/ordenes/ordenes-trabajo/{self.ot_a1.pk}/', 'asesor'),
-            (f'/api/ordenes/ordenes-trabajo/{self.ot_a1.pk}/', 'mecanico_principal'),
+            (f'/api/citas/{self.cita_a.uuid}/', 'asesor'),
+            (f'/api/cotizaciones/{self.cot_a.uuid}/', 'asesor'),
+            (f'/api/ordenes/ordenes-trabajo/{self.ot_a1.uuid}/', 'asesor'),
+            (f'/api/ordenes/ordenes-trabajo/{self.ot_a1.uuid}/', 'mecanico_principal'),
         )
         for url, campo in casos:
             with self.subTest(url=url, campo=campo):
@@ -256,12 +256,12 @@ class AuditoriaTenantTests(TestCase):
     def test_asigna_asesor_de_la_propia_empresa(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
         respuesta = client.patch(
-            f'/api/cotizaciones/{self.cot_a.pk}/', {'asesor': self.asesor_a1.pk}, format='json'
+            f'/api/cotizaciones/{self.cot_a.uuid}/', {'asesor': self.asesor_a1.pk}, format='json'
         )
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
 
     def test_recepcion_generada_de_la_cita_no_se_escribe(self):
         client = self._cliente(self.admin_a, self.empresa_a.pk)
-        client.patch(f'/api/citas/{self.cita_a.pk}/', {'recepcion_generada': self.recepcion_b.pk}, format='json')
+        client.patch(f'/api/citas/{self.cita_a.uuid}/', {'recepcion_generada': str(self.recepcion_b.uuid)}, format='json')
         self.cita_a.refresh_from_db()
         self.assertIsNone(self.cita_a.recepcion_generada_id)

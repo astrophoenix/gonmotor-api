@@ -10,6 +10,7 @@ from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.db.models import Prefetch
 from django.http import FileResponse
+from apps.core.ids_publicos import id_publico
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     _formatear_saldo,
@@ -19,7 +20,7 @@ from apps.core.utils.pdf_export import (
 # from apps.empresas.models import Empresa, Taller
 from .models import Cliente
 from apps.vehiculos.models import VehiculoPropietario
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from .serializers import ClienteListSerializer, ClienteSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
@@ -53,7 +54,7 @@ def _anotar_vehiculos_count(queryset):
         vehiculos_count=Coalesce(Subquery(conteo, output_field=IntegerField()), 0)
     )
 
-class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class ClienteViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     parser_classes = (MultiPartParser, FormParser)
     serializer_class = ClienteSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
@@ -126,7 +127,7 @@ class ClienteViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         return Response({
             'status': 'success',
-            'id': instance.id,
+            'id': id_publico(instance),
             'is_active': instance.is_active,
             'message': f"El cliente '{instance.nombre}' fue reactivado correctamente.",
         })

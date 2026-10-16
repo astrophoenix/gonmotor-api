@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from django.utils import timezone
 from .models import Vehiculo, VehiculoPropietario, vincular_empresa
+from apps.core.ids_publicos import id_publico
 from apps.clientes.models import Cliente
 from apps.core.utils.images import validate_image_extension
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.core.serializers import ModelSerializerPublico, RelacionPublicaField
 
 
 class EstadoPorEmpresaMixin:
@@ -46,7 +48,7 @@ class EstadoPorEmpresaMixin:
             instance.save(update_fields=['is_active', 'updated_at'])
 
 
-class ClienteNullablePkField(serializers.PrimaryKeyRelatedField):
+class ClienteNullablePkField(RelacionPublicaField):
     def get_queryset(self):
         # Solo clientes (no eliminados) de la empresa activa: evita enlazar un
         # cliente de otra empresa enviando su id. Se resuelve aquí (no en
@@ -63,7 +65,7 @@ class ClienteNullablePkField(serializers.PrimaryKeyRelatedField):
         return super().to_internal_value(data)
 
 
-class VehiculoNestedSerializer(EstadoPorEmpresaMixin, serializers.ModelSerializer):
+class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
     imagen = serializers.ImageField(required=False, allow_null=True)
     cliente_id = ClienteNullablePkField(
         queryset=Cliente.objects.none(),
@@ -165,7 +167,7 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, serializers.ModelSerialize
             if vinculo:
                 raise serializers.ValidationError({
                     'inactive_duplicate': {
-                        'id': existente.id,
+                        'id': id_publico(existente),
                         'placa': placa,
                         'marca': existente.marca,
                         'modelo': existente.modelo,
@@ -214,7 +216,7 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, serializers.ModelSerialize
         return instance
 
 
-class VehiculoSerializer(EstadoPorEmpresaMixin, serializers.ModelSerializer):
+class VehiculoSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
     cliente_nombre = serializers.SerializerMethodField()
     cliente_id = serializers.SerializerMethodField()
 
@@ -231,7 +233,7 @@ class VehiculoSerializer(EstadoPorEmpresaMixin, serializers.ModelSerializer):
 
     def get_cliente_id(self, obj):
         propietario = self._propietario_actual(obj)
-        return propietario.cliente_id if propietario else None
+        return id_publico(propietario.cliente) if propietario else None
 
     def validate_imagen(self, value):
         if not value:

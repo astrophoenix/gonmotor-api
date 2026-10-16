@@ -1,11 +1,13 @@
 from rest_framework import serializers
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 
 from .models import Proveedor
+from apps.core.serializers import ModelSerializerPublico
 
 
-class ProveedorListSerializer(serializers.ModelSerializer):
+class ProveedorListSerializer(ModelSerializerPublico):
     class Meta:
         model = Proveedor
         fields = [
@@ -21,7 +23,7 @@ class ProveedorListSerializer(serializers.ModelSerializer):
         ]
 
 
-class ProveedorSerializer(serializers.ModelSerializer):
+class ProveedorSerializer(ModelSerializerPublico):
     is_active = serializers.BooleanField(required=False, default=True)
 
     class Meta:
@@ -81,7 +83,7 @@ class ProveedorSerializer(serializers.ModelSerializer):
         if existe_inactivo:
             raise serializers.ValidationError({
                 'inactive_duplicate': {
-                    'id': existe_inactivo.id,
+                    'id': id_publico(existe_inactivo),
                     'identificacion': identificacion,
                     'nombre': existe_inactivo.nombre,
                     'message': (

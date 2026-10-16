@@ -18,7 +18,8 @@ from apps.core.utils.pdf_export import (
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.ids_publicos import filtrar_por_id_publico
+from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from rest_framework.decorators import action
@@ -56,7 +57,7 @@ class PlacaNormalizableSearchFilter(BusquedaIndexadaFilter):
         return [Q(placa__sintilde_icontains=normalizada)] if normalizada else []
 
 
-class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class VehiculoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = VehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('vehiculos')]
 
@@ -125,11 +126,10 @@ class VehiculoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         if cliente_id:
             # Subconsulta en vez de JOIN: no duplica filas, así que el listado
             # no necesita `DISTINCT` (que obligaba a deduplicar todo el tenant).
-            queryset = queryset.filter(
-                pk__in=VehiculoPropietario.objects.filter(
-                    cliente_id=cliente_id, es_actual=True
-                ).values('vehiculo_id')
+            propietarios = filtrar_por_id_publico(
+                VehiculoPropietario.objects.filter(es_actual=True), 'cliente', cliente_id
             )
+            queryset = queryset.filter(pk__in=propietarios.values('vehiculo_id'))
 
         if self.action in ['list', 'retrieve']:
             return queryset.prefetch_related(

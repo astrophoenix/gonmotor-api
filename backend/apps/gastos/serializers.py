@@ -9,9 +9,10 @@ from apps.authentication.utils import (
 from apps.empresas.services import resolver_taller
 
 from .models import Gasto
+from apps.core.serializers import ModelSerializerPublico
 
 
-class GastoSerializer(serializers.ModelSerializer):
+class GastoSerializer(ModelSerializerPublico):
     categoria_display = serializers.CharField(source='get_categoria_display', read_only=True)
     taller_nombre = serializers.CharField(source='taller.nombre', read_only=True)
 

@@ -6,10 +6,11 @@ from django.db import models
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseTallerModel
 
 
-class Cita(BaseTallerModel):
+class Cita(UuidPublicoModel, BaseTallerModel):
     """Gestión de citas programadas para el ingreso de vehículos al taller.
 
     Una cita agrupa empresa, cliente y vehículo con una fecha/hora acordada

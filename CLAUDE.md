@@ -126,6 +126,12 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Defaults DRF: `IsAuthenticated`, `PageNumberPagination` con `PAGE_SIZE=10`, throttling `300/min` usuario y `60/min` anónimo.
 - Mensajes de error y respuestas en español.
 
+### ID público (UUIDv7) — migración por fases en curso
+- El `id` entero es solo interno (FKs, joins). Los modelos con `UuidPublicoModel` (`apps/core/ids_publicos.py`) exponen su `uuid` como único identificador en la API. Hecho (fase 1): clientes, vehículos, citas, recepciones, inspecciones, cotizaciones, órdenes y sus líneas y fotos. Pendientes: proveedores, inventario, gastos, talleres, empleados/usuarios (fase 2) y empresas/roles (fase 3).
+- Todos los serializers heredan `ModelSerializerPublico` (`apps/core/serializers.py`): `id` sale del `uuid` y toda FK automática se lee/escribe por UUID si el modelo relacionado lo tiene (si no, por pk, igual que DRF). Nuevos serializers: heredar de esa clase, nunca de `serializers.ModelSerializer`.
+- Para pasar un modelo a UUID: heredar `UuidPublicoModel`, migración en tres pasos (columna nullable → `rellenar_uuid` → única; ver `clientes/migrations/0007_cliente_uuid.py`), `LookupPublicoMixin` en su ViewSet, filtros por query param con `filtrar_por_id_publico`, y `select_related` de las FKs que lo serializan.
+- Respuestas armadas a mano: `id_publico(obj)`, nunca `obj.id`/`obj.pk` (tampoco dentro de textos o URLs: `referencia_corta(obj)` para un `#ABC123` legible). Entradas fuera de serializers (query params, cuerpos de acciones): `por_id_publico(qs, valor)`. Tests: enviar `str(obj.uuid)`.
+
 ### Roles y permisos
 - Un permiso es `(recurso, acción)` con acciones `ver` / `modificar`. Los recursos están en `permisos_repo.RECURSOS` (empresa, talleres, usuarios, empleados, clientes, vehiculos, proveedores, citas, recepciones, inspecciones, cotizaciones, ordenes, inventario, facturacion, reportes, gastos, notificaciones). Configurar WhatsApp (preferencias, envío masivo, prueba) exige además `empresa`/`modificar`.
 - Roles de sistema: `ADMIN_SISTEMA`, `ADMIN_EMPRESA`, `ADMIN_TALLER`, `ASESOR`, `MECANICO`, `CAJERO`. Los roles personalizados son posibles y pueden tener el flag `ver_todos_talleres`.

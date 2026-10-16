@@ -91,18 +91,18 @@ class BusquedaGlobalTest(TestCase):
         self.assertIn('vehiculos', tipos)
 
         cliente = tipos['clientes']['resultados'][0]
-        self.assertEqual(cliente['id'], self.cliente.pk)
+        self.assertEqual(cliente['id'], str(self.cliente.uuid))
         self.assertEqual(cliente['titulo'], 'Roberto Buscable')
 
         vehiculo = tipos['vehiculos']['resultados'][0]
-        self.assertEqual(vehiculo['id'], self.vehiculo.pk)
+        self.assertEqual(vehiculo['id'], str(self.vehiculo.uuid))
         self.assertEqual(vehiculo['titulo'], 'BUS1234')
 
     def test_encuentra_vehiculo_por_placa_con_guion(self):
         respuesta = self.client.get(ENDPOINT, {'q': 'BUS-1234'})
         tipos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
         self.assertIn('vehiculos', tipos)
-        self.assertEqual(tipos['vehiculos']['resultados'][0]['id'], self.vehiculo.pk)
+        self.assertEqual(tipos['vehiculos']['resultados'][0]['id'], str(self.vehiculo.uuid))
 
     def test_aislamiento_por_empresa(self):
         respuesta = self.client.get(ENDPOINT, {'q': 'Roberto'})
@@ -111,8 +111,8 @@ class BusquedaGlobalTest(TestCase):
             for grupo in respuesta.data['grupos']
             for resultado in grupo['resultados']
         ]
-        self.assertIn(self.cliente.pk, ids)
-        self.assertNotIn(self.cliente_ajeno.pk, ids)
+        self.assertIn(str(self.cliente.uuid), ids)
+        self.assertNotIn(str(self.cliente_ajeno.uuid), ids)
 
 
 class BusquedaGlobalTallerTest(TestCase):
@@ -163,7 +163,7 @@ class BusquedaGlobalTallerTest(TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(
             self._ids_ordenes(respuesta),
-            {self.orden_central.pk, self.orden_norte.pk},
+            {str(self.orden_central.uuid), str(self.orden_norte.uuid)},
         )
 
     def test_con_cabecera_solo_del_taller_activo(self):
@@ -171,7 +171,7 @@ class BusquedaGlobalTallerTest(TestCase):
             ENDPOINT, {'q': 'Marta'}, HTTP_X_TALLER_ID=str(self.central.pk)
         )
         self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(self._ids_ordenes(respuesta), {self.orden_central.pk})
+        self.assertEqual(self._ids_ordenes(respuesta), {str(self.orden_central.uuid)})
 
     def _cliente_no_admin(self, talleres):
         user = User.objects.create_user(username=f'busq_meca_{uuid4().hex[:8]}', password='x')
@@ -188,7 +188,7 @@ class BusquedaGlobalTallerTest(TestCase):
         client = self._cliente_no_admin([self.central])
         respuesta = client.get(ENDPOINT, {'q': 'Marta'})
         self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(self._ids_ordenes(respuesta), {self.orden_central.pk})
+        self.assertEqual(self._ids_ordenes(respuesta), {str(self.orden_central.uuid)})
 
     def test_no_admin_sin_talleres_no_encuentra_ordenes(self):
         client = self._cliente_no_admin([])
@@ -208,7 +208,7 @@ class BusquedaGlobalTallerTest(TestCase):
         )
         grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
         resultado = grupos['ordenes']['resultados'][0]
-        self.assertEqual(resultado['id'], inactiva.pk)
+        self.assertEqual(resultado['id'], str(inactiva.uuid))
         self.assertEqual(resultado['meta'], inactiva.get_estado_display())
         self.assertEqual(resultado['estado'], inactiva.estado)
 

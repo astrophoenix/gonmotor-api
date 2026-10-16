@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from .models import Empresa
+from apps.core.serializers import ModelSerializerPublico
 
 
-class EmpresaSerializer(serializers.ModelSerializer):
+class EmpresaSerializer(ModelSerializerPublico):
     """Alta y edición de empresas (tenants) por el administrador del SaaS."""
 
     class Meta:

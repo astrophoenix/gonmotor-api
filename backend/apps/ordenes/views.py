@@ -8,7 +8,8 @@ from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
-from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, SoftDeleteDestroyMixin
+from apps.core.ids_publicos import referencia_corta
+from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -67,7 +68,7 @@ def tipo_inspeccion_desde_recepcion(tipo_recepcion):
     return TipoTrabajo.DIAGNOSTICO
 
 
-class OrdenTrabajoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     delete_identifier_fields = ['numero_orden']
@@ -107,7 +108,7 @@ class OrdenTrabajoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
         def row_builder(orden, cell_style):
             return [
-                celda_texto(orden.numero_orden or f'#{orden.id}', cell_style),
+                celda_texto(orden.numero_orden or referencia_corta(orden), cell_style),
                 celda_texto(orden.vehiculo.placa if orden.vehiculo else None, cell_style),
                 celda_texto(orden.cliente.nombre if orden.cliente else None, cell_style),
                 celda_texto(orden.get_tipo_trabajo_display(), cell_style),
@@ -209,7 +210,7 @@ def parsear_fecha(valor):
         return None
 
 
-class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
+class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     taller_filter_field = 'sucursal'
@@ -244,7 +245,7 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     @staticmethod
     def _export_valores(recepcion):
         return [
-            recepcion.numero_recepcion or f'#{recepcion.id}',
+            recepcion.numero_recepcion or referencia_corta(recepcion),
             recepcion.vehiculo.placa if recepcion.vehiculo else '-',
             recepcion.cliente.nombre if recepcion.cliente else '-',
             recepcion.get_tipo_recepcion_display(),
@@ -457,7 +458,7 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
             if f.name.startswith('testigo_')
         ]
         data = {
-            'recepcion': recepcion.id,
+            'recepcion': str(recepcion.uuid),  # el serializer recibe FKs por ID público
             'tipo_inspeccion': tipo_inspeccion_desde_recepcion(recepcion.tipo_recepcion),
             'estado': 'PENDIENTE',
             'motivo_ingreso': recepcion.motivo_ingreso or '',
@@ -474,7 +475,7 @@ class RecepcionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         )
 
 
-class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
+class InspeccionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     taller_filter_field = 'sucursal'
@@ -521,7 +522,7 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
             cliente = inspeccion.cliente or (recepcion.cliente if recepcion else None)
             responsable = inspeccion.responsable
             return [
-                celda_texto(inspeccion.numero_inspeccion or f'#{inspeccion.id}', cell_style),
+                celda_texto(inspeccion.numero_inspeccion or referencia_corta(inspeccion), cell_style),
                 celda_texto(vehiculo.placa if vehiculo else None, cell_style),
                 celda_texto(cliente.nombre if cliente else None, cell_style),
                 celda_texto(inspeccion.get_tipo_inspeccion_display(), cell_style),
@@ -620,7 +621,7 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'inspeccion')
 
-class DetalleServicioInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleServicioInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
@@ -644,7 +645,7 @@ class DetalleServicioInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.Model
         super().perform_destroy(instance)
 
 
-class DetalleRepuestoInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleRepuestoInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
@@ -668,7 +669,7 @@ class DetalleRepuestoInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.Model
         super().perform_destroy(instance)
 
 
-class FotoInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class FotoInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
@@ -704,7 +705,7 @@ def _check_orden_editable(orden):
         raise
 
 
-class FotoOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class FotoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
@@ -739,7 +740,7 @@ class FotoOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
 
-class DetalleServicioOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
@@ -780,7 +781,7 @@ class DetalleServicioOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.Mod
         orden.calcular_totales()
 
 
-class DetalleRepuestoOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]

@@ -1,5 +1,7 @@
 import logging
 
+from django.http import Http404
+
 from rest_framework import serializers as drf_serializers
 from rest_framework import status
 from rest_framework.exceptions import APIException
@@ -55,6 +57,18 @@ class FiltroTallerMixin:
         return talleres_filtro_de_request(self.request, explicito=explicito)
 
 
+class LookupPublicoMixin:
+    """ViewSet de un modelo con ID público: el detalle se busca por ``uuid``.
+
+    El kwarg de la URL se sigue llamando ``pk`` para no cambiar la firma de
+    las acciones ``@action(detail=True)``. Un valor que no es UUID responde
+    404 (DRF convierte el error de validación en ``Http404``).
+    """
+
+    lookup_field = 'uuid'
+    lookup_url_kwarg = 'pk'
+
+
 class FiltroDocumentoPadreMixin:
     """Líneas y fotos de un documento del taller: mismo alcance que el documento.
 
@@ -81,7 +95,9 @@ class FiltroDocumentoPadreMixin:
         }).select_related(self.documento_padre, *self.relaciones_extra)
         documento_id = self.request.query_params.get(self.documento_query_param or '')
         if documento_id:
-            queryset = queryset.filter(**{f'{self.documento_padre}_id': documento_id})
+            from apps.core.ids_publicos import filtrar_por_id_publico
+
+            queryset = filtrar_por_id_publico(queryset, self.documento_padre, documento_id)
         return queryset
 
 
@@ -225,7 +241,8 @@ class SoftDeleteDestroyMixin:
                 status=status.HTTP_200_OK
             )
 
-        except APIException:
+        except (APIException, Http404):
+            # Registro inexistente o fuera del alcance: 404, no el 500 genérico.
             raise
 
         except Exception as e:

@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from reportlab.platypus import Paragraph
 
+from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
@@ -74,7 +75,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             return Response({'results': []})
         items = Repuesto.objects.filter(empresa_id=empresa_id, is_active=True).order_by('nombre')
         data = [{
-            'id': item.pk,
+            'id': id_publico(item),
             'codigo': item.codigo,
             'nombre': item.nombre,
             'marca': item.marca,
@@ -154,7 +155,7 @@ class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             return Response({'results': []})
         items = Servicio.objects.filter(empresa_id=empresa_id, is_active=True).order_by('nombre')
         data = [{
-            'id': item.pk,
+            'id': id_publico(item),
             'codigo': item.codigo,
             'nombre': item.nombre,
             'tiempo_estimado_minutos': item.tiempo_estimado_minutos,

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseTallerModel
 
 
@@ -25,7 +26,7 @@ class TipoTrabajo(models.TextChoices):
     OTRO = 'OTRO', 'Otro'
 
 
-class OrdenTrabajo(BaseTallerModel):
+class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
     """Modelo principal para la gestión de la reparación o mantenimiento del vehículo."""
 
     # Alias retrocompatible: el enum vive a nivel de módulo para poder reutilizarlo
@@ -171,7 +172,7 @@ class OrdenTrabajo(BaseTallerModel):
         self.save()
 
 
-class DetalleServicioOrdenTrabajo(models.Model):
+class DetalleServicioOrdenTrabajo(UuidPublicoModel, models.Model):
     """Líneas de mano de obra aplicadas en la orden."""
 
     orden_trabajo = models.ForeignKey(OrdenTrabajo, on_delete=models.CASCADE, related_name='servicios')
@@ -213,7 +214,7 @@ class DetalleServicioOrdenTrabajo(models.Model):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'
 
 
-class DetalleRepuestoOrdenTrabajo(models.Model):
+class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, models.Model):
     """Líneas de repuestos consumidos en la orden."""
 
     contifico_producto_id = models.CharField(max_length=100, blank=True, null=True)
@@ -249,7 +250,7 @@ class DetalleRepuestoOrdenTrabajo(models.Model):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'
 
 
-class RecepcionVehiculo(BaseTallerModel):
+class RecepcionVehiculo(UuidPublicoModel, BaseTallerModel):
     """Registro del estado físico y administrativo del vehículo al ingresar al taller.
 
     Puede existir independientemente de una Orden de Trabajo.
@@ -546,7 +547,7 @@ class RecepcionVehiculo(BaseTallerModel):
         return f'Recepción #{self.pk} - Sin OT vinculada'
 
 
-class InspeccionVehiculo(BaseTallerModel):
+class InspeccionVehiculo(UuidPublicoModel, BaseTallerModel):
     """Registro técnico del diagnóstico y estado mecánico del vehículo.
     Puede existir independientemente de una Orden de Trabajo."""
 
@@ -766,7 +767,7 @@ class InspeccionVehiculo(BaseTallerModel):
         super().save(*args, **kwargs)
 
 
-class DetalleServicioInspeccion(models.Model):
+class DetalleServicioInspeccion(UuidPublicoModel, models.Model):
     """Servicios detectados/recomendados durante la inspección técnica.
 
     El mecánico selecciona ítems desde el catálogo maestro de Servicios sin
@@ -836,7 +837,7 @@ class DetalleServicioInspeccion(models.Model):
         super().save(*args, **kwargs)
 
 
-class DetalleRepuestoInspeccion(models.Model):
+class DetalleRepuestoInspeccion(UuidPublicoModel, models.Model):
     """Repuestos sugeridos durante la inspección técnica.
 
     El mecánico selecciona ítems desde el catálogo maestro de Repuestos sin
@@ -906,7 +907,7 @@ class DetalleRepuestoInspeccion(models.Model):
         super().save(*args, **kwargs)
 
 
-class FotoRecepcion(models.Model):
+class FotoRecepcion(UuidPublicoModel, models.Model):
     """Adjunta múltiples fotos de la recepción del vehículo."""
 
     class TipoVista(models.TextChoices):
@@ -943,7 +944,7 @@ class FotoRecepcion(models.Model):
         return f'{self.recepcion_id} - {self.get_tipo_vista_display()}'
 
 
-class FotoInspeccion(models.Model):
+class FotoInspeccion(UuidPublicoModel, models.Model):
     """Adjunta hasta 5 fotos de evidencia de los hallazgos de la inspección."""
 
     MAX_FOTOS = 5
@@ -967,7 +968,7 @@ class FotoInspeccion(models.Model):
         return f'Inspección #{self.inspeccion_id} - foto {self.pk}'
 
 
-class FotoOrdenTrabajo(models.Model):
+class FotoOrdenTrabajo(UuidPublicoModel, models.Model):
     """Adjunta hasta 5 fotos de evidencia del trabajo realizado en la orden."""
 
     MAX_FOTOS = 5

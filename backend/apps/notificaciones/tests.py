@@ -463,7 +463,7 @@ class NotificacionesApiTests(TestCase):
     def test_enviar_vehiculo_ok(self):
         resp = self.client.post(
             '/api/notificaciones/recordatorios/enviar-vehiculo/',
-            {'vehiculo_id': self.vehiculo.pk},
+            {'vehiculo_id': str(self.vehiculo.uuid)},
             format='json',
         )
         self.assertEqual(resp.status_code, 201)
@@ -476,12 +476,12 @@ class NotificacionesApiTests(TestCase):
     def test_enviar_vehiculo_omitido_si_reciente(self):
         self.client.post(
             '/api/notificaciones/recordatorios/enviar-vehiculo/',
-            {'vehiculo_id': self.vehiculo.pk},
+            {'vehiculo_id': str(self.vehiculo.uuid)},
             format='json',
         )
         resp = self.client.post(
             '/api/notificaciones/recordatorios/enviar-vehiculo/',
-            {'vehiculo_id': self.vehiculo.pk},
+            {'vehiculo_id': str(self.vehiculo.uuid)},
             format='json',
         )
         self.assertEqual(resp.status_code, 200)
@@ -490,7 +490,7 @@ class NotificacionesApiTests(TestCase):
     def test_enviar_vehiculo_no_en_empresa(self):
         resp = self.client.post(
             '/api/notificaciones/recordatorios/enviar-vehiculo/',
-            {'vehiculo_id': self.vehiculo_ajeno.pk},
+            {'vehiculo_id': str(self.vehiculo_ajeno.uuid)},
             format='json',
         )
         self.assertEqual(resp.status_code, 404)
@@ -504,7 +504,7 @@ class NotificacionesApiTests(TestCase):
         vehiculo.empresas.add(self.empresa)
         resp = self.client.post(
             '/api/notificaciones/recordatorios/enviar-vehiculo/',
-            {'vehiculo_id': vehiculo.pk},
+            {'vehiculo_id': str(vehiculo.uuid)},
             format='json',
         )
         self.assertEqual(resp.status_code, 400)
