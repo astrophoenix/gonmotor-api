@@ -3,6 +3,7 @@ from rest_framework.test import APITestCase, APIClient
 
 from apps.empresas.models import Empresa
 from apps.proveedores.models import Proveedor
+from apps.core.testing import fijar_empresa
 
 
 class ProveedorApiTest(APITestCase):
@@ -40,8 +41,7 @@ class ProveedorApiTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_listado_sin_filtro_muestra_activos_e_inactivos(self):
         resp = self.client.get('/api/proveedores/')
         self.assertEqual(resp.status_code, 200)

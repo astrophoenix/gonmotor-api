@@ -27,6 +27,7 @@ from apps.ordenes.models import (
     RecepcionVehiculo,
 )
 from apps.vehiculos.models import Vehiculo
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -161,8 +162,7 @@ class DashboardEndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_requiere_autenticacion(self):
         anonimo = APIClient()
         resp = anonimo.get(ENDPOINT)
@@ -523,8 +523,7 @@ class DashboardV2EndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     # ── contrato ────────────────────────────────────────────────────────────
     def test_requiere_autenticacion(self):
         anonimo = APIClient()
@@ -764,7 +763,7 @@ class DashboardV2EndpointTest(TestCase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(client, str(self.empresa.uuid))
         return client
 
     def test_no_admin_sin_sucursal_ve_solo_sus_talleres(self):

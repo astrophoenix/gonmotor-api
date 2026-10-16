@@ -15,6 +15,7 @@ from apps.clientes.models import Cliente
 from apps.empresas.models import Empresa, Taller
 from apps.ordenes.models import OrdenTrabajo
 from apps.vehiculos.models import Vehiculo
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -62,8 +63,7 @@ class BusquedaGlobalTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_requiere_autenticacion(self):
         anonimo = APIClient()
         respuesta = anonimo.get(ENDPOINT, {'q': 'bus'})
@@ -152,8 +152,7 @@ class BusquedaGlobalTallerTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _ids_ordenes(self, respuesta):
         grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
         return {fila['id'] for fila in grupos.get('ordenes', {}).get('resultados', [])}
@@ -181,7 +180,7 @@ class BusquedaGlobalTallerTest(TestCase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(client, str(self.empresa.uuid))
         return client
 
     def test_no_admin_sin_cabecera_solo_busca_en_sus_talleres(self):

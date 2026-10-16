@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
+from apps.core.testing import fijar_empresa
 
 
 class BusquedaIndexadaFilterTests(TestCase):
@@ -40,8 +41,7 @@ class BusquedaIndexadaFilterTests(TestCase):
         user = get_user_model().objects.create_superuser(username='busqueda', password='x')
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _ordenes(self, termino):
         respuesta = self.client.get('/api/ordenes/ordenes-trabajo/', {'search': termino})
         self.assertEqual(respuesta.status_code, 200, respuesta.content)

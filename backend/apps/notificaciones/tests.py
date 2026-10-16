@@ -28,6 +28,7 @@ from .services.whatsapp import (
     resumen_configuracion,
     whatsapp_enviar_y_registrar,
 )
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -363,8 +364,7 @@ class NotificacionesApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _marcar_fecha_cercana(self):
         Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
             proxima_mantenimiento_fecha=timezone.localdate() + timedelta(days=2)
@@ -379,7 +379,6 @@ class NotificacionesApiTests(TestCase):
 
     def test_estado_requiere_autenticacion(self):
         c = APIClient()
-        c.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         resp = c.get('/api/notificaciones/estado/')
         self.assertEqual(resp.status_code, 401)
 

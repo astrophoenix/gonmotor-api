@@ -13,6 +13,11 @@ Reglas de la línea base de usuarios (F1):
 3. El taller de la sesión (cabecera `X-Taller-ID` o `UserProfile.taller_activo`)
    se valida contra la empresa activa Y contra ese alcance. Jamás se confía en
    lo que envía el cliente sin comprobarlo.
+4. La empresa de la sesión sale SOLO de la claim `empresa_id` del JWT (no hay
+   cabecera de empresa): el token se emite para una empresa y cambiarla exige
+   uno nuevo (`select-company`). A diferencia del rol, la claim solo ata la
+   sesión a un tenant; la pertenencia se revalida contra la base en cada
+   petición, así que quitar el acceso tiene efecto inmediato.
 
 Toda la API consume estas funciones; no se reimplementa filtrado por tenant en
 otro archivo.
@@ -25,7 +30,6 @@ from apps.authentication.permisos_repo import ROLES_TODOS_TALLERES, ver_todos_ta
 from apps.authentication.models import UsuarioEmpresa
 from apps.empresas.models import Empresa, Taller
 
-HEADER_EMPRESA = 'X-Empresa-ID'
 HEADER_TALLER = 'X-Taller-ID'
 
 class Contexto(NamedTuple):
@@ -102,15 +106,21 @@ _normalizar_empresa_id = _normalizar_id
 
 
 def _empresa_candidata(request):
-    """empresa_id declarado por la petición: claim del JWT y, si no, cabecera."""
-    empresa_id = None
-    if hasattr(request, 'auth') and isinstance(request.auth, dict):
-        # Claim firmada (UUID en los tokens nuevos; un entero, de tokens
-        # previos, es confiable porque lo firmó el servidor).
-        empresa_id = _empresa_pk(request.auth.get('empresa_id'), request)
-    if not empresa_id:
-        empresa_id = _empresa_pk(request.headers.get(HEADER_EMPRESA), request)
-    return empresa_id
+    """Empresa de la sesión: la claim `empresa_id` del JWT (única fuente).
+
+    La sesión queda atada a una empresa al emitirse el token (login o
+    `select-company`); cambiar de empresa exige un token nuevo. La claim va
+    firmada: UUID en los tokens actuales; un entero (tokens previos al ID
+    público) es confiable porque también lo firmó el servidor. La pertenencia
+    del usuario a esa empresa se valida igual contra la base en cada petición.
+
+    `request.auth` es el `AccessToken` de SimpleJWT (o un dict en tests); la
+    cabecera `X-Empresa-ID` ya no se lee.
+    """
+    auth = getattr(request, 'auth', None)
+    if auth is None or not hasattr(auth, 'get'):
+        return None
+    return _empresa_pk(auth.get('empresa_id'), request)
 
 
 def _resolver_contexto(request):

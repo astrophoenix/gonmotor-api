@@ -23,6 +23,7 @@ from apps.gastos.models import Gasto
 from apps.inventario.models import Repuesto, Servicio
 from apps.proveedores.models import Proveedor
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario, vincular_empresa
+from apps.core.testing import fijar_empresa
 
 
 class GeneracionUuidTests(SimpleTestCase):
@@ -57,8 +58,7 @@ class ApiIdPublicoTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_el_listado_expone_el_uuid_como_id(self):
         fila = self.client.get('/api/clientes/').json()['results'][0]
         self.assertEqual(fila['id'], str(self.cliente.uuid))
@@ -150,8 +150,7 @@ class ApiIdPublicoFase2Tests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.admin)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_todo_usuario_nuevo_tiene_perfil_con_uuid(self):
         usuario = get_user_model().objects.create_user(username='nuevo-f2', password='x')
         self.assertIsNotNone(UserProfile.objects.get(user=usuario).uuid)
@@ -223,7 +222,7 @@ class ApiIdPublicoFase3Tests(TestCase):
         client = APIClient()
         client.force_authenticate(user=user)
         if empresa is not None:
-            client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa)
+            fijar_empresa(client, str(empresa))
         return client
 
     def test_empresa_y_rol_por_uuid_y_no_por_entero(self):
@@ -235,12 +234,27 @@ class ApiIdPublicoFase3Tests(TestCase):
         self.assertEqual(saas.get(f'/api/auth/roles/{rol.uuid}/').status_code, 200)
         self.assertEqual(saas.get(f'/api/auth/roles/{rol.pk}/').status_code, 404)
 
-    def test_la_cabecera_de_empresa_solo_acepta_el_uuid(self):
-        # Usuario con dos empresas: sin una empresa válida no hay contexto.
-        con_uuid = self._cliente(self.usuario, self.empresa_b.uuid).get('/api/auth/me/')
-        self.assertEqual(con_uuid.json()['empresa_id'], str(self.empresa_b.uuid))
-        con_entero = self._cliente(self.usuario, self.empresa_b.pk).get('/api/auth/me/')
-        self.assertIsNone(con_entero.json()['empresa_id'])
+    def test_la_empresa_sale_solo_del_token(self):
+        # Token atado a la empresa A: una cabecera X-Empresa-ID con la B se ignora.
+        client = self._cliente(self.usuario, self.empresa_a.uuid)
+        respuesta = client.get('/api/auth/me/', HTTP_X_EMPRESA_ID=str(self.empresa_b.uuid))
+        self.assertEqual(respuesta.json()['empresa_id'], str(self.empresa_a.uuid))
+
+        # Sin claim de empresa, la cabecera tampoco da contexto (usuario con dos empresas).
+        sin_claim = self._cliente(self.usuario)
+        respuesta = sin_claim.get('/api/auth/me/', HTTP_X_EMPRESA_ID=str(self.empresa_b.uuid))
+        self.assertIsNone(respuesta.json()['empresa_id'])
+
+    def test_la_claim_de_tokens_previos_con_entero_sigue_valiendo(self):
+        # Tokens emitidos antes del ID público llevan la pk (firmada por el servidor).
+        client = APIClient()
+        client.force_authenticate(user=self.usuario, token={'empresa_id': self.empresa_b.pk})
+        self.assertEqual(client.get('/api/auth/me/').json()['empresa_id'], str(self.empresa_b.uuid))
+
+    def test_quitar_el_acceso_tiene_efecto_aunque_el_token_siga_vigente(self):
+        client = self._cliente(self.usuario, self.empresa_b.uuid)
+        UsuarioEmpresa.objects.filter(user=self.usuario, empresa=self.empresa_b).update(tiene_acceso=False)
+        self.assertIsNone(client.get('/api/auth/me/').json()['empresa_id'])
 
     def test_seleccion_de_empresa_por_uuid_y_jwt_sin_pk(self):
         client = APIClient()

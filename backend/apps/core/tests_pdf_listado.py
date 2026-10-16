@@ -14,6 +14,7 @@ from apps.core.utils.pdf_export import (
     generar_listado_pdf,
 )
 from apps.empresas.models import Empresa, Taller
+from apps.core.testing import fijar_empresa
 
 
 def _paginas(pdf: bytes):
@@ -90,8 +91,7 @@ class ListadosPdfEndpointsTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_todos_los_listados_generan_pdf(self):
         for url, filtros in self.ENDPOINTS:
             for params in ({}, filtros):

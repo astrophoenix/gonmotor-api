@@ -19,6 +19,7 @@ from apps.empresas.models import Empresa, Taller
 from apps.empresas.services import generar_codigo_secuencial
 from apps.ordenes.models import OrdenTrabajo
 from apps.vehiculos.models import Vehiculo, VehiculoEmpresa
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -159,12 +160,12 @@ class ParaRequestTest(TestCase):
 
     def _request(self, user, empresa_id=None, taller_id=None):
         headers = {}
-        if empresa_id:
-            headers['HTTP_X_EMPRESA_ID'] = str(empresa_id)
         if taller_id:
             headers['HTTP_X_TALLER_ID'] = str(taller_id)
         request = RequestFactory().get('/', **headers)
         request.user = user
+        # La empresa viaja en la claim del token (no hay cabecera de empresa).
+        request.auth = {'empresa_id': str(empresa_id)} if empresa_id else None
         return request
 
     def test_sin_contexto_no_devuelve_nada(self):
@@ -214,7 +215,7 @@ class ApiSoftDeleteTest(TestCase):
         self._como(self.empresa, self.taller)
 
     def _como(self, empresa, taller=None):
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa.uuid)
+        fijar_empresa(self.client, str(empresa.uuid))
         if taller:
             self.client.defaults['HTTP_X_TALLER_ID'] = str(taller.uuid)
         else:

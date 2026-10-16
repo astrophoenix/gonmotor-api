@@ -18,6 +18,7 @@ from apps.vehiculos.models import Vehiculo
 
 from .models import Empresa, Taller
 from .services import generar_codigo_secuencial, ultimo_numero_emitido
+from apps.core.testing import fijar_empresa
 
 
 class NumeracionDocumentosTests(TestCase):
@@ -192,8 +193,7 @@ class EmpresaCrudAdminSaaSTests(TestCase):
         UsuarioEmpresa.objects.create(user=dueno, empresa=self.activa, rol='ADMIN_EMPRESA')
         self.dueno = APIClient()
         self.dueno.force_authenticate(dueno)
-        self.dueno.defaults['HTTP_X_EMPRESA_ID'] = str(self.activa.uuid)
-
+        fijar_empresa(self.dueno, str(self.activa.uuid))
     def _payload(self, **extra):
         return {
             'nombre_comercial': 'Gamma Taller',

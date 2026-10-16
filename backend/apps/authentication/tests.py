@@ -32,6 +32,7 @@ from apps.authentication.utils import (
     validar_talleres_asignables,
 )
 from apps.empresas.models import Empresa, Taller
+from apps.core.testing import fijar_empresa
 
 
 class RegistrationTests(APITestCase):
@@ -99,8 +100,7 @@ class EmpleadoExportTests(APITestCase):
 		)
 		self.client = APIClient()
 		self.client.force_authenticate(user=self.user)
-		self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+		fijar_empresa(self.client, str(self.empresa.uuid))
 	def _crear_empleado(self):
 		from apps.authentication.models import UsuarioEmpresa
 
@@ -142,8 +142,8 @@ class EmpleadoExportTests(APITestCase):
 		self.assertIn('Activo', valores)
 
 	def test_exportar_sin_empresa_rechazado(self):
+		# Token sin claim de empresa.
 		self.client.force_authenticate(user=self.usuario)
-		self.client.defaults.pop('HTTP_X_EMPRESA_ID')
 		resp = self.client.get('/api/auth/empleados/exportar-pdf/')
 		self.assertEqual(resp.status_code, 403)
 
@@ -277,14 +277,15 @@ class EscenarioMixin:
 
 	def _request(self, user=None, empresa=None, taller=None, claim=None):
 		kwargs = {}
-		if empresa is not None:
-			kwargs['HTTP_X_EMPRESA_ID'] = str(empresa)
 		if taller is not None:
 			kwargs['HTTP_X_TALLER_ID'] = str(taller)
 		request = self.factory.get('/api/auth/me/', **kwargs)
 		request.user = AnonymousUser() if user is None else user
+		# La empresa viaja en la claim del token (no hay cabecera de empresa).
 		if claim is not None:
 			request.auth = claim
+		elif empresa is not None:
+			request.auth = {'empresa_id': str(empresa)}
 		return request
 
 
@@ -451,9 +452,8 @@ class AlcanceTallerTests(EscenarioMixin, APITestCase):
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
 		cliente = APIClient()
 		cliente.force_authenticate(user=mecanico)
-		respuesta = cliente.get(
-			'/api/auth/me/', HTTP_X_EMPRESA_ID=str(self.empresa_a.uuid)
-		)
+		fijar_empresa(cliente, self.empresa_a)
+		respuesta = cliente.get('/api/auth/me/')
 		self.assertEqual(respuesta.status_code, 200, respuesta.data)
 		self.assertEqual(respuesta.data['taller_nombre'], self.a1.nombre)
 
@@ -668,7 +668,7 @@ class MiPerfilRolesTests(EscenarioMixin, APITestCase):
 	def _me(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		resp = cliente.get('/api/auth/me/')
 		return resp
 
@@ -721,7 +721,7 @@ class AccesoEmpresaTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		return cliente
 
 	def _con_rol(self, rol, talleres=None):
@@ -809,7 +809,7 @@ class PermisosEndpointTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		return cliente
 
 	def _con_rol(self, rol, talleres=None):
@@ -915,7 +915,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		return cliente
 
 	def _crear_rol(self, cliente, nombre='Supervisor de taller'):
@@ -1232,7 +1232,7 @@ class EscalacionRolesTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		return cliente
 
 	def _postea(self, rol):
@@ -1301,7 +1301,7 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
+		fijar_empresa(cliente, str(self.empresa_a.uuid))
 		return cliente
 
 	def test_gerente_de_taller_no_toca_datos_de_empresa(self):
@@ -1380,7 +1380,7 @@ class TalleresDisponiblesEndpointTests(EscenarioMixin, APITestCase):
 		client = APIClient()
 		client.force_authenticate(user=user)
 		if empresa is not None:
-			client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa)
+			fijar_empresa(client, str(empresa))
 		return client
 
 	def test_requiere_autenticacion(self):

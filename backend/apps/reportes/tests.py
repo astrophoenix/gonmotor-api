@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.authentication.models import UsuarioEmpresa
+from apps.core.testing import fijar_empresa
 from apps.clientes.models import Cliente
 from apps.empresas.models import Empresa, Taller
 from apps.gastos.models import Gasto
@@ -81,11 +82,8 @@ class RentabilidadReportTests(TestCase):
         return orden
 
     def _get(self, path, params=None):
-        return self.api.get(
-            path,
-            params or {},
-            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
-        )
+        fijar_empresa(self.api, self.empresa)
+        return self.api.get(path, params or {})
 
     def test_taller_report_uses_net_revenue_and_line_cost_snapshots(self):
         self._orden(fecha_entrega=timezone.now())
@@ -244,6 +242,7 @@ class RentabilidadReportTests(TestCase):
         relacion.talleres.set(talleres)
         api = APIClient()
         api.force_authenticate(user=usuario)
+        fijar_empresa(api, self.empresa)
         return api
 
     def test_no_admin_solo_ve_sus_talleres(self):
@@ -255,14 +254,13 @@ class RentabilidadReportTests(TestCase):
         api = self._api_no_admin([self.taller])
 
         # Sin taller declarado: solo sus talleres permitidos.
-        response = api.get('/api/reportes/rentabilidad-empresa/', HTTP_X_EMPRESA_ID=str(self.empresa.uuid))
+        response = api.get('/api/reportes/rentabilidad-empresa/')
         self.assertEqual(Decimal(response.data['ingresos']['total']), Decimal('100.00'))
 
         # Forzar un taller no permitido no devuelve sus datos.
         response = api.get(
             '/api/reportes/rentabilidad-taller/',
             {'taller_id': str(otro_taller.uuid)},
-            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
         )
         self.assertEqual(Decimal(response.data['ingresos']['total']), Decimal('0.00'))
         self.assertEqual(

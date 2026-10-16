@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.export_limits import ExporteDemasiadoGrande, validar_limite_exporte
 from apps.core.utils.pdf_export import PdfExportConfig, PdfExportService
+from apps.core.testing import fijar_empresa
 
 
 class ValidarLimiteExporteTests(SimpleTestCase):
@@ -56,8 +57,7 @@ class ExportesSobreElLimiteApiTests(TestCase):
         user = get_user_model().objects.create_superuser(username='limites', password='x')
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_responden_400_con_detalle(self):
         for url in (
             '/api/clientes/exportar-pdf/',

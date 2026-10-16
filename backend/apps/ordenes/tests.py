@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from .models import InspeccionVehiculo
+from apps.core.testing import fijar_empresa
 
 
 class OrdenesCrudTests(SimpleTestCase):
@@ -573,6 +574,7 @@ class OrdenTrabajoEstadosTests(TestCase):
         )
         client = APIClient()
         client.force_authenticate(usuario)
+        fijar_empresa(client, self.empresa)
         response = client.post(
             '/api/ordenes/ordenes-trabajo/',
             {
@@ -583,7 +585,6 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'tipo_trabajo': 'MANTENIMIENTO',
             },
             format='json',
-            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
         )
         self.assertEqual(response.status_code, 201, response.data)
         creada = OrdenTrabajo.objects.get(uuid=response.data['id'])
@@ -639,8 +640,7 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _actualizar(self, tipo, entidad_id, accion):
         return self.client.post(
             f'/api/recepciones/{self.recepcion.uuid}/relaciones/',
@@ -821,8 +821,7 @@ class _BaseRelacionesFlujoApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _post(self, url, tipo, entidad_id, accion='vincular'):
         return self.client.post(
             url, {'tipo': tipo, 'id': entidad_id, 'accion': accion}, format='json'
@@ -1221,8 +1220,7 @@ class VinculoCotizacionFlujoTests(TestCase):
 
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
-        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.api, str(self.empresa.uuid))
     def _recepcion(self, estado='ACEPTADA', numero='REC-0001'):
         from .models import RecepcionVehiculo
 
@@ -1326,7 +1324,7 @@ class InspeccionReaperturaApiTests(TestCase):
 
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
-        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(self.api, str(self.empresa.uuid))
         self.inspeccion = InspeccionVehiculo.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
@@ -1461,7 +1459,7 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(self.client, str(self.empresa.uuid))
         self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.uuid)
         self.tipo = TipoTrabajo.MANTENIMIENTO
 
@@ -1545,7 +1543,7 @@ class RecepcionFirmarApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(self.client, str(self.empresa.uuid))
         self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.uuid)
 
     def _url(self, pk=None):
@@ -1713,7 +1711,7 @@ class OrdenSucursalConservadaTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(self.client, str(self.empresa.uuid))
         self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.uuid)
 
     def _payload(self, **extra):
@@ -1801,7 +1799,7 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(self.client, str(self.empresa.uuid))
         self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.uuid)
 
     def _entregar(self, **extra):

@@ -21,6 +21,7 @@ from apps.empresas.models import Empresa, Taller
 from apps.authentication.models import UsuarioEmpresa
 from apps.ordenes.models import RecepcionVehiculo
 from apps.vehiculos.models import Vehiculo
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -73,8 +74,7 @@ class AgendaCitasBase(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def payload(self, **kwargs):
         datos = {
             'taller': str(self.taller.uuid),
@@ -127,7 +127,7 @@ class HorarioAtencionTest(AgendaCitasBase):
         vehiculo = Vehiculo.objects.create(placa='NSU001', marca='Chevy', modelo='Aveo')
         vehiculo.empresas.add(sin_taller)
 
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.uuid)
+        fijar_empresa(self.client, str(sin_taller.uuid))
         resp = self.crear(
             taller=None,
             hora_cita='03:00',
@@ -339,8 +339,7 @@ class DisponibilidadEndpointTest(AgendaCitasBase):
             ruc=_ruc_unico(),
             email_contacto='otra@test.com',
         )
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.uuid)
-
+        fijar_empresa(self.client, str(sin_taller.uuid))
         data = self.client.get(DISPONIBILIDAD).json()
         self.assertFalse(data['aplicable'])
         self.assertIsNone(data['taller'])
@@ -819,7 +818,7 @@ class CitaConversionNumeracionTests(TestCase):
         user = get_user_model().objects.create_superuser(username='num_admin', password='x')
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(client, str(self.empresa.uuid))
         cita = self._cita_en_norte()
 
         with mock.patch(
@@ -873,7 +872,7 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        fijar_empresa(client, str(self.empresa.uuid))
         return client
 
     def test_sin_cabecera_no_filtra(self):

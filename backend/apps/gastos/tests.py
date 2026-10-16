@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from apps.empresas.models import Empresa, Taller
 
 from .models import Gasto
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 ENDPOINT = '/api/gastos/'
@@ -40,8 +41,7 @@ class GastosFiltroTallerTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _ids(self, respuesta):
         self.assertEqual(respuesta.status_code, 200)
         return {fila['id'] for fila in respuesta.data['results']}
@@ -89,8 +89,7 @@ class GastosCrearTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def _payload(self, **extra):
         return {
             'categoria': 'INSUMOS', 'fecha': '2026-10-14', 'monto': 20,

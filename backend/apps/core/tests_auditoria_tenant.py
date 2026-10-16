@@ -29,6 +29,7 @@ from apps.ordenes.models import (
     RecepcionVehiculo,
 )
 from apps.vehiculos.models import Vehiculo, vincular_empresa
+from apps.core.testing import fijar_empresa
 
 User = get_user_model()
 
@@ -113,7 +114,7 @@ class AuditoriaTenantTests(TestCase):
         client = APIClient()
         client.force_authenticate(user=user)
         if empresa_id:
-            client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa_id)
+            fijar_empresa(client, str(empresa_id))
         return client
 
     # --- Otra empresa: lectura ---------------------------------------------

@@ -12,6 +12,7 @@ from .models import Cotizacion
 from .pdf import _consolidar
 from .serializers import transicion_estado_valida
 from .views import _validar_origen_cotizacion, _validar_origen_inspeccion
+from apps.core.testing import fijar_empresa
 
 
 class ConsolidarConceptosTests(SimpleTestCase):
@@ -332,8 +333,7 @@ class CotizacionAsesorApiTests(APITestCase):
         self.vehiculo.empresas.add(self.empresa)
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_crear_con_asesor(self):
         resp = self.client.post(
             '/api/cotizaciones/',
@@ -622,7 +622,6 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
     def test_requiere_autenticacion(self):
         cotizacion_id = self._cotizacion_con_detalles()
         anonimo = APIClient()
-        anonimo.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         respuesta = anonimo.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
         self.assertEqual(respuesta.status_code, 401)
 

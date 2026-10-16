@@ -8,6 +8,7 @@ from apps.clientes.models import Cliente
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario
 from apps.vehiculos.serializers import VehiculoNestedSerializer
 from apps.vehiculos.views import formatear_placa
+from apps.core.testing import fijar_empresa
 
 
 class ClientePropietarioSerializerTest(TestCase):
@@ -83,8 +84,7 @@ class VehiculoViewSetFilterTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
         self.vehiculo = Vehiculo.objects.create(
             placa='GSU5812', marca='Toyota', modelo='Corolla', anio=2018,
         )
@@ -158,8 +158,7 @@ class VehiculoExportTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
-
+        fijar_empresa(self.client, str(self.empresa.uuid))
     def test_exportar_pdf(self):
         resp = self.client.get('/api/vehiculos/exportar-pdf/')
         self.assertEqual(resp.status_code, 200)
@@ -225,8 +224,7 @@ class VehiculoNoExponeEmpresasTests(TestCase):
 
         client = APIClient()
         client.force_authenticate(User.objects.create_superuser(username='emp', password='x'))
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(propia.uuid)
-
+        fijar_empresa(client, str(propia.uuid))
         listado = client.get('/api/vehiculos/').json()['results']
         self.assertEqual([v['placa'] for v in listado], ['EMP0001'])
         self.assertNotIn('empresas', listado[0])
