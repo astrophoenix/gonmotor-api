@@ -4,11 +4,10 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.core.ids_publicos import id_publico
-from apps.authentication.models import UsuarioEmpresa
-from apps.authentication.permisos_repo import nombre_rol
 from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
+    rol_de_usuario_en_empresa,
 )
 from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarTenantMixin, ValidarUsuariosEmpresaMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
@@ -564,12 +563,8 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
             perfil = getattr(instance.responsable, 'profile', None)
             rep['responsable_identificacion'] = perfil.identificacion if perfil else None
             rep['responsable_telefono'] = perfil.telefono if perfil else None
-            usuario_empresa = UsuarioEmpresa.objects.filter(
-                user=instance.responsable, empresa=instance.empresa
-            ).first()
-            rep['responsable_rol'] = usuario_empresa.rol if usuario_empresa else None
-            rep['responsable_rol_display'] = (
-                nombre_rol(usuario_empresa.rol) if usuario_empresa else None
+            rep['responsable_rol'], rep['responsable_rol_display'] = rol_de_usuario_en_empresa(
+                instance.responsable_id, instance.empresa_id, self.context.get('request')
             )
         else:
             rep['responsable_identificacion'] = None
@@ -775,13 +770,9 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
             }
         if instance.recibido_por_id:
             rep['recibido_por_nombre'] = instance.recibido_por.get_full_name() or instance.recibido_por.username
-            usuario_empresa = UsuarioEmpresa.objects.filter(user=instance.recibido_por, empresa=instance.empresa).first()
-            if usuario_empresa:
-                rep['recibido_por_rol'] = usuario_empresa.rol
-                rep['recibido_por_rol_display'] = nombre_rol(usuario_empresa.rol)
-            else:
-                rep['recibido_por_rol'] = None
-                rep['recibido_por_rol_display'] = None
+            rep['recibido_por_rol'], rep['recibido_por_rol_display'] = rol_de_usuario_en_empresa(
+                instance.recibido_por_id, instance.empresa_id, self.context.get('request')
+            )
         else:
             rep['recibido_por_nombre'] = None
             rep['recibido_por_rol'] = None
@@ -1084,7 +1075,13 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         )
         cotizacion = instance.cotizacion_origen
         if cotizacion is None and inspeccion_estado is not None:
-            cotizacion = inspeccion_estado.cotizaciones_generadas.order_by('created_at', 'id').last()
+            # En memoria sobre `.all()` (precargado): `order_by().last()`
+            # ignoraba la precarga y consultaba una vez por orden.
+            cotizacion = max(
+                inspeccion_estado.cotizaciones_generadas.all(),
+                key=lambda c: (c.created_at, c.id),
+                default=None,
+            )
         rep['cotizacion_estado'] = cotizacion.estado if cotizacion else None
         rep['cotizacion_estado_display'] = (
             cotizacion.get_estado_display() if cotizacion else None

@@ -1,6 +1,7 @@
 import datetime
 import logging
 
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -67,6 +68,31 @@ def tipo_inspeccion_desde_recepcion(tipo_recepcion):
         return tipo_recepcion
     return TipoTrabajo.DIAGNOSTICO
 
+
+
+# Precargas de los documentos que se serializan anidados (la recepción dentro
+# de la orden, la inspección dentro de la recepción): sin ellas cada documento
+# anidado consultaba por separado su taller, responsable, líneas y catálogo.
+def _inspecciones_con_relaciones():
+    return InspeccionVehiculo.objects.select_related(
+        'sucursal', 'orden_trabajo', 'responsable__profile', 'cliente', 'vehiculo',
+        'recepcion__vehiculo', 'recepcion__cliente',
+    ).prefetch_related(
+        Prefetch('servicios_detectados', queryset=DetalleServicioInspeccion.objects.select_related('servicio')),
+        Prefetch('repuestos_sugeridos', queryset=DetalleRepuestoInspeccion.objects.select_related('repuesto')),
+        'fotos',
+        'cotizaciones_generadas',
+    )
+
+
+def _recepciones_con_relaciones():
+    return RecepcionVehiculo.objects.select_related(
+        'cliente', 'vehiculo', 'orden_trabajo', 'sucursal', 'recibido_por',
+    ).prefetch_related(
+        Prefetch('inspecciones', queryset=_inspecciones_con_relaciones()),
+        'cotizaciones_generadas',
+        'fotos',
+    )
 
 class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
@@ -167,9 +193,14 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
                 'asesor',
                 'mecanico_principal',
                 'cotizacion_origen',
-                'inspeccion',
             )
-            .prefetch_related('servicios', 'repuestos', 'recepciones', 'fotos', 'recepciones__fotos', 'inspeccion__fotos')
+            .prefetch_related(
+                'servicios',
+                'repuestos',
+                'fotos',
+                Prefetch('inspeccion', queryset=_inspecciones_con_relaciones()),
+                Prefetch('recepciones', queryset=_recepciones_con_relaciones()),
+            )
         )
         return self._filtrar_ordenes(queryset)
 
@@ -317,8 +348,12 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
             return RecepcionVehiculo.objects.none()
         queryset = (
             RecepcionVehiculo.objects.filter(empresa_id=empresa_id)
-            .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal')
-            .prefetch_related('inspecciones', 'cotizaciones_generadas', 'fotos')
+            .select_related('cliente', 'vehiculo', 'orden_trabajo', 'sucursal', 'recibido_por')
+            .prefetch_related(
+                Prefetch('inspecciones', queryset=_inspecciones_con_relaciones()),
+                'cotizaciones_generadas',
+                'fotos',
+            )
         )
         return self.filtrar_por_taller(self._filtrar_recepciones(queryset))
 
@@ -576,8 +611,14 @@ class InspeccionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.
                 'cliente',
                 'orden_trabajo',
                 'sucursal',
+                'responsable__profile',
             )
-            .prefetch_related('servicios_detectados', 'repuestos_sugeridos', 'fotos', 'cotizaciones_generadas')
+            .prefetch_related(
+                Prefetch('servicios_detectados', queryset=DetalleServicioInspeccion.objects.select_related('servicio')),
+                Prefetch('repuestos_sugeridos', queryset=DetalleRepuestoInspeccion.objects.select_related('repuesto')),
+                'fotos',
+                'cotizaciones_generadas',
+            )
         )
         return self.filtrar_por_taller(self._filtrar_inspecciones(queryset))
 

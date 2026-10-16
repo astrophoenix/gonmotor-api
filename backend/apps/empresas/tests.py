@@ -142,6 +142,16 @@ class NumeracionDocumentosTests(TestCase):
         self.assertEqual(ultimo_numero_emitido(self.central, 'recepcion'), 9)
         self.assertEqual(ultimo_numero_emitido(self.sucursal, 'recepcion'), 1)
 
+    def test_ultimo_numero_emitido_es_numerico_y_respeta_el_prefijo_literal(self):
+        Taller.objects.filter(pk=self.central.pk).update(prefijo_recepcion='A.B-')
+        self.central.refresh_from_db()
+        self._recepcion('A.B-00009', self.central)
+        self._recepcion('A.B-000010', self.central)   # se amplió la cantidad de dígitos
+        self._recepcion('AXB-00099', self.central)    # el punto del prefijo no es comodín
+        self._recepcion('A.B-12X', self.central)      # parte no numérica: no cuenta
+
+        self.assertEqual(ultimo_numero_emitido(self.central, 'recepcion'), 10)
+
     def test_ultimo_numero_emitido_cuenta_documentos_dados_de_baja(self):
         self._recepcion('REC-00004', self.central, is_active=False)
 

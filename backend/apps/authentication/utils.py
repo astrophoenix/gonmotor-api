@@ -349,3 +349,42 @@ def talleres_filtro_de_request(request, empresa_id=None, explicito=None):
     if es_admin_talleres(contexto):
         return None
     return permitidos
+
+
+def _cache_de_request(request, nombre):
+    """Diccionario guardado en el request (o uno efímero si no hay request)."""
+    if request is None:
+        return {}
+    cache = getattr(request, nombre, None)
+    if cache is None:
+        cache = {}
+        try:
+            setattr(request, nombre, cache)
+        except AttributeError:
+            pass
+    return cache
+
+
+def rol_de_usuario_en_empresa(user_id, empresa_id, request=None):
+    """`(rol, rol_display)` del usuario en la empresa, o `(None, None)`.
+
+    Para listados que muestran el rol de quien recibió o inspeccionó cada
+    documento: carga una vez por petición los roles de la empresa y los
+    nombres de los roles (dos consultas en total, no tres por fila).
+    """
+    if not user_id or not empresa_id:
+        return None, None
+    roles = _cache_de_request(request, '_roles_por_empresa')
+    if empresa_id not in roles:
+        roles[empresa_id] = dict(
+            UsuarioEmpresa.objects.filter(empresa_id=empresa_id).values_list('user_id', 'rol')
+        )
+    rol = roles[empresa_id].get(user_id)
+    if not rol:
+        return None, None
+    nombres = _cache_de_request(request, '_nombres_de_roles')
+    if not nombres:
+        from .models import Rol
+
+        nombres.update(Rol.objects.values_list('codigo', 'nombre'))
+    return rol, nombres.get(rol, rol)

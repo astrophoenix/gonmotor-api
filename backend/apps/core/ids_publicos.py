@@ -83,25 +83,40 @@ def campo_uuid(modelo):
     return 'profile__uuid' if es_usuario(modelo) else 'uuid'
 
 
-def uuid_de_usuario(user_pk, request=None):
-    """UUID público de un usuario por su pk, cacheado por petición: en un
-    listado el mismo asesor se repite en muchas filas."""
-    if user_pk is None:
+def uuid_por_pk(modelo, pk, request=None):
+    """UUID público de un registro de `modelo` a partir de su pk.
+
+    Para serializar una FK sin traer el objeto relacionado: en un listado la
+    misma empresa, taller o asesor se repite en todas las filas, así que se
+    cachea por petición (una consulta por registro distinto, no por fila).
+    """
+    if pk is None:
         return None
-    cache = getattr(request, '_uuid_usuarios', None) if request is not None else None
+    cache = getattr(request, '_uuid_por_pk', None) if request is not None else None
     if cache is None:
         cache = {}
         if request is not None:
             try:
-                request._uuid_usuarios = cache
+                request._uuid_por_pk = cache
             except AttributeError:
                 pass
-    if user_pk not in cache:
-        from apps.authentication.models import UserProfile
+    clave = (modelo, pk)
+    if clave not in cache:
+        if es_usuario(modelo):
+            from apps.authentication.models import UserProfile
 
-        valor = UserProfile.objects.filter(user_id=user_pk).values_list('uuid', flat=True).first()
-        cache[user_pk] = str(valor) if valor else None
-    return cache[user_pk]
+            valor = UserProfile.objects.filter(user_id=pk).values_list('uuid', flat=True).first()
+        else:
+            valor = modelo._base_manager.filter(pk=pk).values_list('uuid', flat=True).first()
+        cache[clave] = str(valor) if valor else None
+    return cache[clave]
+
+
+def uuid_de_usuario(user_pk, request=None):
+    """UUID público de un usuario por su pk (ver `uuid_por_pk`)."""
+    from django.contrib.auth import get_user_model
+
+    return uuid_por_pk(get_user_model(), user_pk, request)
 
 
 def id_publico(obj, request=None):

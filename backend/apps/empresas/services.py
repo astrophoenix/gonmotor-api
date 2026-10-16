@@ -8,7 +8,11 @@ la fila del taller con `select_for_update()` y siempre devuelve el siguiente
 número **disponible** de esa secuencia.
 """
 
+import re
+
 from django.db import transaction
+from django.db.models import BigIntegerField, Max
+from django.db.models.functions import Cast, Substr
 
 from .models import Taller
 
@@ -146,16 +150,14 @@ def ultimo_numero_emitido(taller, tipo):
 
     modelo = _modelo_documento(tipo)
     prefijo = (getattr(taller, campos['prefijo']) or '').strip()
-    codigos = modelo.all_objects.filter(
+    campo = campos['numero']
+    # El máximo se calcula en la base: traer todos los códigos a Python era
+    # lineal con el volumen de documentos del taller (y el listado de talleres
+    # lo pide 4 veces por taller).
+    maximo = modelo.all_objects.filter(
         sucursal=taller,
-        **{f'{campos["numero"]}__isnull': False},
-    ).values_list(campos['numero'], flat=True)
-
-    maximo = 0
-    for codigo in codigos:
-        if not codigo:
-            continue
-        parte = codigo[len(prefijo):] if prefijo else codigo
-        if parte.isdigit():
-            maximo = max(maximo, int(parte))
-    return maximo
+        **{f'{campo}__regex': rf'^{re.escape(prefijo)}[0-9]+$'},
+    ).aggregate(
+        maximo=Max(Cast(Substr(campo, len(prefijo) + 1), BigIntegerField())),
+    )['maximo']
+    return maximo or 0

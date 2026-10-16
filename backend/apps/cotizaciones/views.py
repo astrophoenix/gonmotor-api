@@ -154,7 +154,7 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
             return Cotizacion.objects.none()
         queryset = (
             Cotizacion.objects.filter(empresa_id=empresa_id)
-            .select_related('cliente', 'vehiculo', 'sucursal', 'empresa', 'asesor', 'aceptada_por', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
+            .select_related('cliente', 'vehiculo', 'sucursal', 'empresa', 'asesor__profile', 'aceptada_por', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
             .prefetch_related('servicios', 'repuestos')
         )
         return self.filtrar_por_taller(self._filtrar_cotizaciones(queryset))

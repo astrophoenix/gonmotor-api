@@ -17,7 +17,7 @@ from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist
 from rest_framework import serializers
 from rest_framework.relations import PKOnlyObject
 
-from .ids_publicos import campo_uuid, es_usuario, id_publico, tiene_id_publico, uuid_de_usuario
+from .ids_publicos import campo_uuid, es_usuario, id_publico, tiene_id_publico, uuid_por_pk
 
 
 class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
@@ -48,11 +48,25 @@ class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
         return modelo is not None and tiene_id_publico(modelo)
 
     def use_pk_only_optimization(self):
-        # Con UUID hace falta el objeto (el uuid no está en la fila que lo
-        # referencia): los ViewSets deben hacer `select_related` de esas FKs.
-        # El usuario es la excepción: su UUID se resuelve por pk con caché.
-        modelo = self._modelo_relacionado()
-        return not self._usa_uuid() or es_usuario(modelo)
+        # Siempre pk-only: el uuid se toma del objeto si ya está cargado
+        # (`select_related`/prefetch) o se resuelve por pk con caché
+        # (`get_attribute` y `to_representation`).
+        return True
+
+    def get_attribute(self, instance):
+        """FK directa con ID público: el objeto si ya está en memoria; si no,
+        solo su pk (sin consultar la fila completa del relacionado)."""
+        if self._usa_uuid() and len(self.source_attrs) == 1:
+            try:
+                campo = instance._meta.get_field(self.source_attrs[0])
+            except (AttributeError, FieldDoesNotExist):
+                campo = None
+            if campo is not None and campo.concrete and (campo.many_to_one or campo.one_to_one):
+                if campo.is_cached(instance):
+                    return campo.get_cached_value(instance)
+                pk = getattr(instance, campo.attname)
+                return None if pk is None else PKOnlyObject(pk=pk)
+        return super().get_attribute(instance)
 
     def to_internal_value(self, data):
         if not self._usa_uuid():
@@ -71,8 +85,8 @@ class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
     def to_representation(self, value):
         request = self.context.get('request')
         if isinstance(value, PKOnlyObject):
-            if es_usuario(self._modelo_relacionado()):
-                return uuid_de_usuario(value.pk, request)
+            if self._usa_uuid():
+                return uuid_por_pk(self._modelo_relacionado(), value.pk, request)
             return value.pk
         return id_publico(value, request)
 
