@@ -23,6 +23,8 @@ from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
+from apps.core.testing import fijar_empresa
+
 ESCALA = float(os.environ.get('BENCH_ESCALA', '1'))
 N_CLIENTES = int(20_000 * ESCALA)
 N_VEHICULOS = int(20_000 * ESCALA)
@@ -148,7 +150,7 @@ class BenchListados(SimpleTestCase):
     def test_medir_listados(self):
         client = APIClient()
         client.force_authenticate(user=self.user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresas[0].pk)
+        fijar_empresa(client, self.empresas[0])
 
         print(f'\n\nSeed: {self.segundos_seed:.1f}s · escala {ESCALA} '
               f'({N_DOCUMENTOS} órdenes/recepciones por empresa, 2 empresas)\n')

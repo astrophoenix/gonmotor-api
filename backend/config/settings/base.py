@@ -255,7 +255,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
-    'x-empresa-id',
+    # La empresa viaja en la claim del JWT; solo el taller va en cabecera.
     'x-taller-id',
 ]
 

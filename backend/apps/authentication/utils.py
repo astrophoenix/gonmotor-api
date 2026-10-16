@@ -57,9 +57,9 @@ def _normalizar_id(valor):
 def _pk_publico(modelo, valor, request=None):
     """pk interna del registro de `modelo` que identifica `valor`, o None.
 
-    Lo que envía el cliente (cabeceras `X-Empresa-ID`/`X-Taller-ID`, query
-    params, payloads) es el ID público (UUID); un entero de Python solo puede
-    venir del propio backend o de una claim del JWT (firmado). Un número en
+    Lo que envía el cliente (cabecera `X-Taller-ID`, query params, payloads)
+    es el ID público (UUID); un entero de Python solo puede venir del propio
+    backend o de la claim `empresa_id` de un JWT previo (firmado). Un número en
     texto no se acepta: es el id interno, que la API ya no expone. La
     conversión UUID → pk se cachea por petición.
     """

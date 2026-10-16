@@ -272,3 +272,25 @@ class ApiIdPublicoFase3Tests(TestCase):
         from rest_framework_simplejwt.tokens import AccessToken
 
         self.assertEqual(AccessToken(respuesta.json()['access'])['empresa_id'], str(self.empresa_b.uuid))
+
+
+class CorsCabecerasTests(TestCase):
+    """La empresa viaja en el JWT: el navegador solo puede enviar X-Taller-ID."""
+
+    def _preflight(self, cabecera):
+        from django.conf import settings
+
+        return self.client.options(
+            '/api/core/health/',
+            HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0],
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD='GET',
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS=cabecera,
+        )
+
+    def test_permite_la_cabecera_de_taller(self):
+        permitidas = self._preflight('x-taller-id')['Access-Control-Allow-Headers'].lower()
+        self.assertIn('x-taller-id', permitidas)
+
+    def test_ya_no_permite_la_cabecera_de_empresa(self):
+        permitidas = self._preflight('x-empresa-id')['Access-Control-Allow-Headers'].lower()
+        self.assertNotIn('x-empresa-id', permitidas)

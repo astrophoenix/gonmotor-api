@@ -93,7 +93,7 @@ La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export
 - Activar el venv antes de cualquier comando: `cd backend && source venv/bin/activate`.
 - `backend/.env` es obligatorio: `SECRET_KEY` y `DB_NAME/USER/PASSWORD/HOST/PORT` no tienen valor por defecto. Opcionales: `DB_SSLMODE`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, `WHATSAPP_*`, `AI_TEXT_*`, `THROTTLE_*`, `EXPORT_MAX_FILAS_PDF` (default 5000) y `EXPORT_MAX_FILAS_EXCEL` (default 20000): máximo de filas de los exportes de listados; por encima responden 400 pidiendo filtrar (`apps/core/utils/export_limits.py`).
 - `local.py`: `DEBUG=True`, `ALLOWED_HOSTS=['*']`, email por consola. `production.py`: HTTPS/HSTS, whitenoise, SMTP, logging a consola.
-- CORS permite las cabeceras `x-empresa-id` (ya no se lee; se conserva para no romper clientes que aún la envíen) y `x-taller-id`; si se añade una cabecera nueva desde el frontend hay que agregarla a `CORS_ALLOW_HEADERS`.
+- CORS permite la cabecera `x-taller-id` (la empresa viaja en el JWT, no hay cabecera de empresa); si se añade una cabecera nueva desde el frontend hay que agregarla a `CORS_ALLOW_HEADERS`.
 
 ### Multi-tenant (empresa → taller)
 Todo el filtrado por tenant pasa por `apps/authentication/utils.py`; **no reimplementarlo en otro archivo**.
