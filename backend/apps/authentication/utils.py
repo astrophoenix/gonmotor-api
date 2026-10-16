@@ -18,6 +18,7 @@ Toda la API consume estas funciones; no se reimplementa filtrado por tenant en
 otro archivo.
 """
 
+import uuid
 from typing import NamedTuple, Optional
 
 from apps.authentication.permisos_repo import ROLES_TODOS_TALLERES, ver_todos_talleres_rol
@@ -49,6 +50,53 @@ def _normalizar_id(valor):
         return None
 
 
+def _pk_publico(modelo, valor, request=None):
+    """pk interna del registro de `modelo` que identifica `valor`, o None.
+
+    Lo que envía el cliente (cabeceras `X-Empresa-ID`/`X-Taller-ID`, query
+    params, payloads) es el ID público (UUID); un entero de Python solo puede
+    venir del propio backend o de una claim del JWT (firmado). Un número en
+    texto no se acepta: es el id interno, que la API ya no expone. La
+    conversión UUID → pk se cachea por petición.
+    """
+    if valor is None or valor == '' or isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, modelo):
+        return valor.pk
+    try:
+        valor_uuid = uuid.UUID(str(valor).strip())
+    except ValueError:
+        return None
+    cache = getattr(request, '_pks_por_uuid', None) if request is not None else None
+    if cache is None:
+        cache = {}
+        if request is not None:
+            try:
+                request._pks_por_uuid = cache
+            except AttributeError:
+                pass
+    clave = (modelo, valor_uuid)
+    if clave not in cache:
+        cache[clave] = modelo.objects.filter(uuid=valor_uuid).values_list('pk', flat=True).first()
+    return cache[clave]
+
+
+def _taller_pk(valor, request=None):
+    return _pk_publico(Taller, valor, request)
+
+
+def _empresa_pk(valor, request=None):
+    return _pk_publico(Empresa, valor, request)
+
+
+def taller_de_valor(valor, request=None):
+    """Instancia del taller que identifica `valor` (UUID público), o None."""
+    pk = _taller_pk(valor, request)
+    return Taller.objects.filter(pk=pk).first() if pk else None
+
+
 # Alias histórico: el nombre original se mantenía solo dentro de este archivo.
 _normalizar_empresa_id = _normalizar_id
 
@@ -57,9 +105,11 @@ def _empresa_candidata(request):
     """empresa_id declarado por la petición: claim del JWT y, si no, cabecera."""
     empresa_id = None
     if hasattr(request, 'auth') and isinstance(request.auth, dict):
-        empresa_id = _normalizar_id(request.auth.get('empresa_id'))
+        # Claim firmada (UUID en los tokens nuevos; un entero, de tokens
+        # previos, es confiable porque lo firmó el servidor).
+        empresa_id = _empresa_pk(request.auth.get('empresa_id'), request)
     if not empresa_id:
-        empresa_id = _normalizar_id(request.headers.get(HEADER_EMPRESA))
+        empresa_id = _empresa_pk(request.headers.get(HEADER_EMPRESA), request)
     return empresa_id
 
 
@@ -176,10 +226,13 @@ def validar_talleres_asignables(user, contexto, talleres_ids):
     empresa de la sesión o están inactivos. Se usa antes de `M2M.set()` para que
     nadie asigne un taller de otra empresa a un empleado.
     """
-    talleres_ids = [_normalizar_id(t) for t in (talleres_ids or [])]
+    entrada = list(talleres_ids or [])
+    talleres_ids = [_taller_pk(t) for t in entrada]
+    # Un valor que no identifica ningún taller se rechaza tal cual llegó.
+    no_resueltos = [v for v, pk in zip(entrada, talleres_ids) if pk is None]
     talleres_ids = [t for t in talleres_ids if t is not None]
     if not talleres_ids:
-        return [], []
+        return [], no_resueltos
     empresa_id = _normalizar_id(contexto.empresa_id)
     if not empresa_id:
         return [], talleres_ids
@@ -189,7 +242,7 @@ def validar_talleres_asignables(user, contexto, talleres_ids):
         ).values_list('pk', flat=True)
     )
     permitidos = [t for t in talleres_ids if t in validos]
-    rechazados = [t for t in talleres_ids if t not in validos]
+    rechazados = no_resueltos + [t for t in talleres_ids if t not in validos]
     return permitidos, rechazados
 
 
@@ -227,7 +280,7 @@ def get_taller_desde_request(request, empresa_id=None):
         contexto = contexto._replace(empresa_id=_normalizar_id(empresa_id))
     if not contexto.hay_contexto:
         return None
-    candidato = _normalizar_id(request.headers.get(HEADER_TALLER))
+    candidato = _taller_pk(request.headers.get(HEADER_TALLER), request)
     return _taller_efectivo(getattr(request, 'user', None), contexto, candidato)
 
 
@@ -239,7 +292,7 @@ def taller_id_de_request(request, empresa_id=None):
     clientes que no seleccionan taller (p. ej. scripts o tests). El frontend
     siempre envía la cabecera, así que en la UI el recorte por taller aplica.
     """
-    if not _normalizar_id(request.headers.get(HEADER_TALLER)):
+    if not _taller_pk(request.headers.get(HEADER_TALLER), request):
         return None
     return get_taller_desde_request(request, empresa_id=empresa_id)
 
@@ -276,12 +329,11 @@ def talleres_filtro_de_request(request, empresa_id=None, explicito=None):
         .values_list('pk', flat=True)
     )
 
-    if explicito is not None:
-        candidato = _normalizar_id(explicito)
-    else:
-        candidato = _normalizar_id(request.headers.get(HEADER_TALLER))
-
-    if candidato:
+    declarado = explicito if explicito is not None else request.headers.get(HEADER_TALLER)
+    if declarado not in (None, ''):
+        # Un taller declarado que no se resuelve (inexistente, de otra empresa
+        # o con formato inválido) no amplía el alcance: no devuelve nada.
+        candidato = _taller_pk(declarado, request)
         return [candidato] if candidato in permitidos else []
 
     if es_admin_talleres(contexto):

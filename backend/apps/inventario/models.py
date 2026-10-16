@@ -2,10 +2,11 @@ from decimal import Decimal
 
 from django.db import models
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseEmpresaModel
 
 
-class Repuesto(BaseEmpresaModel):
+class Repuesto(UuidPublicoModel, BaseEmpresaModel):
     """Repuesto / insumo con control de stock del taller.
 
     Multi-tenant por empresa. Los precios son referenciales (no fijos):
@@ -150,7 +151,7 @@ class Repuesto(BaseEmpresaModel):
         super().save(*args, **kwargs)
 
 
-class RepuestoImagen(models.Model):
+class RepuestoImagen(UuidPublicoModel, models.Model):
     """Imagen asociada a un repuesto (mínimo 1, máximo 3 por repuesto).
 
     Una y solo una imagen por repuesto es la principal (`es_principal`); es la
@@ -220,7 +221,7 @@ class RepuestoImagen(models.Model):
             primera.save(update_fields=['es_principal'])
 
 
-class Servicio(BaseEmpresaModel):
+class Servicio(UuidPublicoModel, BaseEmpresaModel):
     """Servicio / mano de obra del taller (catálogo de tareas estándar).
 
     No maneja stock. Se enfoca en tiempos estimados y en el alcance de cada

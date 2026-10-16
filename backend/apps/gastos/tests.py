@@ -40,23 +40,23 @@ class GastosFiltroTallerTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _ids(self, respuesta):
         self.assertEqual(respuesta.status_code, 200)
         return {fila['id'] for fila in respuesta.data['results']}
 
     def test_con_taller_activo_solo_lista_sus_gastos(self):
-        respuesta = self.client.get(ENDPOINT, HTTP_X_TALLER_ID=str(self.central.pk))
-        self.assertEqual(self._ids(respuesta), {self.gasto_central.pk})
+        respuesta = self.client.get(ENDPOINT, HTTP_X_TALLER_ID=str(self.central.uuid))
+        self.assertEqual(self._ids(respuesta), {str(self.gasto_central.uuid)})
 
     def test_todos_los_talleres_lista_todo(self):
         respuesta = self.client.get(ENDPOINT)
-        self.assertEqual(self._ids(respuesta), {self.gasto_central.pk, self.gasto_norte.pk})
+        self.assertEqual(self._ids(respuesta), {str(self.gasto_central.uuid), str(self.gasto_norte.uuid)})
 
     def test_filtro_manual_por_taller_en_todos(self):
-        respuesta = self.client.get(ENDPOINT, {'taller_id': self.norte.pk})
-        self.assertEqual(self._ids(respuesta), {self.gasto_norte.pk})
+        respuesta = self.client.get(ENDPOINT, {'taller_id': str(self.norte.uuid)})
+        self.assertEqual(self._ids(respuesta), {str(self.gasto_norte.uuid)})
 
 
 class GastosCrearTests(TestCase):
@@ -89,7 +89,7 @@ class GastosCrearTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _payload(self, **extra):
         return {
@@ -99,24 +99,24 @@ class GastosCrearTests(TestCase):
 
     def test_crear_sin_empresa_ni_taller_usa_la_sesion(self):
         respuesta = self.client.post(
-            ENDPOINT, self._payload(), format='json', HTTP_X_TALLER_ID=str(self.norte.pk),
+            ENDPOINT, self._payload(), format='json', HTTP_X_TALLER_ID=str(self.norte.uuid),
         )
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        gasto = Gasto.objects.get(pk=respuesta.data['id'])
+        gasto = Gasto.objects.get(uuid=respuesta.data['id'])
         self.assertEqual(gasto.empresa_id, self.empresa.pk)
         self.assertEqual(gasto.taller_id, self.norte.pk)
 
     def test_crear_con_taller_explicito(self):
-        respuesta = self.client.post(ENDPOINT, self._payload(taller=self.central.pk), format='json')
+        respuesta = self.client.post(ENDPOINT, self._payload(taller=str(self.central.uuid)), format='json')
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        self.assertEqual(Gasto.objects.get(pk=respuesta.data['id']).taller_id, self.central.pk)
+        self.assertEqual(Gasto.objects.get(uuid=respuesta.data['id']).taller_id, self.central.pk)
 
     def test_no_se_puede_forzar_otra_empresa(self):
         respuesta = self.client.post(ENDPOINT, self._payload(empresa=self.otra_empresa.pk), format='json')
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
-        self.assertEqual(Gasto.objects.get(pk=respuesta.data['id']).empresa_id, self.empresa.pk)
+        self.assertEqual(Gasto.objects.get(uuid=respuesta.data['id']).empresa_id, self.empresa.pk)
 
     def test_taller_de_otra_empresa_se_rechaza(self):
-        respuesta = self.client.post(ENDPOINT, self._payload(taller=self.taller_ajeno.pk), format='json')
+        respuesta = self.client.post(ENDPOINT, self._payload(taller=str(self.taller_ajeno.uuid)), format='json')
         self.assertEqual(respuesta.status_code, 400)
         self.assertIn('taller', respuesta.data)

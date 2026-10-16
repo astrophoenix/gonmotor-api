@@ -90,7 +90,7 @@ class ListadosPdfEndpointsTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_todos_los_listados_generan_pdf(self):
         for url, filtros in self.ENDPOINTS:

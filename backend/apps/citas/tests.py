@@ -73,11 +73,11 @@ class AgendaCitasBase(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def payload(self, **kwargs):
         datos = {
-            'taller': self.taller.pk,
+            'taller': str(self.taller.uuid),
             'cliente': str(self.cliente.uuid),
             'vehiculo': str(self.vehiculo.uuid),
             'fecha_cita': self.manana.isoformat(),
@@ -127,7 +127,7 @@ class HorarioAtencionTest(AgendaCitasBase):
         vehiculo = Vehiculo.objects.create(placa='NSU001', marca='Chevy', modelo='Aveo')
         vehiculo.empresas.add(sin_taller)
 
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.uuid)
         resp = self.crear(
             taller=None,
             hora_cita='03:00',
@@ -194,7 +194,7 @@ class CupoDiarioTest(AgendaCitasBase):
         )
 
         self.assertEqual(self.crear(hora_cita='09:00').status_code, 201)
-        resp = self.crear(hora_cita='15:00', taller=otro_taller.pk)
+        resp = self.crear(hora_cita='15:00', taller=str(otro_taller.uuid))
         self.assertEqual(resp.status_code, 201, resp.content)
 
 
@@ -261,18 +261,18 @@ class CapacidadSimultaneaTest(AgendaCitasBase):
         )
 
         self.assertEqual(self.crear(hora_cita='09:00').status_code, 201)
-        resp = self.crear(hora_cita='09:30', taller=otro_taller.pk)
+        resp = self.crear(hora_cita='09:30', taller=str(otro_taller.uuid))
         self.assertEqual(resp.status_code, 201, resp.content)
 
 
 class AislamientoPorEmpresaTest(AgendaCitasBase):
     def test_no_admite_el_taller_de_otra_empresa(self):
-        resp = self.crear(taller=self.taller_ajeno.pk)
+        resp = self.crear(taller=str(self.taller_ajeno.uuid))
         self.assertEqual(resp.status_code, 400)
         self.assertIn('no pertenece a tu empresa', resp.json()['taller'][0])
 
     def test_disponibilidad_no_expone_el_taller_de_otra_empresa(self):
-        resp = self.client.get(f'{DISPONIBILIDAD}?taller={self.taller_ajeno.pk}')
+        resp = self.client.get(f'{DISPONIBILIDAD}?taller={self.taller_ajeno.uuid}')
         self.assertEqual(resp.status_code, 400)
         self.assertIn('no pertenece a tu empresa', resp.json()['taller'][0])
 
@@ -300,7 +300,7 @@ class DisponibilidadEndpointTest(AgendaCitasBase):
         data = self.client.get(f'{DISPONIBILIDAD}?fecha={self.manana.isoformat()}').json()
 
         self.assertTrue(data['aplicable'])
-        self.assertEqual(data['taller']['id'], self.taller.pk)
+        self.assertEqual(data['taller']['id'], str(self.taller.uuid))
         self.assertEqual(data['horario'], {'apertura': '08:00', 'cierre': '17:00'})
         self.assertEqual(data['capacidad_dia'], 3)
         self.assertEqual(data['citas_ocupadas'], 2)
@@ -339,7 +339,7 @@ class DisponibilidadEndpointTest(AgendaCitasBase):
             ruc=_ruc_unico(),
             email_contacto='otra@test.com',
         )
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(sin_taller.uuid)
 
         data = self.client.get(DISPONIBILIDAD).json()
         self.assertFalse(data['aplicable'])
@@ -819,7 +819,7 @@ class CitaConversionNumeracionTests(TestCase):
         user = get_user_model().objects.create_superuser(username='num_admin', password='x')
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         cita = self._cita_en_norte()
 
         with mock.patch(
@@ -873,7 +873,7 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         return client
 
     def test_sin_cabecera_no_filtra(self):
@@ -886,14 +886,14 @@ class FiltroTallerCitasTest(AgendaCitasBase):
     def test_con_cabecera_solo_devuelve_el_taller_activo(self):
         central = self._cita(self.taller)
         self._cita(self.taller_norte)
-        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.pk))
+        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.uuid))
         data = resp.json()
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['results'][0]['id'], str(central.uuid))
 
     def test_excluye_citas_sin_taller(self):
         self._cita(None)
-        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.pk))
+        resp = self.client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller.uuid))
         self.assertEqual(resp.json()['count'], 0)
 
     def test_no_admin_sin_cabecera_solo_ve_sus_talleres(self):
@@ -915,7 +915,7 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         self._cita(self.taller)
         self._cita(self.taller_norte)
         client = self._cliente_no_admin([self.taller])
-        resp = client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller_norte.pk))
+        resp = client.get(LISTADO, HTTP_X_TALLER_ID=str(self.taller_norte.uuid))
         self.assertEqual(resp.json()['count'], 0)
 
 

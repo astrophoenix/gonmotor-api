@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseModel
 
 
@@ -12,7 +13,7 @@ PLANTILLA_MANTENIMIENTO_DEFAULT = (
 )
 
 
-class PreferenciaMantenimiento(BaseModel):
+class PreferenciaMantenimiento(UuidPublicoModel, BaseModel):
     """Configuración por empresa para las alertas de mantenimiento preventivo.
 
     Viene con valores por defecto "amigables para demo" (intervalo de 5000 km y
@@ -68,7 +69,7 @@ class PreferenciaMantenimiento(BaseModel):
         return f'Preferencias {self.empresa_id} (cada {self.intervalo_km} km)'
 
 
-class RegistroMensajeWhatsApp(BaseModel):
+class RegistroMensajeWhatsApp(UuidPublicoModel, BaseModel):
     """Bitácora de mensajes de WhatsApp enviados o simulados.
 
     En modo `mock` (desarrollo local) los mensajes no salen realmente por

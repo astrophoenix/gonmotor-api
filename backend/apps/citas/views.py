@@ -157,7 +157,7 @@ class CitaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, FiltroTallerMixin,
 
         taller_param = request.query_params.get('taller')
         if taller_param:
-            taller = Taller.objects.filter(pk=taller_param, empresa_id=empresa_id).first()
+            taller = por_id_publico(Taller.objects.filter(empresa_id=empresa_id), taller_param).first()
             if taller is None:
                 raise serializers.ValidationError(
                     {'taller': ['El taller no pertenece a tu empresa.']}

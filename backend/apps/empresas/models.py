@@ -2,10 +2,11 @@ from datetime import time
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseEmpresaModel, SoftDeleteModel
 
 
-class Empresa(SoftDeleteModel):
+class Empresa(UuidPublicoModel, SoftDeleteModel):
     """
     Representa al Negocio / Razón Social principal (Cliente SaaS).
     """
@@ -55,7 +56,7 @@ class Empresa(SoftDeleteModel):
         return f"{self.nombre_comercial} ({self.ruc})"
 
 
-class Taller(BaseEmpresaModel):
+class Taller(UuidPublicoModel, BaseEmpresaModel):
     """
     Representa un Taller físico de la Empresa.
     """

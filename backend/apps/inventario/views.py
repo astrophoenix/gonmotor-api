@@ -9,9 +9,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from reportlab.platypus import Paragraph
 
-from apps.core.ids_publicos import id_publico
+from apps.core.ids_publicos import filtrar_por_id_publico, id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -31,7 +31,7 @@ from apps.core.filters import BusquedaIndexadaFilter
 
 
 
-class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class RepuestoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = RepuestoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
@@ -86,7 +86,7 @@ class RepuestoViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         return Response({'results': data})
 
 
-class RepuestoImagenViewSet(viewsets.ModelViewSet):
+class RepuestoImagenViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
     serializer_class = RepuestoImagenSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 
@@ -102,9 +102,7 @@ class RepuestoImagenViewSet(viewsets.ModelViewSet):
             repuesto__empresa_id=empresa_id
         ).select_related('repuesto')
 
-        repuesto_id = self.request.query_params.get('repuesto')
-        if repuesto_id:
-            queryset = queryset.filter(repuesto_id=repuesto_id)
+        queryset = filtrar_por_id_publico(queryset, 'repuesto', self.request.query_params.get('repuesto'))
 
         return queryset
 
@@ -114,7 +112,7 @@ class RepuestoImagenViewSet(viewsets.ModelViewSet):
         RepuestoImagen.asegurar_principal(repuesto_id)
 
 
-class ServicioViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class ServicioViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = ServicioSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 

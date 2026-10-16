@@ -59,9 +59,9 @@ urlpatterns = [
     
     # 📋 Roles y permisos (pantalla de configuración de accesos)
     path('roles/', RolesView.as_view(), name='roles'),
-    path('roles/<int:pk>/', RolDetailView.as_view(), name='roles-detalle'),
-    path('roles/<int:pk>/permisos/', RolPermisosView.as_view(), name='roles-permisos'),
-    path('roles/<int:pk>/acciones/', RolAccionesView.as_view(), name='roles-acciones'),
+    path('roles/<str:pk>/', RolDetailView.as_view(), name='roles-detalle'),
+    path('roles/<str:pk>/permisos/', RolPermisosView.as_view(), name='roles-permisos'),
+    path('roles/<str:pk>/acciones/', RolAccionesView.as_view(), name='roles-acciones'),
     path('recursos/', RecursosView.as_view(), name='recursos'),
 
     path('', include(router.urls)),

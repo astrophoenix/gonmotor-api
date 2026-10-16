@@ -363,7 +363,7 @@ class NotificacionesApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _marcar_fecha_cercana(self):
         Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
@@ -379,7 +379,7 @@ class NotificacionesApiTests(TestCase):
 
     def test_estado_requiere_autenticacion(self):
         c = APIClient()
-        c.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        c.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         resp = c.get('/api/notificaciones/estado/')
         self.assertEqual(resp.status_code, 401)
 
@@ -399,7 +399,7 @@ class NotificacionesApiTests(TestCase):
         data = resp.json()
         self.assertEqual(data['dias_antelacion'], 14)
         self.assertTrue(data['notificar_vehiculos_sin_programar'])
-        self.assertEqual(data['empresa'], self.empresa.pk)
+        self.assertEqual(data['empresa'], str(self.empresa.uuid))
 
     def test_enviar_prueba_ok(self):
         resp = self.client.post(

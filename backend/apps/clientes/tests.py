@@ -27,7 +27,7 @@ class ClienteEstadoFilterTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_listado_sin_filtro_muestra_activos_e_inactivos(self):
         resp = self.client.get('/api/clientes/')

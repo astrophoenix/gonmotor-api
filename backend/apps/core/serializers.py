@@ -17,7 +17,7 @@ from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist
 from rest_framework import serializers
 from rest_framework.relations import PKOnlyObject
 
-from .ids_publicos import id_publico, tiene_id_publico
+from .ids_publicos import campo_uuid, es_usuario, id_publico, tiene_id_publico, uuid_de_usuario
 
 
 class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
@@ -50,7 +50,9 @@ class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
     def use_pk_only_optimization(self):
         # Con UUID hace falta el objeto (el uuid no está en la fila que lo
         # referencia): los ViewSets deben hacer `select_related` de esas FKs.
-        return not self._usa_uuid()
+        # El usuario es la excepción: su UUID se resuelve por pk con caché.
+        modelo = self._modelo_relacionado()
+        return not self._usa_uuid() or es_usuario(modelo)
 
     def to_internal_value(self, data):
         if not self._usa_uuid():
@@ -62,14 +64,17 @@ class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
         except ValueError:
             self.fail('incorrect_type', data_type=type(data).__name__)
         try:
-            return self.get_queryset().get(uuid=valor)
+            return self.get_queryset().get(**{campo_uuid(self._modelo_relacionado()): valor})
         except ObjectDoesNotExist:
             self.fail('does_not_exist', pk_value=data)
 
     def to_representation(self, value):
+        request = self.context.get('request')
         if isinstance(value, PKOnlyObject):
+            if es_usuario(self._modelo_relacionado()):
+                return uuid_de_usuario(value.pk, request)
             return value.pk
-        return id_publico(value)
+        return id_publico(value, request)
 
 
 class ModelSerializerPublico(serializers.ModelSerializer):
@@ -78,5 +83,6 @@ class ModelSerializerPublico(serializers.ModelSerializer):
     def get_fields(self):
         fields = super().get_fields()
         if 'id' in fields and tiene_id_publico(self.Meta.model):
-            fields['id'] = serializers.UUIDField(source='uuid', read_only=True)
+            fuente = 'profile.uuid' if es_usuario(self.Meta.model) else 'uuid'
+            fields['id'] = serializers.UUIDField(source=fuente, read_only=True)
         return fields

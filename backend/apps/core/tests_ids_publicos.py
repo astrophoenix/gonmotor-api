@@ -17,6 +17,11 @@ from apps.core.ids_publicos import _uuid7_respaldo, nuevo_uuid
 from apps.cotizaciones.models import Cotizacion
 from apps.empresas.models import Empresa, Taller
 from apps.ordenes.models import InspeccionVehiculo, OrdenTrabajo, RecepcionVehiculo
+from apps.authentication.models import Rol, UserProfile, UsuarioEmpresa
+from apps.authentication.serializers import emitir_token_seleccion
+from apps.gastos.models import Gasto
+from apps.inventario.models import Repuesto, Servicio
+from apps.proveedores.models import Proveedor
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario, vincular_empresa
 
 
@@ -52,7 +57,7 @@ class ApiIdPublicoTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_el_listado_expone_el_uuid_como_id(self):
         fila = self.client.get('/api/clientes/').json()['results'][0]
@@ -124,3 +129,132 @@ class ApiIdPublicoTests(TestCase):
         token = enlace.rstrip('/').rsplit('/', 1)[-1]
         self.assertEqual(signing.loads(token, salt=SALT_ENLACE_CITA_ICS), str(cita.uuid))
         self.assertEqual(APIClient().get(enlace).status_code, 200)
+
+
+class ApiIdPublicoFase2Tests(TestCase):
+    """Catálogos, gastos, talleres y usuarios por ID público."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.empresa = Empresa.objects.create(nombre_comercial='Fase 2', ruc='1790000000888')
+        cls.taller = Taller.objects.create(empresa=cls.empresa, nombre='Centro', codigo_sucursal='001', direccion='x')
+        cls.otro_taller = Taller.objects.create(empresa=cls.empresa, nombre='Norte', codigo_sucursal='002', direccion='x')
+        cls.admin = User.objects.create_superuser(username='fase2', password='x')
+        cls.asesor = User.objects.create_user(username='asesor-f2', password='x', first_name='Ana')
+        cls.empleado = UsuarioEmpresa.objects.create(user=cls.asesor, empresa=cls.empresa, rol='ASESOR')
+        cls.empleado.talleres.set([cls.taller])
+        cls.gasto_centro = Gasto.objects.create(empresa=cls.empresa, taller=cls.taller, fecha=date.today(), monto=10)
+        cls.gasto_norte = Gasto.objects.create(empresa=cls.empresa, taller=cls.otro_taller, fecha=date.today(), monto=20)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+
+    def test_todo_usuario_nuevo_tiene_perfil_con_uuid(self):
+        usuario = get_user_model().objects.create_user(username='nuevo-f2', password='x')
+        self.assertIsNotNone(UserProfile.objects.get(user=usuario).uuid)
+
+    def test_detalle_por_uuid_y_no_por_entero(self):
+        recursos = {
+            '/api/proveedores/': Proveedor.objects.create(empresa=self.empresa, nombre='Prov', identificacion='0101010101'),
+            '/api/repuestos/': Repuesto.objects.create(empresa=self.empresa, codigo='R-1', nombre='Filtro'),
+            '/api/servicios/': Servicio.objects.create(empresa=self.empresa, codigo='S-1', nombre='Alineación'),
+            '/api/gastos/': self.gasto_centro,
+            '/api/configuracion/sucursales/': self.taller,
+            '/api/auth/empleados/': self.empleado,
+        }
+        for url, objeto in recursos.items():
+            with self.subTest(url=url):
+                respuesta = self.client.get(f'{url}{objeto.uuid}/')
+                self.assertEqual(respuesta.status_code, 200, respuesta.content)
+                self.assertEqual(respuesta.json()['id'], str(objeto.uuid))
+                self.assertEqual(self.client.get(f'{url}{objeto.pk}/').status_code, 404)
+
+    def test_cabecera_de_taller_por_uuid(self):
+        def ids(cabecera):
+            respuesta = self.client.get('/api/gastos/', HTTP_X_TALLER_ID=cabecera)
+            return {fila['id'] for fila in respuesta.json()['results']}
+
+        self.assertEqual(ids(str(self.taller.uuid)), {str(self.gasto_centro.uuid)})
+        # El id interno ya no identifica un taller: no amplía ni elige alcance.
+        self.assertEqual(ids(str(self.otro_taller.pk)), set())
+
+    def test_usuario_expuesto_por_el_uuid_de_su_perfil(self):
+        perfil_uuid = str(self.asesor.profile.uuid)
+        empleado = self.client.get(f'/api/auth/empleados/{self.empleado.uuid}/').json()
+        self.assertEqual(empleado['user']['id'], perfil_uuid)
+
+        cliente = Cliente.objects.create(empresa=self.empresa, nombre='Luis', identificacion='0202020202')
+        respuesta = self.client.post('/api/cotizaciones/', {
+            'cliente': str(cliente.uuid), 'asesor': perfil_uuid, 'validez_dias': 15,
+        }, format='json')
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        self.assertEqual(respuesta.json()['asesor'], perfil_uuid)
+
+        con_entero = self.client.post('/api/cotizaciones/', {
+            'cliente': str(cliente.uuid), 'asesor': self.asesor.pk, 'validez_dias': 15,
+        }, format='json')
+        self.assertEqual(con_entero.status_code, 400)
+        self.assertIn('asesor', con_entero.json())
+
+    def test_me_expone_el_uuid_del_usuario(self):
+        self.client.force_authenticate(user=self.asesor)
+        respuesta = self.client.get('/api/auth/me/')
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.json()['id'], str(self.asesor.profile.uuid))
+
+
+class ApiIdPublicoFase3Tests(TestCase):
+    """Empresas y roles por ID público; la empresa de la sesión, por UUID."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.empresa_a = Empresa.objects.create(nombre_comercial='Fase 3 A', ruc='1790000000777')
+        cls.empresa_b = Empresa.objects.create(nombre_comercial='Fase 3 B', ruc='1790000000666')
+        cls.saas = User.objects.create_superuser(username='saas-f3', password='x')
+        cls.usuario = User.objects.create_user(username='multi-f3', password='x')
+        for empresa in (cls.empresa_a, cls.empresa_b):
+            UsuarioEmpresa.objects.create(user=cls.usuario, empresa=empresa, rol='ADMIN_EMPRESA')
+
+    def _cliente(self, user, empresa=None):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        if empresa is not None:
+            client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa)
+        return client
+
+    def test_empresa_y_rol_por_uuid_y_no_por_entero(self):
+        saas = self._cliente(self.saas, self.empresa_a.uuid)
+        self.assertEqual(saas.get(f'/api/empresas/{self.empresa_a.uuid}/').status_code, 200)
+        self.assertEqual(saas.get(f'/api/empresas/{self.empresa_a.pk}/').status_code, 404)
+
+        rol = Rol.objects.filter(es_sistema=True).first()
+        self.assertEqual(saas.get(f'/api/auth/roles/{rol.uuid}/').status_code, 200)
+        self.assertEqual(saas.get(f'/api/auth/roles/{rol.pk}/').status_code, 404)
+
+    def test_la_cabecera_de_empresa_solo_acepta_el_uuid(self):
+        # Usuario con dos empresas: sin una empresa válida no hay contexto.
+        con_uuid = self._cliente(self.usuario, self.empresa_b.uuid).get('/api/auth/me/')
+        self.assertEqual(con_uuid.json()['empresa_id'], str(self.empresa_b.uuid))
+        con_entero = self._cliente(self.usuario, self.empresa_b.pk).get('/api/auth/me/')
+        self.assertIsNone(con_entero.json()['empresa_id'])
+
+    def test_seleccion_de_empresa_por_uuid_y_jwt_sin_pk(self):
+        client = APIClient()
+        token = emitir_token_seleccion(self.usuario)
+        con_entero = client.post('/api/auth/select-company/', {
+            'selection_token': token, 'empresa_id': self.empresa_b.pk,
+        }, format='json')
+        self.assertEqual(con_entero.status_code, 400)
+
+        respuesta = client.post('/api/auth/select-company/', {
+            'selection_token': token, 'empresa_id': str(self.empresa_b.uuid),
+        }, format='json')
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.json()['user']['empresa_id'], str(self.empresa_b.uuid))
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        self.assertEqual(AccessToken(respuesta.json()['access'])['empresa_id'], str(self.empresa_b.uuid))

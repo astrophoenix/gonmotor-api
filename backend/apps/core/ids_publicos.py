@@ -66,14 +66,53 @@ class UuidPublicoModel(models.Model):
         abstract = True
 
 
+def es_usuario(modelo):
+    """El `User` de Django no admite columnas nuevas: su ID público es el
+    `uuid` de su `UserProfile` (uno por usuario, garantizado por señal)."""
+    from django.contrib.auth import get_user_model
+
+    return modelo is get_user_model()
+
+
 def tiene_id_publico(modelo):
-    return any(f.name == 'uuid' for f in modelo._meta.concrete_fields)
+    return es_usuario(modelo) or any(f.name == 'uuid' for f in modelo._meta.concrete_fields)
 
 
-def id_publico(obj):
+def campo_uuid(modelo):
+    """Lookup del UUID público de `modelo` (``uuid`` o ``profile__uuid``)."""
+    return 'profile__uuid' if es_usuario(modelo) else 'uuid'
+
+
+def uuid_de_usuario(user_pk, request=None):
+    """UUID público de un usuario por su pk, cacheado por petición: en un
+    listado el mismo asesor se repite en muchas filas."""
+    if user_pk is None:
+        return None
+    cache = getattr(request, '_uuid_usuarios', None) if request is not None else None
+    if cache is None:
+        cache = {}
+        if request is not None:
+            try:
+                request._uuid_usuarios = cache
+            except AttributeError:
+                pass
+    if user_pk not in cache:
+        from apps.authentication.models import UserProfile
+
+        valor = UserProfile.objects.filter(user_id=user_pk).values_list('uuid', flat=True).first()
+        cache[user_pk] = str(valor) if valor else None
+    return cache[user_pk]
+
+
+def id_publico(obj, request=None):
     """ID que la API expone para `obj` (None si no hay objeto)."""
     if obj is None:
         return None
+    if es_usuario(type(obj)):
+        perfil = obj._state.fields_cache.get('profile')
+        if perfil is not None:
+            return str(perfil.uuid)
+        return uuid_de_usuario(obj.pk, request)
     return str(obj.uuid) if tiene_id_publico(type(obj)) else obj.pk
 
 
@@ -87,7 +126,7 @@ def referencia_corta(obj):
 def por_id_publico(queryset, valor):
     """``queryset`` acotado al registro con ese UUID (vacío si no es un UUID)."""
     try:
-        return queryset.filter(uuid=uuid.UUID(str(valor)))
+        return queryset.filter(**{campo_uuid(queryset.model): uuid.UUID(str(valor))})
     except ValueError:
         return queryset.none()
 
@@ -106,7 +145,7 @@ def filtrar_por_id_publico(queryset, campo, valor):
             valor = uuid.UUID(str(valor))
         except ValueError:
             return queryset.none()
-        return queryset.filter(**{f'{campo}__uuid': valor})
+        return queryset.filter(**{f'{campo}__{campo_uuid(relacionado)}': valor})
     try:
         return queryset.filter(**{f'{campo}_id': int(valor)})
     except (TypeError, ValueError, ValidationError):

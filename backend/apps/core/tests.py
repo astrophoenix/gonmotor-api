@@ -161,7 +161,7 @@ class DashboardEndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_requiere_autenticacion(self):
         anonimo = APIClient()
@@ -523,7 +523,7 @@ class DashboardV2EndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     # ── contrato ────────────────────────────────────────────────────────────
     def test_requiere_autenticacion(self):
@@ -690,11 +690,11 @@ class DashboardV2EndpointTest(TestCase):
 
     # ── filtros ─────────────────────────────────────────────────────────────
     def test_filtro_por_sucursal(self):
-        resp = self.client.get(f'{ENDPOINT_V2}?sucursal={self.taller.pk}')
+        resp = self.client.get(f'{ENDPOINT_V2}?sucursal={self.taller.uuid}')
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
 
-        self.assertEqual(data['filtros']['sucursal'], self.taller.pk)
+        self.assertEqual(data['filtros']['sucursal'], str(self.taller.uuid))
         self.assertEqual(data['filtros']['sucursal_nombre'], 'Taller Centro')
         # Solo las recepciones de este taller (la del Taller Norte queda fuera).
         self.assertEqual(data['kpis']['vehiculos_en_taller'], 2)
@@ -729,7 +729,7 @@ class DashboardV2EndpointTest(TestCase):
             'fecha_desde=2026-09-10&fecha_hasta=2026-09-01',
             'fecha_desde=2020-01-01&fecha_hasta=2026-01-01',
             'sucursal=abc',
-            f'sucursal={self.taller_ajeno.pk}',
+            f'sucursal={self.taller_ajeno.uuid}',
         )
         for consulta in casos:
             with self.subTest(consulta=consulta):
@@ -764,7 +764,7 @@ class DashboardV2EndpointTest(TestCase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         return client
 
     def test_no_admin_sin_sucursal_ve_solo_sus_talleres(self):
@@ -780,7 +780,7 @@ class DashboardV2EndpointTest(TestCase):
 
     def test_no_admin_no_puede_forzar_otra_sucursal(self):
         client = self._cliente_no_admin([self.taller])
-        resp = client.get(f'{ENDPOINT_V2}?sucursal={self.taller_otro.pk}')
+        resp = client.get(f'{ENDPOINT_V2}?sucursal={self.taller_otro.uuid}')
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data['recepciones'], [])
@@ -821,7 +821,7 @@ class DashboardV2EndpointTest(TestCase):
                 self.assertEqual(resp.status_code, 400)
 
     def test_taller_activo_por_cabecera_sin_parametro(self):
-        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller.pk))
+        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller.uuid))
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data['filtros']['sucursal_nombre'], 'Taller Centro')
@@ -829,7 +829,7 @@ class DashboardV2EndpointTest(TestCase):
         self.assertEqual(Decimal(str(data['kpis']['facturacion_periodo'])), Decimal('390.00'))
 
     def test_cabecera_de_taller_de_otra_empresa_no_devuelve_datos(self):
-        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller_ajeno.pk))
+        resp = self.client.get(ENDPOINT_V2, HTTP_X_TALLER_ID=str(self.taller_ajeno.uuid))
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data['recepciones'], [])

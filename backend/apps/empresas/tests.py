@@ -192,7 +192,7 @@ class EmpresaCrudAdminSaaSTests(TestCase):
         UsuarioEmpresa.objects.create(user=dueno, empresa=self.activa, rol='ADMIN_EMPRESA')
         self.dueno = APIClient()
         self.dueno.force_authenticate(dueno)
-        self.dueno.defaults['HTTP_X_EMPRESA_ID'] = str(self.activa.pk)
+        self.dueno.defaults['HTTP_X_EMPRESA_ID'] = str(self.activa.uuid)
 
     def _payload(self, **extra):
         return {
@@ -209,7 +209,7 @@ class EmpresaCrudAdminSaaSTests(TestCase):
         self.assertEqual(self.dueno.get(self.endpoint).status_code, 403)
         self.assertEqual(self.dueno.post(self.endpoint, self._payload(), format='json').status_code, 403)
         self.assertEqual(
-            self.dueno.patch(f'{self.endpoint}{self.activa.pk}/', {'nombre_comercial': 'X'}, format='json').status_code,
+            self.dueno.patch(f'{self.endpoint}{self.activa.uuid}/', {'nombre_comercial': 'X'}, format='json').status_code,
             403,
         )
 
@@ -218,9 +218,9 @@ class EmpresaCrudAdminSaaSTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['count'], 2)
         resp = self.saas.get(self.endpoint, {'estado': 'inactivo'})
-        self.assertEqual([e['id'] for e in resp.data['results']], [self.inactiva.pk])
+        self.assertEqual([e['id'] for e in resp.data['results']], [str(self.inactiva.uuid)])
         resp = self.saas.get(self.endpoint, {'search': '0000000001'})
-        self.assertEqual([e['id'] for e in resp.data['results']], [self.activa.pk])
+        self.assertEqual([e['id'] for e in resp.data['results']], [str(self.activa.uuid)])
 
     def test_crea_y_edita(self):
         resp = self.saas.post(self.endpoint, self._payload(), format='json')
@@ -241,12 +241,12 @@ class EmpresaCrudAdminSaaSTests(TestCase):
         self.assertIn('Ya existe', str(resp.data['ruc']))
         # Editar sin cambiar el RUC no choca consigo misma.
         resp = self.saas.patch(
-            f'{self.endpoint}{self.activa.pk}/', {'ruc': self.activa.ruc}, format='json'
+            f'{self.endpoint}{self.activa.uuid}/', {'ruc': self.activa.ruc}, format='json'
         )
         self.assertEqual(resp.status_code, 200, resp.content)
 
     def test_eliminar_es_logico_y_libera_el_ruc(self):
-        resp = self.saas.delete(f'{self.endpoint}{self.activa.pk}/')
+        resp = self.saas.delete(f'{self.endpoint}{self.activa.uuid}/')
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(resp.data['action'], 'soft_delete')
         self.assertTrue(Empresa.all_objects.filter(pk=self.activa.pk, deleted_at__isnull=False).exists())

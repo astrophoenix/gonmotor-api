@@ -56,7 +56,7 @@ class ExportesSobreElLimiteApiTests(TestCase):
         user = get_user_model().objects.create_superuser(username='limites', password='x')
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_responden_400_con_detalle(self):
         for url in (

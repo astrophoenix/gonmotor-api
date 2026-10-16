@@ -9,6 +9,7 @@ from django.db import IntegrityError
 from django.db.models import Q
 from reportlab.platypus import Paragraph
 
+from apps.core.mixins import LookupPublicoMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -27,7 +28,7 @@ from .serializers import EmpresaConfigSerializer, TallerConfigSerializer
 DUPLICATE_CODE_MESSAGE_TALLER = 'El código del taller ya está en uso por un taller activo.'
 
 
-class TallerConfigViewSet(viewsets.ModelViewSet):
+class TallerConfigViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
     """
     CRUD de sucursales / talleres de la empresa en sesión.
 
@@ -244,22 +245,29 @@ class TallerExcelExportView(APIView):
             )
 
 
-class EmpresaConfigViewSet(viewsets.ModelViewSet):
+class EmpresaConfigViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
     """
     Endpoint de configuración de la empresa del taller (datos fiscales/corporativos).
 
-    GET   /api/configuracion/empresa/   -> Empresa del tenant en sesión
-    GET   /api/configuracion/empresa/{id}/ -> Empresa por id (tenant permitido)
+    GET   /api/configuracion/empresa/      -> Empresa del tenant en sesión
+    GET   /api/configuracion/empresa/{id}/ -> La misma, por su ID público
     PATCH /api/configuracion/empresa/{id}/ -> Actualiza datos (solo administradores)
+
+    Solo opera sobre la empresa de la sesión: otro id responde 404. Crear y
+    eliminar empresas es exclusivo del administrador del SaaS (`/api/empresas/`).
     """
     serializer_class = EmpresaConfigSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('empresa')]
+    http_method_names = ['get', 'patch', 'head', 'options']
 
     def get_empresa_id(self, request):
         return get_empresa_id_desde_request(request)
 
     def get_queryset(self):
-        return Empresa.objects.filter(is_active=True)
+        empresa_id = self.get_empresa_id(self.request)
+        if not empresa_id:
+            return Empresa.objects.none()
+        return Empresa.objects.filter(pk=empresa_id, is_active=True)
 
     def list(self, request, *args, **kwargs):
         empresa_id = self.get_empresa_id(request)

@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -42,7 +42,7 @@ def _contacto_texto(proveedor):
     return 'Sin contacto'
 
 
-class ProveedorViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class ProveedorViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = ProveedorSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('proveedores')]
 

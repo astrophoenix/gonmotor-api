@@ -332,7 +332,7 @@ class CotizacionAsesorApiTests(APITestCase):
         self.vehiculo.empresas.add(self.empresa)
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_crear_con_asesor(self):
         resp = self.client.post(
@@ -340,14 +340,14 @@ class CotizacionAsesorApiTests(APITestCase):
             {
                 'cliente': str(self.cliente.uuid),
                 'vehiculo': str(self.vehiculo.uuid),
-                'asesor': self.asesor.id,
+                'asesor': str(self.asesor.profile.uuid),
                 'validez_dias': 15,
             },
             format='json',
         )
         self.assertEqual(resp.status_code, 201, resp.content)
         data = resp.json()
-        self.assertEqual(data['asesor'], self.asesor.id)
+        self.assertEqual(data['asesor'], str(self.asesor.profile.uuid))
         self.assertEqual(data['asesor_nombre'], 'Ana Paredes')
         self.assertEqual(data['asesor_email'], 'ana@gonmotor.test')
 
@@ -362,10 +362,10 @@ class CotizacionAsesorApiTests(APITestCase):
         self.assertNotIn('asesor_nombre', resp.json())
 
         patch = self.client.patch(
-            f"/api/cotizaciones/{resp.json()['id']}/", {'asesor': self.asesor.id}, format='json'
+            f"/api/cotizaciones/{resp.json()['id']}/", {'asesor': str(self.asesor.profile.uuid)}, format='json'
         )
         self.assertEqual(patch.status_code, 200, patch.content)
-        self.assertEqual(patch.json()['asesor'], self.asesor.id)
+        self.assertEqual(patch.json()['asesor'], str(self.asesor.profile.uuid))
         self.assertEqual(patch.json()['asesor_nombre'], 'Ana Paredes')
 
     def test_quitar_asesor(self):
@@ -622,7 +622,7 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
     def test_requiere_autenticacion(self):
         cotizacion_id = self._cotizacion_con_detalles()
         anonimo = APIClient()
-        anonimo.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        anonimo.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         respuesta = anonimo.get(f'/api/cotizaciones/{cotizacion_id}/exportar-pdf/')
         self.assertEqual(respuesta.status_code, 401)
 

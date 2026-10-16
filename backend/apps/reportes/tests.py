@@ -84,14 +84,14 @@ class RentabilidadReportTests(TestCase):
         return self.api.get(
             path,
             params or {},
-            HTTP_X_EMPRESA_ID=str(self.empresa.pk),
+            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
         )
 
     def test_taller_report_uses_net_revenue_and_line_cost_snapshots(self):
         self._orden(fecha_entrega=timezone.now())
         response = self._get(
             '/api/reportes/rentabilidad-taller/',
-            {'taller_id': self.taller.pk},
+            {'taller_id': str(self.taller.uuid)},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -124,7 +124,7 @@ class RentabilidadReportTests(TestCase):
         response = self._get(
             '/api/reportes/rentabilidad-taller/',
             {
-                'taller_id': self.taller.pk,
+                'taller_id': str(self.taller.uuid),
                 'fecha_desde': hoy.isoformat(),
                 'fecha_hasta': hoy.isoformat(),
             },
@@ -142,7 +142,7 @@ class RentabilidadReportTests(TestCase):
         response = self._get(
             '/api/reportes/rentabilidad-taller/',
             {
-                'taller_id': self.taller.pk,
+                'taller_id': str(self.taller.uuid),
                 'fecha_desde': hoy.isoformat(),
             },
         )
@@ -172,7 +172,7 @@ class RentabilidadReportTests(TestCase):
 
         response = self._get(
             '/api/reportes/rentabilidad-empresa/',
-            {'taller_id': self.taller.pk},
+            {'taller_id': str(self.taller.uuid)},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -182,7 +182,7 @@ class RentabilidadReportTests(TestCase):
         response = self._get(
             '/api/reportes/rentabilidad-taller/',
             {
-                'taller_id': self.taller.pk,
+                'taller_id': str(self.taller.uuid),
                 'fecha_desde': 'not-a-date',
             },
         )
@@ -199,7 +199,7 @@ class RentabilidadReportTests(TestCase):
         response = self._get(
             '/api/reportes/rentabilidad-taller/',
             {
-                'taller_id': self.taller.pk,
+                'taller_id': str(self.taller.uuid),
                 'fecha_desde': hoy.replace(day=1).isoformat(),
                 'fecha_hasta': hoy.isoformat(),
             },
@@ -255,14 +255,14 @@ class RentabilidadReportTests(TestCase):
         api = self._api_no_admin([self.taller])
 
         # Sin taller declarado: solo sus talleres permitidos.
-        response = api.get('/api/reportes/rentabilidad-empresa/', HTTP_X_EMPRESA_ID=str(self.empresa.pk))
+        response = api.get('/api/reportes/rentabilidad-empresa/', HTTP_X_EMPRESA_ID=str(self.empresa.uuid))
         self.assertEqual(Decimal(response.data['ingresos']['total']), Decimal('100.00'))
 
         # Forzar un taller no permitido no devuelve sus datos.
         response = api.get(
             '/api/reportes/rentabilidad-taller/',
-            {'taller_id': otro_taller.pk},
-            HTTP_X_EMPRESA_ID=str(self.empresa.pk),
+            {'taller_id': str(otro_taller.uuid)},
+            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
         )
         self.assertEqual(Decimal(response.data['ingresos']['total']), Decimal('0.00'))
         self.assertEqual(
@@ -278,7 +278,7 @@ class RentabilidadReportTests(TestCase):
         taller_ajeno = Taller.objects.create(empresa=otra_empresa, nombre='Ajeno', direccion='X')
         self._orden(fecha_entrega=timezone.now(), numero='OT-AJ', empresa=otra_empresa, taller=taller_ajeno)
 
-        response = self._get('/api/reportes/rentabilidad-taller/', {'taller_id': taller_ajeno.pk})
+        response = self._get('/api/reportes/rentabilidad-taller/', {'taller_id': str(taller_ajeno.uuid)})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Decimal(response.data['ingresos']['total']), Decimal('0.00'))
 

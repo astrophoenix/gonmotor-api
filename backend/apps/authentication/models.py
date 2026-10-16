@@ -1,9 +1,10 @@
 from django.db import models
 from django.contrib.auth.models import User
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseModel
 
 
-class UserProfile(BaseModel):
+class UserProfile(UuidPublicoModel, BaseModel):
     """
     Perfil global del usuario (datos personales / preferencias).
     Las empresas y roles específicos se manejan en UsuarioEmpresa.
@@ -54,7 +55,7 @@ class UserProfile(BaseModel):
         return f"Perfil de {self.user.username}"
 
 
-class UsuarioEmpresa(BaseModel):
+class UsuarioEmpresa(UuidPublicoModel, BaseModel):
     """
     Tabla intermedia que permite a un usuario pertenecer a N Empresas (RUCs distintos)
     y tener un rol específico en cada una de ellas.
@@ -147,7 +148,7 @@ class RolPermiso(models.Model):
         return f'{self.rol}: {self.recurso}.{self.accion}'
 
 
-class Rol(BaseModel):
+class Rol(UuidPublicoModel, BaseModel):
     """Catálogo de roles: los 6 de sistema y los personalizados por empresa.
 
     `UsuarioEmpresa.rol` guarda el `codigo` (compatible con los códigos

@@ -3,10 +3,11 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseTallerModel
 
 
-class Gasto(BaseTallerModel):
+class Gasto(UuidPublicoModel, BaseTallerModel):
     class Categoria(models.TextChoices):
         ARRIENDO = 'ARRIENDO', 'Arriendo'
         SUELDOS = 'SUELDOS', 'Sueldos/Nómina'

@@ -99,7 +99,7 @@ class EmpleadoExportTests(APITestCase):
 		)
 		self.client = APIClient()
 		self.client.force_authenticate(user=self.user)
-		self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+		self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
 	def _crear_empleado(self):
 		from apps.authentication.models import UsuarioEmpresa
@@ -292,7 +292,7 @@ class ContextoUsuarioTests(EscenarioMixin, APITestCase):
 	"""Empresa activa y rol vigente resueltos desde la base."""
 
 	def test_contexto_por_cabecera(self):
-		request = self._request(user=self.usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_a.uuid)
 		contexto = get_contexto_desde_request(request)
 		self.assertEqual(contexto.empresa_id, self.empresa_a.pk)
 		self.assertEqual(contexto.rol, 'ASESOR')
@@ -300,18 +300,18 @@ class ContextoUsuarioTests(EscenarioMixin, APITestCase):
 
 	def test_contexto_por_claim_del_jwt(self):
 		request = self._request(user=self.usuario)
-		request.auth = {'empresa_id': self.empresa_a.pk, 'rol': 'CAJERO'}
+		request.auth = {'empresa_id': str(self.empresa_a.uuid), 'rol': 'CAJERO'}
 		contexto = get_contexto_desde_request(request)
 		self.assertEqual(contexto.empresa_id, self.empresa_a.pk)
 
 	def test_el_rol_vigente_de_la_base_no_lo_pisa_el_jwt(self):
 		request = self._request(user=self.usuario)
-		request.auth = {'empresa_id': self.empresa_a.pk, 'rol': 'CAJERO'}
+		request.auth = {'empresa_id': str(self.empresa_a.uuid), 'rol': 'CAJERO'}
 		self.assertEqual(get_rol_desde_request(request), 'ASESOR')
 		self.assertEqual(get_empresa_id_desde_request(request), self.empresa_a.pk)
 
 	def test_no_da_contexto_si_la_empresa_no_es_suya(self):
-		request = self._request(user=self.usuario, empresa=self.empresa_b.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_b.uuid)
 		contexto = get_contexto_desde_request(request)
 		self.assertIsNone(contexto.empresa_id)
 		self.assertIsNone(contexto.rol)
@@ -336,14 +336,14 @@ class ContextoUsuarioTests(EscenarioMixin, APITestCase):
 
 	def test_superusuario_toma_una_empresa_y_es_admin_sistema(self):
 		superuser = User.objects.create_superuser(username='root', password='x')
-		request = self._request(user=superuser, empresa=self.empresa_b.pk)
+		request = self._request(user=superuser, empresa=self.empresa_b.uuid)
 		contexto = get_contexto_desde_request(request)
 		self.assertEqual(contexto.empresa_id, self.empresa_b.pk)
 		self.assertEqual(contexto.rol, 'ADMIN_SISTEMA')
 		self.assertTrue(contexto.es_superusuario)
 
 	def test_el_contexto_se_cachea_por_peticion(self):
-		request = self._request(user=self.usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_a.uuid)
 		primero = get_contexto_desde_request(request)
 		segundo = get_contexto_desde_request(request)
 		self.assertIs(primero, segundo)
@@ -387,7 +387,7 @@ class AlcanceTallerTests(EscenarioMixin, APITestCase):
 		mecanico = User.objects.create_user(username='meca2', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
 		request = self._request(
-			user=mecanico, empresa=self.empresa_a.pk, taller=self.b1.pk
+			user=mecanico, empresa=self.empresa_a.pk, taller=str(self.b1.uuid)
 		)
 		self.assertEqual(get_taller_desde_request(request), self.a1.pk)
 
@@ -395,28 +395,28 @@ class AlcanceTallerTests(EscenarioMixin, APITestCase):
 		mecanico = User.objects.create_user(username='meca3', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
 		request = self._request(
-			user=mecanico, empresa=self.empresa_a.pk, taller=self.a2.pk
+			user=mecanico, empresa=self.empresa_a.pk, taller=str(self.a2.uuid)
 		)
 		self.assertEqual(get_taller_desde_request(request), self.a1.pk)
 
 	def test_el_taller_activo_del_perfil_se_valida_contra_el_alcance(self):
 		mecanico = User.objects.create_user(username='meca4', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
-		UserProfile.objects.create(user=mecanico, taller_activo=self.a2)
-		request = self._request(user=mecanico, empresa=self.empresa_a.pk)
+		UserProfile.objects.update_or_create(user=mecanico, defaults={'taller_activo': self.a2})
+		request = self._request(user=mecanico, empresa=self.empresa_a.uuid)
 		self.assertEqual(get_taller_desde_request(request), self.a1.pk)
 
 	def test_el_taller_activo_valido_se_respeta(self):
 		mecanico = User.objects.create_user(username='meca5', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1, self.a2])
-		UserProfile.objects.create(user=mecanico, taller_activo=self.a2)
-		request = self._request(user=mecanico, empresa=self.empresa_a.pk)
+		UserProfile.objects.update_or_create(user=mecanico, defaults={'taller_activo': self.a2})
+		request = self._request(user=mecanico, empresa=self.empresa_a.uuid)
 		self.assertEqual(get_taller_desde_request(request), self.a2.pk)
 
 	def test_sin_talleres_permitidos_devuelve_none(self):
 		mecanico = User.objects.create_user(username='meca6', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO')
-		request = self._request(user=mecanico, empresa=self.empresa_a.pk)
+		request = self._request(user=mecanico, empresa=self.empresa_a.uuid)
 		self.assertIsNone(get_taller_desde_request(request))
 
 	def test_taller_de_otra_empresa_no_es_asignable(self):
@@ -452,7 +452,7 @@ class AlcanceTallerTests(EscenarioMixin, APITestCase):
 		cliente = APIClient()
 		cliente.force_authenticate(user=mecanico)
 		respuesta = cliente.get(
-			'/api/auth/me/', HTTP_X_EMPRESA_ID=str(self.empresa_a.pk)
+			'/api/auth/me/', HTTP_X_EMPRESA_ID=str(self.empresa_a.uuid)
 		)
 		self.assertEqual(respuesta.status_code, 200, respuesta.data)
 		self.assertEqual(respuesta.data['taller_nombre'], self.a1.nombre)
@@ -524,21 +524,21 @@ class PermisosDrfTests(EscenarioMixin, APITestCase):
 	def test_cajero_si_puede_facturar(self):
 		cajero = User.objects.create_user(username='caja', password='x')
 		_asignar(cajero, self.empresa_a, 'CAJERO', [self.a1])
-		request = self._request(user=cajero, empresa=self.empresa_a.pk)
+		request = self._request(user=cajero, empresa=self.empresa_a.uuid)
 		permiso = TienePermiso('facturacion', 'modificar')()
 		self.assertTrue(permiso.has_permission(request, None))
 
 	def test_mecanico_no_puede_facturar(self):
 		mecanico = User.objects.create_user(username='meca8', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
-		request = self._request(user=mecanico, empresa=self.empresa_a.pk)
+		request = self._request(user=mecanico, empresa=self.empresa_a.uuid)
 		permiso = TienePermiso('facturacion', 'modificar')()
 		self.assertFalse(permiso.has_permission(request, None))
 
 	def test_admin_de_empresa_si_puede_gestionar_usuarios(self):
 		admin = User.objects.create_user(username='dueno4', password='x')
 		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
-		request = self._request(user=admin, empresa=self.empresa_a.pk)
+		request = self._request(user=admin, empresa=self.empresa_a.uuid)
 		permiso = TienePermiso('usuarios', 'modificar')()
 		self.assertTrue(permiso.has_permission(request, None))
 
@@ -549,12 +549,12 @@ class PermisosDrfTests(EscenarioMixin, APITestCase):
 		self.assertFalse(permiso.has_permission(request, None))
 
 	def test_es_admin_de_empresa_permite_lectura_a_cualquiera(self):
-		request = self._request(user=self.usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_a.uuid)
 		permiso = EsAdminDeEmpresa()
 		self.assertTrue(permiso.has_permission(request, None))
 
 	def test_es_admin_de_empresa_bloquea_escritura_a_un_asesor(self):
-		request = self._request(user=self.usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_a.uuid)
 		request.method = 'POST'
 		permiso = EsAdminDeEmpresa()
 		self.assertFalse(permiso.has_permission(request, None))
@@ -568,7 +568,7 @@ class SerializadorEmpleadosTests(EscenarioMixin, APITestCase):
 	"""Alta de empleados: no se puede asignar un taller de otra empresa."""
 
 	def _serializer(self, talleres):
-		request = self._request(user=self.usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=self.usuario, empresa=self.empresa_a.uuid)
 		return EmpleadoWriteSerializer(
 			data={
 				'first_name': 'Ana',
@@ -586,7 +586,7 @@ class SerializadorEmpleadosTests(EscenarioMixin, APITestCase):
 		self.assertIn('talleres', serializer.errors)
 
 	def test_acepta_talleres_de_la_empresa(self):
-		serializer = self._serializer([self.a1.pk, self.a2.pk])
+		serializer = self._serializer([str(self.a1.uuid), str(self.a2.uuid)])
 		self.assertTrue(serializer.is_valid(), serializer.errors)
 
 	def test_acepta_lista_vacia(self):
@@ -668,7 +668,7 @@ class MiPerfilRolesTests(EscenarioMixin, APITestCase):
 	def _me(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		resp = cliente.get('/api/auth/me/')
 		return resp
 
@@ -721,7 +721,7 @@ class AccesoEmpresaTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		return cliente
 
 	def _con_rol(self, rol, talleres=None):
@@ -778,7 +778,7 @@ class AccesoEmpresaTests(EscenarioMixin, APITestCase):
 		cliente = self._cliente(mi)
 		relacion = UsuarioEmpresa.objects.get(user=mi, empresa=self.empresa_a)
 		resp = cliente.patch(
-			f'/api/auth/empleados/{relacion.pk}/',
+			f'/api/auth/empleados/{relacion.uuid}/',
 			{'tiene_acceso': False},
 			format='json',
 		)
@@ -809,7 +809,7 @@ class PermisosEndpointTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		return cliente
 
 	def _con_rol(self, rol, talleres=None):
@@ -885,7 +885,7 @@ class PermisosEndpointTests(EscenarioMixin, APITestCase):
 	def test_usuario_sin_talleres_no_tiene_taller_de_sesion(self):
 		usuario = User.objects.create_user(username='sin-taller-2', password='x')
 		asignacion = _asignar(usuario, self.empresa_a, 'ADMIN_TALLER', [])
-		request = self._request(user=usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=usuario, empresa=self.empresa_a.uuid)
 		self.assertEqual(list(talleres_permitidos(usuario, get_contexto_desde_request(request))), [])
 		self.assertIsNone(get_taller_desde_request(request))
 		self.assertEqual(asignacion.talleres.count(), 0)
@@ -915,7 +915,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		return cliente
 
 	def _crear_rol(self, cliente, nombre='Supervisor de taller'):
@@ -937,7 +937,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		self.assertFalse(rol['es_sistema'])
 		self.assertTrue(rol['editable'])
 		self.assertEqual(rol['nombre'], 'Supervisor de taller')
-		en_bd = Rol.objects.get(pk=rol['id'])
+		en_bd = Rol.objects.get(uuid=rol['id'])
 		self.assertEqual(en_bd.empresa_id, self.empresa_a.pk)
 		self.assertTrue(en_bd.is_active)
 
@@ -958,7 +958,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 			codigo='rol-otra', nombre='Rol ajeno',
 			empresa=otro_empresa, es_sistema=False, nivel=1,
 		)
-		resp = self._cliente(self.dueno).get(f'/api/auth/roles/{otro_rol.pk}/')
+		resp = self._cliente(self.dueno).get(f'/api/auth/roles/{otro_rol.uuid}/')
 		self.assertEqual(resp.status_code, 404, resp.content)
 
 	def test_asigna_permisos_generales(self):
@@ -1028,20 +1028,20 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 			format='json',
 		)
 		self.assertEqual(resp.status_code, 200, resp.content)
-		self.assertEqual(Rol.objects.get(pk=rol['id']).nombre, 'Auxiliar administrativo')
+		self.assertEqual(Rol.objects.get(uuid=rol['id']).nombre, 'Auxiliar administrativo')
 		resp = cliente.patch(
 			f"/api/auth/roles/{rol['id']}/",
 			{'is_active': False},
 			format='json',
 		)
 		self.assertEqual(resp.status_code, 200, resp.content)
-		self.assertFalse(Rol.objects.get(pk=rol['id']).is_active)
+		self.assertFalse(Rol.objects.get(uuid=rol['id']).is_active)
 
 	def test_metadata_de_roles_de_sistema_no_editable(self):
 		cliente = self._cliente(self.superadmin)
 		sistema = Rol.objects.get(codigo='MECANICO')
 		resp = cliente.patch(
-			f'/api/auth/roles/{sistema.pk}/',
+			f'/api/auth/roles/{sistema.uuid}/',
 			{'nombre': 'Mecanizado'},
 			format='json',
 		)
@@ -1051,7 +1051,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		cliente = self._cliente(self.superadmin)
 		sistema = Rol.objects.get(codigo='MECANICO')
 		resp = cliente.put(
-			f'/api/auth/roles/{sistema.pk}/permisos/',
+			f'/api/auth/roles/{sistema.uuid}/permisos/',
 			{'permisos': [
 				{'recurso': 'clientes', 'ver': True, 'modificar': False},
 				{'recurso': 'facturacion', 'ver': True, 'modificar': True},
@@ -1071,7 +1071,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		self.assertEqual(globales['clientes'], ['ver'])
 		self.assertNotIn('facturacion', globales)
 		resp = cliente.put(
-			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			f'/api/auth/roles/{mecanico.uuid}/permisos/',
 			{'permisos': [
 				{'recurso': 'clientes', 'ver': True, 'modificar': True},
 				{'recurso': 'facturacion', 'ver': True, 'modificar': False},
@@ -1087,7 +1087,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		self.assertEqual(permisos_de_rol('MECANICO', otra.pk), globales)
 		lista = cliente.get('/api/auth/roles/').json()
 		self.assertTrue(next(r for r in lista if r['codigo'] == 'MECANICO')['personalizado'])
-		detalle = cliente.get(f'/api/auth/roles/{mecanico.pk}/').json()
+		detalle = cliente.get(f'/api/auth/roles/{mecanico.uuid}/').json()
 		self.assertTrue(detalle['personalizado'])
 
 	def test_restablecer_rol_de_sistema_a_matriz_global(self):
@@ -1095,11 +1095,11 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		mecanico = Rol.objects.get(codigo='MECANICO')
 		globales = permisos_de_rol('MECANICO')
 		cliente.put(
-			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			f'/api/auth/roles/{mecanico.uuid}/permisos/',
 			{'permisos': [{'recurso': 'clientes', 'ver': True, 'modificar': True}]},
 			format='json',
 		)
-		resp = cliente.delete(f'/api/auth/roles/{mecanico.pk}/permisos/')
+		resp = cliente.delete(f'/api/auth/roles/{mecanico.uuid}/permisos/')
 		self.assertEqual(resp.status_code, 200, resp.content)
 		self.assertEqual(permisos_de_rol('MECANICO', self.empresa_a.pk), globales)
 		self.assertFalse(
@@ -1112,19 +1112,19 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		cliente = self._cliente(self.dueno)
 		mecanico = Rol.objects.get(codigo='MECANICO')
 		cliente.put(
-			f'/api/auth/roles/{mecanico.pk}/permisos/',
+			f'/api/auth/roles/{mecanico.uuid}/permisos/',
 			{'permisos': [{'recurso': 'facturacion', 'ver': True, 'modificar': False}]},
 			format='json',
 		)
 		usuario = self._con_rol('MECANICO')
-		request = self._request(user=usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=usuario, empresa=self.empresa_a.uuid)
 		self.assertTrue(TienePermiso('facturacion', 'ver')().has_permission(request, None))
 
 	def test_override_acciones_especiales_por_empresa(self):
 		cliente = self._cliente(self.dueno)
 		asesor = Rol.objects.get(codigo='ASESOR')
 		cliente.put(
-			f'/api/auth/roles/{asesor.pk}/acciones/',
+			f'/api/auth/roles/{asesor.uuid}/acciones/',
 			{'acciones': ['aprobar_descuentos']},
 			format='json',
 		)
@@ -1151,7 +1151,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 			format='json',
 		)
 		usuario = self._con_rol_empresa(rol['codigo'])
-		request = self._request(user=usuario, empresa=self.empresa_a.pk)
+		request = self._request(user=usuario, empresa=self.empresa_a.uuid)
 		self.assertTrue(
 			TienePermiso('facturacion', 'modificar')().has_permission(request, None)
 		)
@@ -1232,7 +1232,7 @@ class EscalacionRolesTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		return cliente
 
 	def _postea(self, rol):
@@ -1269,19 +1269,19 @@ class EscalacionRolesTests(EscenarioMixin, APITestCase):
 	def test_no_desactivo_mi_propio_acceso(self):
 		cliente = self._cliente(self.gerente)
 		mi = UsuarioEmpresa.objects.get(user=self.gerente)
-		resp = cliente.patch(f'/api/auth/empleados/{mi.pk}/', {'is_active': False}, format='json')
+		resp = cliente.patch(f'/api/auth/empleados/{mi.uuid}/', {'is_active': False}, format='json')
 		self.assertEqual(resp.status_code, 400, resp.content)
 
 	def test_no_cambio_mi_propio_rol(self):
 		cliente = self._cliente(self.gerente)
 		mi = UsuarioEmpresa.objects.get(user=self.gerente)
-		resp = cliente.patch(f'/api/auth/empleados/{mi.pk}/', {'rol': 'ASESOR'}, format='json')
+		resp = cliente.patch(f'/api/auth/empleados/{mi.uuid}/', {'rol': 'ASESOR'}, format='json')
 		self.assertEqual(resp.status_code, 400, resp.content)
 
 	def test_no_me_doy_de_baja_a_mi_mismo(self):
 		cliente = self._cliente(self.gerente)
 		mi = UsuarioEmpresa.objects.get(user=self.gerente)
-		resp = cliente.delete(f'/api/auth/empleados/{mi.pk}/')
+		resp = cliente.delete(f'/api/auth/empleados/{mi.uuid}/')
 		self.assertEqual(resp.status_code, 400, resp.content)
 
 	def test_si_doy_de_baja_a_otro(self):
@@ -1289,7 +1289,7 @@ class EscalacionRolesTests(EscenarioMixin, APITestCase):
 		mecanico = User.objects.create_user(username='baja-1', email='baja@taller.ec', password='x')
 		_asignar(mecanico, self.empresa_a, 'MECANICO', [self.a1])
 		ue = UsuarioEmpresa.objects.get(user=mecanico)
-		resp = cliente.delete(f'/api/auth/empleados/{ue.pk}/')
+		resp = cliente.delete(f'/api/auth/empleados/{ue.uuid}/')
 		self.assertEqual(resp.status_code, 200, resp.content)
 		ue.refresh_from_db()
 		self.assertFalse(ue.is_active)
@@ -1301,7 +1301,7 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 	def _cliente(self, usuario):
 		cliente = APIClient()
 		cliente.force_authenticate(usuario)
-		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.pk)
+		cliente.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa_a.uuid)
 		return cliente
 
 	def test_gerente_de_taller_no_toca_datos_de_empresa(self):
@@ -1310,7 +1310,7 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		cliente = self._cliente(gerente)
 		lectura = cliente.get('/api/configuracion/empresa/')
 		self.assertEqual(lectura.status_code, 403, lectura.content)
-		grabado = cliente.patch(f'/api/configuracion/empresa/{self.empresa_a.pk}/', {}, format='json')
+		grabado = cliente.patch(f'/api/configuracion/empresa/{self.empresa_a.uuid}/', {}, format='json')
 		self.assertEqual(grabado.status_code, 403, grabado.content)
 
 	def test_dueno_edita_datos_de_empresa(self):
@@ -1320,7 +1320,7 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		lectura = cliente.get('/api/configuracion/empresa/')
 		self.assertEqual(lectura.status_code, 200, lectura.content)
 		grabado = cliente.patch(
-			f'/api/configuracion/empresa/{self.empresa_a.pk}/',
+			f'/api/configuracion/empresa/{self.empresa_a.uuid}/',
 			{'nombre_comercial': 'Taller GON Config'},
 			format='json',
 		)
@@ -1330,7 +1330,7 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		dueno = User.objects.create_user(username='dueno-razon', password='x')
 		_asignar(dueno, self.empresa_a, 'ADMIN_EMPRESA', [self.a1])
 		resp = self._cliente(dueno).patch(
-			f'/api/configuracion/empresa/{self.empresa_a.pk}/',
+			f'/api/configuracion/empresa/{self.empresa_a.uuid}/',
 			{'razon_social': '   '},
 			format='json',
 		)
@@ -1393,30 +1393,30 @@ class TalleresDisponiblesEndpointTests(EscenarioMixin, APITestCase):
 		self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
 	def test_asesor_solo_ve_sus_talleres_asignados(self):
-		resp = self._cliente(self.usuario, self.empresa_a.pk).get(self.endpoint)
+		resp = self._cliente(self.usuario, self.empresa_a.uuid).get(self.endpoint)
 		self.assertEqual(resp.status_code, status.HTTP_200_OK)
-		self.assertEqual([t['id'] for t in resp.data['resultados']], [self.a1.pk])
+		self.assertEqual([t['id'] for t in resp.data['resultados']], [str(self.a1.uuid)])
 		self.assertEqual(resp.data['total'], 1)
 
 	def test_admin_ve_todos_los_de_la_empresa(self):
 		admin = User.objects.create_user(username='dueno-talleres', password='x')
 		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
-		resp = self._cliente(admin, self.empresa_a.pk).get(self.endpoint)
+		resp = self._cliente(admin, self.empresa_a.uuid).get(self.endpoint)
 		ids = sorted(t['id'] for t in resp.data['resultados'])
-		self.assertEqual(ids, [self.a1.pk, self.a2.pk])
+		self.assertEqual(ids, sorted([str(self.a1.uuid), str(self.a2.uuid)]))
 
 	def test_no_mezcla_talleres_de_otra_empresa(self):
-		resp = self._cliente(self.usuario, self.empresa_a.pk).get(self.endpoint)
+		resp = self._cliente(self.usuario, self.empresa_a.uuid).get(self.endpoint)
 		ids = [t['id'] for t in resp.data['resultados']]
 		self.assertNotIn(self.b1.pk, ids)
 
 	def test_filtra_por_search(self):
 		admin = User.objects.create_user(username='dueno-search', password='x')
 		_asignar(admin, self.empresa_a, 'ADMIN_EMPRESA')
-		resp = self._cliente(admin, self.empresa_a.pk).get(
+		resp = self._cliente(admin, self.empresa_a.uuid).get(
 			self.endpoint, {'search': 'Norte Norte'}
 		)
-		self.assertEqual([t['id'] for t in resp.data['resultados']], [self.a2.pk])
+		self.assertEqual([t['id'] for t in resp.data['resultados']], [str(self.a2.uuid)])
 		self.assertEqual(resp.data['total'], 1)
 
 
@@ -1429,7 +1429,7 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 		)
 		self.assertEqual(resp.status_code, status.HTTP_200_OK)
 		self.assertFalse(resp.data['requires_company_selection'])
-		self.assertEqual(resp.data['user']['taller_id'], self.a1.pk)
+		self.assertEqual(resp.data['user']['taller_id'], str(self.a1.uuid))
 		self.assertEqual(resp.data['user']['taller_nombre'], self.a1.nombre)
 		self.assertEqual(resp.data['user']['talleres_count'], 1)
 		self.assertFalse(resp.data['user']['es_admin_talleres'])
@@ -1445,12 +1445,12 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 		self.assertTrue(resp.data['requires_company_selection'])
 		por_empresa = {e['id']: e for e in resp.data['empresas']}
 		self.assertEqual(
-			[t['id'] for t in por_empresa[self.empresa_a.pk]['talleres']],
-			[self.a1.pk],
+			[t['id'] for t in por_empresa[str(self.empresa_a.uuid)]['talleres']],
+			[str(self.a1.uuid)],
 		)
 		self.assertEqual(
-			[t['id'] for t in por_empresa[self.empresa_b.pk]['talleres']],
-			[self.b1.pk],
+			[t['id'] for t in por_empresa[str(self.empresa_b.uuid)]['talleres']],
+			[str(self.b1.uuid)],
 		)
 
 	def test_talleres_count_refleja_el_alcance_del_admin(self):
@@ -1481,7 +1481,7 @@ class LoginTalleresPayloadTests(EscenarioMixin, APITestCase):
 		self.assertEqual(resp.status_code, status.HTTP_200_OK)
 		self.assertTrue(resp.data['requires_company_selection'])
 		ids = {empresa['id'] for empresa in resp.data['empresas']}
-		self.assertEqual(ids, {self.empresa_a.pk, self.empresa_b.pk})
+		self.assertEqual(ids, {str(self.empresa_a.uuid), str(self.empresa_b.uuid)})
 		for empresa in resp.data['empresas']:
 			self.assertIn('nombre_comercial', empresa)
 			self.assertIn('ruc', empresa)
@@ -1538,16 +1538,16 @@ class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
 	def test_canjea_token_por_jwt_de_la_empresa(self):
 		token = self._token_login()
 		resp = self.client.post(
-			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_b.pk}, format='json'
+			self.endpoint, {'selection_token': token, 'empresa_id': str(self.empresa_b.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 200, resp.content)
 		self.assertIn('access', resp.data)
-		self.assertEqual(resp.data['user']['empresa_id'], self.empresa_b.pk)
+		self.assertEqual(resp.data['user']['empresa_id'], str(self.empresa_b.uuid))
 
 	def test_user_id_sin_token_no_emite_jwt(self):
 		root = User.objects.create_superuser(username='root-x', password='secreta')
 		resp = self.client.post(
-			self.endpoint, {'user_id': root.pk, 'empresa_id': self.empresa_a.pk}, format='json'
+			self.endpoint, {'user_id': root.pk, 'empresa_id': str(self.empresa_a.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 401, resp.content)
 		self.assertNotIn('access', resp.data)
@@ -1555,13 +1555,13 @@ class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
 	def test_token_alterado_o_ajeno_se_rechaza(self):
 		token = self._token_login()
 		resp = self.client.post(
-			self.endpoint, {'selection_token': token[:-2] + 'xx', 'empresa_id': self.empresa_a.pk}, format='json'
+			self.endpoint, {'selection_token': token[:-2] + 'xx', 'empresa_id': str(self.empresa_a.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 401)
 		# Token válido pero a una empresa sin relación: 403.
 		otra = Empresa.objects.create(nombre_comercial='Otra', ruc='1790000000999', email_contacto='o@x.com')
 		resp = self.client.post(
-			self.endpoint, {'selection_token': token, 'empresa_id': otra.pk}, format='json'
+			self.endpoint, {'selection_token': token, 'empresa_id': str(otra.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 403)
 
@@ -1572,7 +1572,7 @@ class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
 		token = self._token_login()
 		with mock.patch.object(auth_serializers, 'SELECCION_EMPRESA_MAX_AGE', -1):
 			resp = self.client.post(
-				self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+				self.endpoint, {'selection_token': token, 'empresa_id': str(self.empresa_a.uuid)}, format='json'
 			)
 		self.assertEqual(resp.status_code, 401)
 
@@ -1581,7 +1581,7 @@ class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
 		self.usuario.set_password('nueva-clave')
 		self.usuario.save()
 		resp = self.client.post(
-			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+			self.endpoint, {'selection_token': token, 'empresa_id': str(self.empresa_a.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 401)
 
@@ -1596,7 +1596,7 @@ class SelectCompanyTokenTests(EscenarioMixin, APITestCase):
 		User.objects.create_superuser(username='saas-sel', password='x')
 		token = self._token_login('saas-sel')
 		resp = self.client.post(
-			self.endpoint, {'selection_token': token, 'empresa_id': self.empresa_a.pk}, format='json'
+			self.endpoint, {'selection_token': token, 'empresa_id': str(self.empresa_a.uuid)}, format='json'
 		)
 		self.assertEqual(resp.status_code, 200, resp.content)
 		self.assertEqual(resp.data['user']['rol'], 'ADMIN_SISTEMA')

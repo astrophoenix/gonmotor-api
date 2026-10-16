@@ -62,7 +62,7 @@ class BusquedaGlobalTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_requiere_autenticacion(self):
         anonimo = APIClient()
@@ -152,7 +152,7 @@ class BusquedaGlobalTallerTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _ids_ordenes(self, respuesta):
         grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
@@ -168,7 +168,7 @@ class BusquedaGlobalTallerTest(TestCase):
 
     def test_con_cabecera_solo_del_taller_activo(self):
         respuesta = self.client.get(
-            ENDPOINT, {'q': 'Marta'}, HTTP_X_TALLER_ID=str(self.central.pk)
+            ENDPOINT, {'q': 'Marta'}, HTTP_X_TALLER_ID=str(self.central.uuid)
         )
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(self._ids_ordenes(respuesta), {str(self.orden_central.uuid)})
@@ -181,7 +181,7 @@ class BusquedaGlobalTallerTest(TestCase):
         relacion.talleres.set(talleres)
         client = APIClient()
         client.force_authenticate(user=user)
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         return client
 
     def test_no_admin_sin_cabecera_solo_busca_en_sus_talleres(self):
@@ -204,7 +204,7 @@ class BusquedaGlobalTallerTest(TestCase):
             is_active=False,
         )
         respuesta = self.client.get(
-            ENDPOINT, {'q': 'FIL-C-0002'}, HTTP_X_TALLER_ID=str(self.central.pk)
+            ENDPOINT, {'q': 'FIL-C-0002'}, HTTP_X_TALLER_ID=str(self.central.uuid)
         )
         grupos = {grupo['tipo']: grupo for grupo in respuesta.data['grupos']}
         resultado = grupos['ordenes']['resultados'][0]
@@ -219,6 +219,6 @@ class BusquedaGlobalTallerTest(TestCase):
             is_active=False,
         )
         respuesta = self.client.get(
-            ENDPOINT, {'q': 'FIL-N-0002'}, HTTP_X_TALLER_ID=str(self.central.pk)
+            ENDPOINT, {'q': 'FIL-N-0002'}, HTTP_X_TALLER_ID=str(self.central.uuid)
         )
         self.assertEqual(respuesta.data['total'], 0)

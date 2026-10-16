@@ -2,12 +2,12 @@ from django.db.models import Q
 from rest_framework import viewsets, permissions
 
 from apps.authentication.permissions import EsAdminSaaS
-from apps.core.mixins import SoftDeleteDestroyMixin
+from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from .models import Empresa
 from .serializers import EmpresaSerializer
 
 
-class EmpresaViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class EmpresaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     """CRUD de empresas (tenants) exclusivo del administrador del SaaS.
 
     No depende del tenant activo: el superusuario gestiona todas las empresas.

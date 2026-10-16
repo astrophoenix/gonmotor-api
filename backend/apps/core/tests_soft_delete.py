@@ -175,26 +175,26 @@ class ParaRequestTest(TestCase):
         self.assertFalse(qs.exists())
 
     def test_rol_no_admin_solo_ve_sus_talleres(self):
-        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.empresa.pk))
+        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.empresa.uuid))
 
         self.assertEqual(set(qs.values_list('pk', flat=True)), {self.ot_a.pk})
 
     def test_taller_ajeno_en_cabecera_no_devuelve_nada(self):
         for taller in (self.taller_b, self.taller_otra):
             qs = OrdenTrabajo.objects.para_request(
-                self._request(self.asesor, self.empresa.pk, taller.pk)
+                self._request(self.asesor, self.empresa.uuid, taller.uuid)
             )
             self.assertFalse(qs.exists(), taller)
 
     def test_empresa_ajena_en_cabecera_no_devuelve_nada(self):
-        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.otra.pk))
+        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.otra.uuid))
 
         self.assertFalse(qs.exists())
 
     def test_excluye_eliminados(self):
         self.ot_a.delete()
 
-        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.empresa.pk))
+        qs = OrdenTrabajo.objects.para_request(self._request(self.asesor, self.empresa.uuid))
 
         self.assertFalse(qs.exists())
 
@@ -214,9 +214,9 @@ class ApiSoftDeleteTest(TestCase):
         self._como(self.empresa, self.taller)
 
     def _como(self, empresa, taller=None):
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(empresa.uuid)
         if taller:
-            self.client.defaults['HTTP_X_TALLER_ID'] = str(taller.pk)
+            self.client.defaults['HTTP_X_TALLER_ID'] = str(taller.uuid)
         else:
             self.client.defaults.pop('HTTP_X_TALLER_ID', None)
 
@@ -306,7 +306,7 @@ class ApiSoftDeleteTest(TestCase):
         casos = {
             'cliente': {**base, 'cliente': str(cliente_otra.uuid)},
             'vehiculo': {**base, 'vehiculo': str(vehiculo_otra.uuid)},
-            'sucursal': {**base, 'sucursal': self.taller_otra.pk},
+            'sucursal': {**base, 'sucursal': str(self.taller_otra.uuid)},
         }
         for campo, payload in casos.items():
             resp = self.client.post(OT_URL, payload, format='json')

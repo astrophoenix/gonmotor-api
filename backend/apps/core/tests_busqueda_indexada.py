@@ -40,7 +40,7 @@ class BusquedaIndexadaFilterTests(TestCase):
         user = get_user_model().objects.create_superuser(username='busqueda', password='x')
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _ordenes(self, termino):
         respuesta = self.client.get('/api/ordenes/ordenes-trabajo/', {'search': termino})

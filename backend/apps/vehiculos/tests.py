@@ -83,7 +83,7 @@ class VehiculoViewSetFilterTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
         self.vehiculo = Vehiculo.objects.create(
             placa='GSU5812', marca='Toyota', modelo='Corolla', anio=2018,
@@ -158,7 +158,7 @@ class VehiculoExportTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_exportar_pdf(self):
         resp = self.client.get('/api/vehiculos/exportar-pdf/')
@@ -225,7 +225,7 @@ class VehiculoNoExponeEmpresasTests(TestCase):
 
         client = APIClient()
         client.force_authenticate(User.objects.create_superuser(username='emp', password='x'))
-        client.defaults['HTTP_X_EMPRESA_ID'] = str(propia.pk)
+        client.defaults['HTTP_X_EMPRESA_ID'] = str(propia.uuid)
 
         listado = client.get('/api/vehiculos/').json()['results']
         self.assertEqual([v['placa'] for v in listado], ['EMP0001'])

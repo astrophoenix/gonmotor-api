@@ -222,7 +222,7 @@ class InspeccionListadoFiltrosTests(TestCase):
         self.assertEqual(self._numeros(tipo_inspeccion='MANTENIMIENTO'), ['INS-FIL-0002'])
 
     def test_filtra_por_taller(self):
-        self.assertEqual(self._numeros(sucursal=self.taller.id), ['INS-FIL-0001', 'INS-FIL-0002'])
+        self.assertEqual(self._numeros(sucursal=str(self.taller.uuid)), ['INS-FIL-0001', 'INS-FIL-0002'])
         self.assertEqual(self._listar(sucursal=999)['count'], 0)
 
     def test_filtra_por_rango_de_fechas(self):
@@ -246,7 +246,7 @@ class InspeccionListadoFiltrosTests(TestCase):
 
     def test_combina_filtros(self):
         self.assertEqual(
-            self._numeros(estado='FINALIZADA', tipo_inspeccion='MANTENIMIENTO', sucursal=self.taller.id),
+            self._numeros(estado='FINALIZADA', tipo_inspeccion='MANTENIMIENTO', sucursal=str(self.taller.uuid)),
             ['INS-FIL-0002'],
         )
 
@@ -583,7 +583,7 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'tipo_trabajo': 'MANTENIMIENTO',
             },
             format='json',
-            HTTP_X_EMPRESA_ID=str(self.empresa.id),
+            HTTP_X_EMPRESA_ID=str(self.empresa.uuid),
         )
         self.assertEqual(response.status_code, 201, response.data)
         creada = OrdenTrabajo.objects.get(uuid=response.data['id'])
@@ -639,7 +639,7 @@ class RecepcionRelacionesFlujoApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _actualizar(self, tipo, entidad_id, accion):
         return self.client.post(
@@ -821,7 +821,7 @@ class _BaseRelacionesFlujoApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _post(self, url, tipo, entidad_id, accion='vincular'):
         return self.client.post(
@@ -1221,7 +1221,7 @@ class VinculoCotizacionFlujoTests(TestCase):
 
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
-        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def _recepcion(self, estado='ACEPTADA', numero='REC-0001'):
         from .models import RecepcionVehiculo
@@ -1326,7 +1326,7 @@ class InspeccionReaperturaApiTests(TestCase):
 
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
-        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
+        self.api.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
         self.inspeccion = InspeccionVehiculo.objects.create(
             empresa=self.empresa,
             sucursal=self.taller,
@@ -1461,8 +1461,8 @@ class RecepcionCreadaConTallerActivoTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.uuid)
         self.tipo = TipoTrabajo.MANTENIMIENTO
 
     def _payload(self):
@@ -1545,8 +1545,8 @@ class RecepcionFirmarApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.uuid)
 
     def _url(self, pk=None):
         return f'/api/recepciones/{pk or self.recepcion.uuid}/firmar/'
@@ -1713,8 +1713,8 @@ class OrdenSucursalConservadaTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller_activo.uuid)
 
     def _payload(self, **extra):
         return {
@@ -1801,8 +1801,8 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(usuario)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.pk)
-        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.pk)
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
+        self.client.defaults['HTTP_X_TALLER_ID'] = str(self.taller.uuid)
 
     def _entregar(self, **extra):
         return self.client.patch(

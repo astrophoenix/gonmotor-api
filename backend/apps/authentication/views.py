@@ -47,6 +47,8 @@ from .permisos_repo import (
     tiene_override_empresa,
 )
 from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
+from apps.core.mixins import LookupPublicoMixin
+from apps.core.ids_publicos import id_publico, por_id_publico
 from apps.empresas.models import Empresa, Taller
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
@@ -82,9 +84,11 @@ class SelectCompanyView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        try:
-            empresa_id = int(request.data.get('empresa_id'))
-        except (TypeError, ValueError):
+        # ID público de la empresa elegida (UUID).
+        empresa_id = por_id_publico(Empresa.objects.all(), request.data.get('empresa_id')).values_list(
+            'pk', flat=True
+        ).first()
+        if empresa_id is None:
             return Response(
                 {"detail": "Se requiere un 'empresa_id' válido."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -123,7 +127,7 @@ class SelectCompanyView(APIView):
 
         # Generar tokens inyectando la empresa y rol seleccionados
         refresh = RefreshToken.for_user(user)
-        refresh['empresa_id'] = empresa.id
+        refresh['empresa_id'] = id_publico(empresa)
         refresh['rol'] = rol
 
         return Response({
@@ -147,7 +151,7 @@ class RegistrationView(APIView):
             {
                 'detail': 'La cuenta fue creada correctamente.',
                 'user': {
-                    'id': user.id,
+                    'id': id_publico(user),
                     'email': user.email,
                     'username': user.username,
                 }
@@ -196,7 +200,7 @@ class UserProfileView(APIView):
         avatar = _avatar_absoluta(request, profile.avatar.url if profile and profile.avatar else None)
 
         return Response({
-            'id': user.id,
+            'id': id_publico(user),
             'username': user.username,
             'email': user.email,
             'first_name': user.first_name,
@@ -209,7 +213,7 @@ class UserProfileView(APIView):
             'permisos': _permisos_efectivos(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
-            'empresa_id': empresa_id,
+            'empresa_id': _empresa_publica(empresa_id),
             'taller_nombre': _taller_sesion_nombre(user, empresa_id),
             'es_admin_talleres': es_admin_talleres(contexto),
         }, status=status.HTTP_200_OK)
@@ -231,7 +235,7 @@ class UserProfileView(APIView):
 
         contexto = get_contexto_desde_request(request)
         user_data = {
-            'id': user.id,
+            'id': id_publico(user),
             'username': user.username,
             'email': user.email,
             'first_name': user.first_name,
@@ -244,7 +248,7 @@ class UserProfileView(APIView):
             'permisos': _permisos_efectivos(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
-            'empresa_id': contexto.empresa_id,
+            'empresa_id': _empresa_publica(contexto.empresa_id),
             'taller_nombre': _taller_sesion_nombre(user, contexto.empresa_id),
             'es_admin_talleres': es_admin_talleres(contexto),
         }
@@ -290,7 +294,7 @@ class TalleresDisponiblesView(APIView):
         total = queryset.count()
         resultados = [
             {
-                'id': taller.id,
+                'id': id_publico(taller),
                 'nombre': taller.nombre,
                 'ciudad': taller.ciudad or '',
                 'codigo_sucursal': taller.codigo_sucursal or '',
@@ -390,7 +394,7 @@ class PasswordResetConfirmView(APIView):
         )
 
 
-class EmpleadoViewSet(viewsets.ModelViewSet):
+class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
     """
     ViewSet para CRUD de empleados de la empresa actual.
     Trabaja sobre UsuarioEmpresa y expone datos anidados del User.
@@ -414,11 +418,10 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         # `?empresa=` solo lo usa el administrador del SaaS: para el resto la
         # empresa sale de la sesión, nunca de un parámetro que el cliente elige.
         query_empresa_id = None
-        if self.request.user.is_superuser:
-            try:
-                query_empresa_id = int(self.request.query_params.get('empresa') or 0) or None
-            except (TypeError, ValueError):
-                query_empresa_id = None
+        if self.request.user.is_superuser and self.request.query_params.get('empresa'):
+            query_empresa_id = por_id_publico(
+                Empresa.objects.all(), self.request.query_params.get('empresa')
+            ).values_list('pk', flat=True).first()
 
         final_empresa_id = query_empresa_id or empresa_id
 
@@ -448,7 +451,7 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
         taller = self.request.query_params.get('taller')
         if taller:
-            queryset = queryset.filter(talleres__id=taller).distinct()
+            queryset = queryset.filter(talleres__in=por_id_publico(Taller.objects.all(), taller)).distinct()
 
         return queryset.select_related('user', 'empresa').prefetch_related('talleres', 'user__profile')
 
@@ -503,11 +506,14 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         user.is_active = True
         user.save()
         
-        UserProfile.objects.create(
+        # El perfil ya existe (señal post_save de User): se completan sus datos.
+        UserProfile.objects.update_or_create(
             user=user,
-            telefono=validated_data.get('telefono', ''),
-            identificacion=validated_data.get('identificacion', ''),
-            direccion=validated_data.get('direccion', ''),
+            defaults={
+                'telefono': validated_data.get('telefono', ''),
+                'identificacion': validated_data.get('identificacion', ''),
+                'direccion': validated_data.get('direccion', ''),
+            },
         )
         
         usuario_empresa = UsuarioEmpresa.objects.create(
@@ -601,7 +607,7 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         talleres_qs = Taller.objects.filter(empresa_id=empresa_id, is_active=True).order_by('nombre')
         data = [
             {
-                'id': t.id,
+                'id': id_publico(t),
                 'nombre': t.nombre,
                 'codigo_sucursal': t.codigo_sucursal,
                 'ciudad': t.ciudad,
@@ -656,7 +662,7 @@ class RolesView(APIView):
         }
         payload = [
             {
-                'id': rol.id,
+                'id': id_publico(rol),
                 'codigo': rol.codigo,
                 'nombre': rol.nombre,
                 'descripcion': rol.descripcion,
@@ -696,7 +702,7 @@ class RolesView(APIView):
 
 def _rol_payload(rol, contexto=None):
     return {
-        'id': rol.id,
+        'id': id_publico(rol),
         'codigo': rol.codigo,
         'nombre': rol.nombre,
         'descripcion': rol.descripcion,
@@ -711,6 +717,18 @@ def _rol_payload(rol, contexto=None):
     }
 
 
+def _rol_por_id_publico(valor):
+    """Rol por su ID público (UUID); `Rol.DoesNotExist` si no hay coincidencia."""
+    return por_id_publico(Rol.objects.all(), valor).get()
+
+
+def _empresa_publica(empresa_pk):
+    """ID público de la empresa de la sesión (la API no expone la pk)."""
+    if not empresa_pk:
+        return None
+    return id_publico(Empresa.objects.filter(pk=empresa_pk).only('uuid').first())
+
+
 class RolDetailView(APIView):
     """Detalle, actualización y desactivación de un rol."""
 
@@ -720,7 +738,7 @@ class RolDetailView(APIView):
         """Rol visible para la sesión o None (404 silencioso si no aplica)."""
         contexto = get_contexto_desde_request(request)
         try:
-            rol = Rol.objects.get(pk=pk)
+            rol = _rol_por_id_publico(pk)
         except Rol.DoesNotExist:
             return None, contexto
         visible = (
@@ -748,7 +766,7 @@ class RolDetailView(APIView):
             'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id),
             'usuarios': [
                 {
-                    'id': ue.user_id,
+                    'id': id_publico(ue.user),
                     'nombre': f'{ue.user.first_name} {ue.user.last_name}'.strip() or ue.user.email,
                     'email': ue.user.email,
                     'empresa': getattr(ue.empresa, 'nombre_comercial', ''),
@@ -809,7 +827,7 @@ class RolPermisosView(APIView):
 
     def put(self, request, pk):
         try:
-            rol = Rol.objects.get(pk=pk)
+            rol = _rol_por_id_publico(pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
         modo, contexto = _modo_edicion_rol(request, rol)
@@ -834,7 +852,7 @@ class RolPermisosView(APIView):
     def delete(self, request, pk):
         """Restablece los overrides de la empresa: el rol vuelve a la matriz global."""
         try:
-            rol = Rol.objects.get(pk=pk)
+            rol = _rol_por_id_publico(pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
         if not rol.es_sistema:
@@ -866,7 +884,7 @@ class RolAccionesView(APIView):
 
     def put(self, request, pk):
         try:
-            rol = Rol.objects.get(pk=pk)
+            rol = _rol_por_id_publico(pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
         modo, contexto = _modo_edicion_rol(request, rol)
@@ -891,7 +909,7 @@ class RolAccionesView(APIView):
     def delete(self, request, pk):
         """Restablece los overrides de acciones de la empresa."""
         try:
-            rol = Rol.objects.get(pk=pk)
+            rol = _rol_por_id_publico(pk)
         except Rol.DoesNotExist:
             return Response({'detail': 'Rol no encontrado.'}, status=404)
         if not rol.es_sistema:
@@ -989,7 +1007,7 @@ def _empleado_export_queryset(request, empresa_id):
 
     taller = request.query_params.get('taller')
     if taller:
-        queryset = queryset.filter(talleres__id=taller).distinct()
+        queryset = queryset.filter(talleres__in=por_id_publico(Taller.objects.all(), taller)).distinct()
 
     return queryset
 

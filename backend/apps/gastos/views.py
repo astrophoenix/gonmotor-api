@@ -5,13 +5,13 @@ from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
 )
-from apps.core.mixins import FiltroTallerMixin
+from apps.core.mixins import FiltroTallerMixin, LookupPublicoMixin
 
 from .models import Gasto
 from .serializers import GastoSerializer
 
 
-class GastoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
+class GastoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = GastoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('gastos')]
     queryset = Gasto.objects.select_related('taller', 'creado_por', 'empresa')

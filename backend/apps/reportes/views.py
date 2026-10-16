@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -33,14 +34,13 @@ def _parse_report_filters(request):
     if parsed_desde and parsed_hasta and parsed_desde > parsed_hasta:
         return None, Response({'error': 'fecha_desde no puede ser posterior a fecha_hasta'}, status=400)
 
+    # ID público del taller (UUID); el alcance lo valida `talleres_filtro_de_request`.
     parsed_taller_id = None
     if taller_id:
         try:
-            parsed_taller_id = int(taller_id)
-        except (TypeError, ValueError):
-            return None, Response({'error': 'taller_id debe ser un entero positivo'}, status=400)
-        if parsed_taller_id <= 0:
-            return None, Response({'error': 'taller_id debe ser un entero positivo'}, status=400)
+            parsed_taller_id = str(uuid.UUID(taller_id))
+        except ValueError:
+            return None, Response({'error': 'taller_id no es un identificador válido'}, status=400)
 
     return {
         'fecha_desde': fecha_desde,

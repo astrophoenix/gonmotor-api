@@ -1,9 +1,10 @@
 from django.db import models
 
+from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseEmpresaModel
 
 
-class Proveedor(BaseEmpresaModel):
+class Proveedor(UuidPublicoModel, BaseEmpresaModel):
     TIPO_IDENTIFICACION = [
         ('C', 'Cédula'),
         ('R', 'RUC'),

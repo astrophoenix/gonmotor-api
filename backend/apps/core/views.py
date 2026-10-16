@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework.renderers import JSONRenderer
 
-from apps.core.ids_publicos import id_publico
+from apps.core.ids_publicos import id_publico, por_id_publico
 from apps.authentication.utils import get_empresa_id_desde_request, talleres_filtro_de_request
 from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
@@ -887,7 +887,7 @@ class DashboardV2View(APIView):
                 'granularidad': granularidad,
             },
             'filtros': {
-                'sucursal': taller_efectivo.pk if taller_efectivo else None,
+                'sucursal': id_publico(taller_efectivo),
                 'sucursal_nombre': taller_efectivo.nombre if taller_efectivo else None,
             },
             'kpis': kpis,
@@ -949,15 +949,8 @@ class DashboardV2View(APIView):
         valor = request.query_params.get('sucursal')
         if not valor:
             return None, None
-        try:
-            sucursal_id = int(valor)
-        except (TypeError, ValueError):
-            return Response(
-                {'detail': 'El campo sucursal debe ser un identificador numérico.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            ), None
-        taller = Taller.objects.filter(
-            pk=sucursal_id, empresa_id=empresa_id, is_active=True
+        taller = por_id_publico(
+            Taller.objects.filter(empresa_id=empresa_id, is_active=True), valor
         ).first()
         if taller is None:
             return Response(

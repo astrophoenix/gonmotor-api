@@ -40,35 +40,35 @@ class ProveedorApiTest(APITestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        self.client.defaults['HTTP_X_EMPRESA_ID'] = self.empresa.pk
+        self.client.defaults['HTTP_X_EMPRESA_ID'] = str(self.empresa.uuid)
 
     def test_listado_sin_filtro_muestra_activos_e_inactivos(self):
         resp = self.client.get('/api/proveedores/')
         self.assertEqual(resp.status_code, 200)
         ids = [p['id'] for p in resp.json()['results']]
-        self.assertIn(self.activo.id, ids)
-        self.assertIn(self.inactivo.id, ids)
+        self.assertIn(str(self.activo.uuid), ids)
+        self.assertIn(str(self.inactivo.uuid), ids)
         self.assertNotIn(self.otra_empresa.id, ids)
 
     def test_filtro_estado_inactivo(self):
         resp = self.client.get('/api/proveedores/', {'estado': 'inactivo'})
         ids = [p['id'] for p in resp.json()['results']]
-        self.assertEqual(ids, [self.inactivo.id])
+        self.assertEqual(ids, [str(self.inactivo.uuid)])
 
     def test_filtro_estado_activo(self):
         resp = self.client.get('/api/proveedores/', {'estado': 'activo'})
         ids = [p['id'] for p in resp.json()['results']]
-        self.assertEqual(ids, [self.activo.id])
+        self.assertEqual(ids, [str(self.activo.uuid)])
 
     def test_filtro_tipo_identificacion(self):
         resp = self.client.get('/api/proveedores/', {'tipo_identificacion': 'C'})
         ids = [p['id'] for p in resp.json()['results']]
-        self.assertEqual(ids, [self.inactivo.id])
+        self.assertEqual(ids, [str(self.inactivo.uuid)])
 
     def test_busqueda_por_nombre(self):
         resp = self.client.get('/api/proveedores/', {'search': 'Andes'})
         ids = [p['id'] for p in resp.json()['results']]
-        self.assertEqual(ids, [self.activo.id])
+        self.assertEqual(ids, [str(self.activo.uuid)])
 
     def test_crear_proveedor(self):
         payload = {
@@ -114,21 +114,21 @@ class ProveedorApiTest(APITestCase):
         self.assertIn('inactive_duplicate', resp.json())
         self.assertEqual(
             str(resp.json()['inactive_duplicate']['id']),
-            str(self.inactivo.id),
+            str(self.inactivo.uuid),
         )
 
     def test_reactivar_proveedor(self):
-        resp = self.client.post(f'/api/proveedores/{self.inactivo.id}/reactivar/')
+        resp = self.client.post(f'/api/proveedores/{self.inactivo.uuid}/reactivar/')
         self.assertEqual(resp.status_code, 200)
         self.inactivo.refresh_from_db()
         self.assertTrue(self.inactivo.is_active)
 
     def test_reactivar_proveedor_activo_devuelve_400(self):
-        resp = self.client.post(f'/api/proveedores/{self.activo.id}/reactivar/')
+        resp = self.client.post(f'/api/proveedores/{self.activo.uuid}/reactivar/')
         self.assertEqual(resp.status_code, 400)
 
     def test_eliminar_proveedor_es_borrado_logico(self):
-        resp = self.client.delete(f'/api/proveedores/{self.activo.id}/')
+        resp = self.client.delete(f'/api/proveedores/{self.activo.uuid}/')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['action'], 'soft_delete')
         self.assertFalse(Proveedor.objects.filter(id=self.activo.id).exists())

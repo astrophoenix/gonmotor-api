@@ -11,6 +11,7 @@ from django.db.models import Q
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import force_bytes, force_str
 
+from apps.core.ids_publicos import id_publico
 from apps.empresas.models import Empresa, Taller
 from .models import UserProfile
 from .models import UsuarioEmpresa
@@ -66,6 +67,13 @@ def _taller_sesion_id(user, empresa):
     return taller_de_usuario(user, empresa_id)
 
 
+def _taller_publico(taller_pk):
+    """ID público del taller de sesión (la API no expone la pk)."""
+    if not taller_pk:
+        return None
+    return id_publico(Taller.objects.filter(pk=taller_pk).only('uuid').first())
+
+
 def _talleres_payload(user, empresa):
     """Talleres permitidos para `user` en `empresa`, con marca de predeterminado.
 
@@ -83,11 +91,11 @@ def _talleres_payload(user, empresa):
     predeterminado = None if es_admin_talleres(contexto) else taller_de_usuario(user, empresa_id)
     return [
         {
-            'id': taller.id,
+            'id': id_publico(taller),
             'nombre': taller.nombre,
             'ciudad': taller.ciudad or '',
             'codigo_sucursal': taller.codigo_sucursal or '',
-            'predeterminado': taller.id == predeterminado,
+            'predeterminado': taller.pk == predeterminado,
         }
         for taller in talleres_permitidos(user, contexto)
     ]
@@ -105,7 +113,7 @@ def _user_payload(user, empresa, rol, request=None):
         if request is not None:
             avatar_url = request.build_absolute_uri(avatar_url)
     base = {
-        "id": user.id,
+        "id": id_publico(user),
         "username": user.username,
         "email": user.email,
         "first_name": user.first_name,
@@ -130,10 +138,10 @@ def _user_payload(user, empresa, rol, request=None):
     talleres_count = talleres_permitidos(user, contexto).count() if contexto.hay_contexto else 0
     return {
         **base,
-        "empresa_id": empresa.id,
+        "empresa_id": id_publico(empresa),
         "empresa_nombre": getattr(empresa, 'nombre_comercial', getattr(empresa, 'nombre', '')),
         "taller_nombre": _taller_sesion_nombre(user, empresa),
-        "taller_id": _taller_sesion_id(user, empresa),
+        "taller_id": _taller_publico(_taller_sesion_id(user, empresa)),
         "talleres_count": talleres_count,
         "es_admin_talleres": es_admin_talleres(contexto),
     }
@@ -217,7 +225,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             empresas_qs = Empresa.objects.filter(is_active=True).order_by('nombre_comercial')
             empresas_list = [
                 {
-                    "id": emp.id,
+                    "id": id_publico(emp),
                     "nombre_comercial": emp.nombre_comercial,
                     "ruc": emp.ruc,
                     "rol": 'ADMIN_SISTEMA',
@@ -253,7 +261,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             relacion = relaciones.first()
             empresa = relacion.empresa
             
-            refresh = self.get_token_with_empresa(user, empresa.id, relacion.rol)
+            refresh = self.get_token_with_empresa(user, empresa, relacion.rol)
             
             data = {
                 'access': str(refresh.access_token),
@@ -265,7 +273,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         empresas_list = [
             {
-                "id": rel.empresa.id,
+                "id": id_publico(rel.empresa),
                 "nombre_comercial": getattr(rel.empresa, 'nombre_comercial', getattr(rel.empresa, 'nombre', '')),
                 "ruc": getattr(rel.empresa, 'ruc', ''),
                 "rol": rel.rol,
@@ -281,10 +289,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         }
 
     @classmethod
-    def get_token_with_empresa(cls, user, empresa_id, rol):
+    def get_token_with_empresa(cls, user, empresa, rol):
         token = super().get_token(user)
-        # 🔒 Inyección del ID de empresa y del rol específico en la firma del JWT
-        token['empresa_id'] = empresa_id
+        # 🔒 Empresa (ID público: el payload del JWT es legible) y rol en la firma.
+        token['empresa_id'] = id_publico(empresa)
         token['rol'] = rol
         return token
 
@@ -570,7 +578,7 @@ class EmpleadoWriteSerializer(serializers.Serializer):
     direccion = serializers.CharField(required=False, allow_blank=True, default='', max_length=255)
     rol = serializers.CharField(max_length=50, required=False, allow_null=True)
     talleres = serializers.ListField(
-        child=serializers.IntegerField(),
+        child=serializers.UUIDField(),
         required=False,
         allow_empty=True,
     )
@@ -588,12 +596,13 @@ class EmpleadoWriteSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 'No se pudo determinar la empresa activa.'
             )
-        _, rechazados = validar_talleres_asignables(request.user, contexto, value)
+        permitidos, rechazados = validar_talleres_asignables(request.user, contexto, value)
         if rechazados:
             raise serializers.ValidationError(
-                f'Los talleres {rechazados} no pertenecen a la empresa activa.'
+                'Algunos talleres no pertenecen a la empresa activa o están inactivos.'
             )
-        return value
+        # A partir de aquí se trabaja con pks internas (M2M.set()).
+        return permitidos
 
     def validate_rol(self, value):
         from .permisos_repo import _rol_por_codigo, puede_otorgar_bd
@@ -633,9 +642,9 @@ class EmpleadoWriteSerializer(serializers.Serializer):
         user = instance.user
         profile = getattr(user, 'profile', None)
         return {
-            'id': instance.id,
+            'id': id_publico(instance),
             'user': {
-                'id': user.id,
+                'id': id_publico(user),
                 'username': user.username,
                 'email': user.email,
                 'first_name': user.first_name,
@@ -646,14 +655,14 @@ class EmpleadoWriteSerializer(serializers.Serializer):
                 'direccion': getattr(profile, 'direccion', '') if profile else '',
             },
             'empresa': {
-                'id': instance.empresa_id,
+                'id': id_publico(instance.empresa),
                 'nombre': getattr(instance.empresa, 'nombre_comercial', getattr(instance.empresa, 'nombre', '')) if instance.empresa_id else None,
             } if instance.empresa_id else None,
             'rol': instance.rol,
             'rol_display': nombre_rol(instance.rol),
             'tiene_acceso': instance.tiene_acceso,
             'talleres': [
-                {'id': t.id, 'nombre': t.nombre}
+                {'id': id_publico(t), 'nombre': t.nombre}
                 for t in instance.talleres.all()
             ],
             'is_active': instance.is_active,
@@ -672,7 +681,7 @@ class EmpleadoReadSerializer(ModelSerializerPublico):
     def get_user(self, obj):
         profile = getattr(obj.user, 'profile', None)
         return {
-            'id': obj.user.id,
+            'id': id_publico(obj.user),
             'username': obj.user.username,
             'email': obj.user.email,
             'first_name': obj.user.first_name,
@@ -688,6 +697,6 @@ class EmpleadoReadSerializer(ModelSerializerPublico):
 
     def get_talleres(self, obj):
         return [
-            {'id': t.id, 'nombre': t.nombre}
+            {'id': id_publico(t), 'nombre': t.nombre}
             for t in obj.talleres.all()
         ]
