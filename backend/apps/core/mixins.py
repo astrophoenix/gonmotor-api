@@ -55,6 +55,110 @@ class FiltroTallerMixin:
         return talleres_filtro_de_request(self.request, explicito=explicito)
 
 
+class FiltroDocumentoPadreMixin:
+    """Líneas y fotos de un documento del taller: mismo alcance que el documento.
+
+    Para ViewSets de modelos que cuelgan de un documento (cotización,
+    inspección, orden). El registro hijo es visible solo si su documento lo es
+    para la petición (`para_request`: empresa activa + talleres permitidos), así
+    un usuario de un taller no lee ni modifica las líneas de otro taller.
+
+    Atributos:
+        documento_padre: nombre de la FK al documento (p. ej. ``'orden_trabajo'``).
+        documento_query_param: query param opcional para listar las de un documento.
+        relaciones_extra: FKs adicionales para ``select_related``.
+    """
+
+    documento_padre = None
+    documento_query_param = None
+    relaciones_extra = ()
+
+    def get_queryset(self):
+        modelo = self.get_serializer_class().Meta.model
+        documentos = modelo._meta.get_field(self.documento_padre).related_model
+        queryset = modelo.objects.filter(**{
+            f'{self.documento_padre}__in': documentos.objects.para_request(self.request).values('pk'),
+        }).select_related(self.documento_padre, *self.relaciones_extra)
+        documento_id = self.request.query_params.get(self.documento_query_param or '')
+        if documento_id:
+            queryset = queryset.filter(**{f'{self.documento_padre}_id': documento_id})
+        return queryset
+
+
+class ValidarDocumentoPadreMixin:
+    """El documento de una línea o foto enviada en el payload debe estar al
+    alcance de la sesión (empresa activa + talleres permitidos).
+
+    Mixin de serializer (va antes de ``serializers.ModelSerializer``). Se
+    engancha en ``to_internal_value``, como ``ValidarTenantMixin``, para que un
+    ``validate()`` propio del serializer no lo anule.
+
+    Atributo: ``campo_documento`` (FK al documento, p. ej. ``'cotizacion'``).
+    """
+
+    campo_documento = None
+    mensaje_documento = 'El documento no existe o no está disponible para tu empresa o taller.'
+
+    def to_internal_value(self, data):
+        attrs = super().to_internal_value(data)
+        documento = attrs.get(self.campo_documento)
+        if documento is None:
+            return attrs
+        instancia = self.instance if not isinstance(self.instance, (list, tuple)) else None
+        if instancia is not None and getattr(instancia, f'{self.campo_documento}_id', None) == documento.pk:
+            return attrs
+        request = self.context.get('request')
+        visible = request is not None and (
+            type(documento).objects.para_request(request).filter(pk=documento.pk).exists()
+        )
+        if not visible:
+            raise drf_serializers.ValidationError({self.campo_documento: self.mensaje_documento})
+        return attrs
+
+
+class ValidarUsuariosEmpresaMixin:
+    """Los usuarios asignados en el payload (asesor, responsable, técnico…)
+    deben pertenecer a la empresa activa.
+
+    Sin esta validación cualquier id de usuario del sistema se aceptaba, y la
+    respuesta devolvía su nombre o email: un tenant podía enumerar los usuarios
+    de los demás. Vale el propio usuario de la petición (p. ej. un superusuario
+    sin relación con la empresa que se asigna a sí mismo).
+
+    Mixin de serializer (antes de ``serializers.ModelSerializer``), enganchado
+    en ``to_internal_value``. Atributo: ``campos_usuario``.
+    """
+
+    campos_usuario = ()
+
+    def to_internal_value(self, data):
+        attrs = super().to_internal_value(data)
+        request = self.context.get('request')
+        if request is None:
+            return attrs
+
+        from apps.authentication.models import UsuarioEmpresa
+        from apps.authentication.utils import get_empresa_id_desde_request
+
+        instancia = self.instance if not isinstance(self.instance, (list, tuple)) else None
+        empresa_id = get_empresa_id_desde_request(request)
+        errores = {}
+        for campo in self.campos_usuario:
+            usuario = attrs.get(campo)
+            if usuario is None or usuario.pk == getattr(request.user, 'pk', None):
+                continue
+            if instancia is not None and getattr(instancia, f'{campo}_id', None) == usuario.pk:
+                continue
+            pertenece = empresa_id and UsuarioEmpresa.objects.filter(
+                user=usuario, empresa_id=empresa_id, is_active=True
+            ).exists()
+            if not pertenece:
+                errores[campo] = 'El usuario no pertenece a tu empresa.'
+        if errores:
+            raise drf_serializers.ValidationError(errores)
+        return attrs
+
+
 class SoftDeleteDestroyMixin:
     """
     Estandariza la eliminación de registros: el borrado es SIEMPRE lógico.

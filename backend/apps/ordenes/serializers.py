@@ -9,7 +9,7 @@ from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
 )
-from apps.core.mixins import ValidarTenantMixin
+from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarTenantMixin, ValidarUsuariosEmpresaMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 from apps.inventario.models import Repuesto, Servicio
 
@@ -48,7 +48,10 @@ def url_imagen_absoluta(request, url):
     return url
 
 
-class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
+class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'orden_trabajo'
+    campos_usuario = ('mecanico_asignado',)
+
     class Meta:
         model = DetalleServicioOrdenTrabajo
         fields = [
@@ -75,6 +78,13 @@ class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
         ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
         return ot.empresa_id if ot else None
 
+    def validate(self, attrs):
+        empresa_id = self._get_empresa_id(attrs)
+        servicio = attrs.get('servicio')
+        if servicio is not None and servicio.empresa_id != empresa_id:
+            raise serializers.ValidationError({'servicio': 'El servicio no pertenece a tu empresa.'})
+        return attrs
+
     def create(self, validated_data):
         if 'costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None:
             empresa_id = self._get_empresa_id(validated_data)
@@ -98,7 +108,9 @@ class DetalleServicioOrdenTrabajoSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
+class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'orden_trabajo'
+
     class Meta:
         model = DetalleRepuestoOrdenTrabajo
         fields = [
@@ -141,7 +153,9 @@ class DetalleRepuestoOrdenTrabajoSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
+class DetalleServicioInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'inspeccion'
+
     servicio_codigo = serializers.SerializerMethodField()
     servicio_nombre = serializers.SerializerMethodField()
     prioridad_display = serializers.CharField(read_only=True, source='get_prioridad_display')
@@ -189,7 +203,9 @@ class DetalleServicioInspeccionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class DetalleRepuestoInspeccionSerializer(serializers.ModelSerializer):
+class DetalleRepuestoInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'inspeccion'
+
     repuesto_codigo = serializers.SerializerMethodField()
     repuesto_nombre = serializers.SerializerMethodField()
     prioridad_display = serializers.CharField(read_only=True, source='get_prioridad_display')
@@ -237,7 +253,9 @@ class DetalleRepuestoInspeccionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class FotoInspeccionSerializer(serializers.ModelSerializer):
+class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'inspeccion'
+
     class Meta:
         model = FotoInspeccion
         fields = ['id', 'inspeccion', 'imagen', 'descripcion', 'created_at']
@@ -274,7 +292,9 @@ class FotoInspeccionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class FotoOrdenTrabajoSerializer(serializers.ModelSerializer):
+class FotoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'orden_trabajo'
+
     class Meta:
         model = FotoOrdenTrabajo
         fields = ['id', 'orden_trabajo', 'imagen', 'descripcion', 'created_at']
@@ -311,7 +331,8 @@ class FotoOrdenTrabajoSerializer(serializers.ModelSerializer):
         return rep
 
 
-class InspeccionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
+class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+    campos_usuario = ('responsable',)
     servicios_detectados = DetalleServicioInspeccionSerializer(many=True, read_only=True)
     repuestos_sugeridos = DetalleRepuestoInspeccionSerializer(many=True, read_only=True)
     fotos = FotoInspeccionSerializer(many=True, read_only=True)
@@ -674,7 +695,8 @@ class FotoRecepcionSerializer(serializers.ModelSerializer):
         return rep
 
 
-class RecepcionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
+class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+    campos_usuario = ('recibido_por',)
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
     fotos = FotoRecepcionSerializer(many=True, read_only=True)
     cotizaciones_generadas = serializers.SerializerMethodField()
@@ -882,7 +904,8 @@ class RecepcionVehiculoSerializer(ValidarTenantMixin, serializers.ModelSerialize
         return instance
 
 
-class OrdenTrabajoSerializer(ValidarTenantMixin, serializers.ModelSerializer):
+class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, serializers.ModelSerializer):
+    campos_usuario = ('asesor', 'mecanico_principal')
     servicios = DetalleServicioOrdenTrabajoSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoOrdenTrabajoSerializer(many=True, read_only=True)
     recepciones = RecepcionVehiculoSerializer(many=True, read_only=True)

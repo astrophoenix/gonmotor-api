@@ -303,6 +303,7 @@ class CotizacionAsesorApiTests(APITestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
 
+        from apps.authentication.models import UsuarioEmpresa
         from apps.clientes.models import Cliente
         from apps.empresas.models import Empresa, Taller
         from apps.vehiculos.models import Vehiculo
@@ -322,6 +323,8 @@ class CotizacionAsesorApiTests(APITestCase):
         self.taller = Taller.objects.create(
             empresa=self.empresa, nombre='Taller Central', direccion='Av. Central 200', prefijo_cotizacion='COT-'
         )
+        # El asesor asignado debe pertenecer a la empresa (ValidarUsuariosEmpresaMixin).
+        UsuarioEmpresa.objects.create(user=self.asesor, empresa=self.empresa, rol='ASESOR')
         self.cliente = Cliente.objects.create(
             empresa=self.empresa, nombre='Carlos Ruiz', identificacion='0987654321'
         )

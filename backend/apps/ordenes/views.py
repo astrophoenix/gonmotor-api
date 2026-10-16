@@ -8,7 +8,7 @@ from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
-from apps.core.mixins import FiltroTallerMixin, SoftDeleteDestroyMixin
+from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -620,24 +620,16 @@ class InspeccionVehiculoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'inspeccion')
 
-class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
+class DetalleServicioInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['-created_at']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleServicioInspeccion.objects.none()
-        queryset = DetalleServicioInspeccion.objects.filter(
-            inspeccion__empresa_id=empresa_id
-        ).select_related('inspeccion', 'servicio')
-        inspeccion_id = self.request.query_params.get('inspeccion')
-        if inspeccion_id:
-            queryset = queryset.filter(inspeccion_id=inspeccion_id)
-        return queryset
+    documento_padre = 'inspeccion'
+    documento_query_param = 'inspeccion'
+    relaciones_extra = ('servicio',)
 
     def perform_create(self, serializer):
         _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
@@ -652,24 +644,16 @@ class DetalleServicioInspeccionViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
 
-class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
+class DetalleRepuestoInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['-created_at']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleRepuestoInspeccion.objects.none()
-        queryset = DetalleRepuestoInspeccion.objects.filter(
-            inspeccion__empresa_id=empresa_id
-        ).select_related('inspeccion', 'repuesto')
-        inspeccion_id = self.request.query_params.get('inspeccion')
-        if inspeccion_id:
-            queryset = queryset.filter(inspeccion_id=inspeccion_id)
-        return queryset
+    documento_padre = 'inspeccion'
+    documento_query_param = 'inspeccion'
+    relaciones_extra = ('repuesto',)
 
     def perform_create(self, serializer):
         _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
@@ -684,23 +668,14 @@ class DetalleRepuestoInspeccionViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
 
-class FotoInspeccionViewSet(viewsets.ModelViewSet):
+class FotoInspeccionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
     ordering = ['created_at', 'id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return FotoInspeccion.objects.none()
-        queryset = FotoInspeccion.objects.filter(
-            inspeccion__empresa_id=empresa_id
-        ).select_related('inspeccion')
-        inspeccion_id = self.request.query_params.get('inspeccion')
-        if inspeccion_id:
-            queryset = queryset.filter(inspeccion_id=inspeccion_id)
-        return queryset
+    documento_padre = 'inspeccion'
+    documento_query_param = 'inspeccion'
 
     def perform_create(self, serializer):
         _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
@@ -729,23 +704,14 @@ def _check_orden_editable(orden):
         raise
 
 
-class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
+class FotoOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering = ['created_at', 'id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return FotoOrdenTrabajo.objects.none()
-        queryset = FotoOrdenTrabajo.objects.filter(
-            orden_trabajo__empresa_id=empresa_id
-        ).select_related('orden_trabajo')
-        orden_id = self.request.query_params.get('orden')
-        if orden_id:
-            queryset = queryset.filter(orden_trabajo_id=orden_id)
-        return queryset
+    documento_padre = 'orden_trabajo'
+    documento_query_param = 'orden'
 
     def perform_create(self, serializer):
         try:
@@ -773,24 +739,15 @@ class FotoOrdenTrabajoViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
 
-class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
+class DetalleServicioOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleServicioOrdenTrabajo.objects.none()
-        queryset = DetalleServicioOrdenTrabajo.objects.filter(
-            orden_trabajo__empresa_id=empresa_id
-        ).select_related('orden_trabajo')
-        orden_id = self.request.query_params.get('orden')
-        if orden_id:
-            queryset = queryset.filter(orden_trabajo_id=orden_id)
-        return queryset
+    documento_padre = 'orden_trabajo'
+    documento_query_param = 'orden'
 
     def perform_create(self, serializer):
         orden = serializer.validated_data.get('orden_trabajo')
@@ -823,24 +780,15 @@ class DetalleServicioOrdenTrabajoViewSet(viewsets.ModelViewSet):
         orden.calcular_totales()
 
 
-class DetalleRepuestoOrdenTrabajoViewSet(viewsets.ModelViewSet):
+class DetalleRepuestoOrdenTrabajoViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleRepuestoOrdenTrabajo.objects.none()
-        queryset = DetalleRepuestoOrdenTrabajo.objects.filter(
-            orden_trabajo__empresa_id=empresa_id
-        ).select_related('orden_trabajo')
-        orden_id = self.request.query_params.get('orden')
-        if orden_id:
-            queryset = queryset.filter(orden_trabajo_id=orden_id)
-        return queryset
+    documento_padre = 'orden_trabajo'
+    documento_query_param = 'orden'
 
     def perform_create(self, serializer):
         orden = serializer.validated_data.get('orden_trabajo')

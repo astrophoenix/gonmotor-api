@@ -55,6 +55,8 @@ RECURSOS = (
     'inventario',       # repuestos y servicios
     'facturacion',      # cobros y caja
     'reportes',
+    'gastos',           # egresos del taller
+    'notificaciones',   # recordatorios de WhatsApp
 )
 
 # Roles que ven TODOS los talleres activos de la empresa: el M2M
@@ -88,6 +90,7 @@ MATRIZ_ROLES = {
         'ordenes': _TODOS,
         'inventario': SOLO_VER,
         'reportes': SOLO_VER,
+        'notificaciones': _TODOS,
     },
     # Técnico: ejecuta el trabajo y consume repuestos. No cotiza ni cobra.
     'MECANICO': {
@@ -174,6 +177,8 @@ NOMBRES_RECURSOS = {
     'inventario': 'Inventario',
     'facturacion': 'Facturación',
     'reportes': 'Reportes',
+    'gastos': 'Gastos',
+    'notificaciones': 'Notificaciones',
 }
 
 

@@ -3,6 +3,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from apps.authentication.utils import get_empresa_id_desde_request
+from apps.core.mixins import ValidarUsuariosEmpresaMixin
 
 from .ics import token_enlace_ics
 from .models import Cita
@@ -22,7 +23,9 @@ ESTADOS_FINALES = [
 ]
 
 
-class CitaSerializer(serializers.ModelSerializer):
+class CitaSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
+    campos_usuario = ('asesor',)
+
     estado_display = serializers.CharField(read_only=True, source='get_estado_display')
     motivo_display = serializers.CharField(read_only=True, source='get_motivo_display')
     enlace_ics = serializers.SerializerMethodField()

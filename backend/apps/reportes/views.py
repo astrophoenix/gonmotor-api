@@ -9,6 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.authentication.permissions import TienePermiso
 from apps.authentication.utils import get_empresa_id_desde_request, talleres_filtro_de_request
 from apps.gastos.models import Gasto
 from apps.ordenes.models import (
@@ -210,7 +211,7 @@ def _respuesta(request, empresa_id, filters, **extra):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
 def rentabilidad_taller(request):
     empresa_id = get_empresa_id_desde_request(request)
     if not empresa_id:
@@ -226,7 +227,7 @@ def rentabilidad_taller(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
 def rentabilidad_empresa(request):
     empresa_id = get_empresa_id_desde_request(request)
     if not empresa_id:

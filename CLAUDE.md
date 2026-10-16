@@ -50,7 +50,7 @@ gonmotor-api/
 | Archivo | Rol |
 |---|---|
 | `apps/core/models.py` | `BaseModel` (auditoría: `is_active`, `created_at`, `updated_at`; catálogos y acceso) y `SoftDeleteModel` → `BaseEmpresaModel` → `BaseTallerModel` (borrado lógico con `deleted_at`, managers `objects`/`all_objects`, QuerySet `para_request`/`de_empresa`/`de_talleres`). |
-| `apps/core/mixins.py` | `FiltroTallerMixin` (recorte por taller activo), `SoftDeleteDestroyMixin` (DELETE siempre lógico) y `ValidarTenantMixin` (serializers: FKs cliente/vehículo/taller del payload deben ser del tenant). |
+| `apps/core/mixins.py` | `FiltroTallerMixin` (recorte por taller activo), `SoftDeleteDestroyMixin` (DELETE siempre lógico) y `ValidarTenantMixin` (serializers: FKs cliente/vehículo/taller del payload deben ser del tenant), `FiltroDocumentoPadreMixin` + `ValidarDocumentoPadreMixin` (líneas y fotos de un documento: mismo alcance empresa/taller que el documento, al leer y al escribir). `ValidarUsuariosEmpresaMixin` (`campos_usuario`: asesor/responsable/técnico asignados deben pertenecer a la empresa activa). Regresión de aislamiento: `apps/core/tests_auditoria_tenant.py`. |
 | `apps/authentication/utils.py` | **Fuente única del contexto tenant**: empresa, rol y taller de la petición. |
 | `apps/authentication/permissions.py` | `TienePermiso(recurso, accion)`, `TieneRecurso(recurso)`, `EsAdminDeEmpresa`. |
 | `apps/authentication/permisos_repo.py` | `MATRIZ_ROLES` (semilla), jerarquía de roles, lectura/escritura de permisos en BD. |
@@ -127,11 +127,11 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Mensajes de error y respuestas en español.
 
 ### Roles y permisos
-- Un permiso es `(recurso, acción)` con acciones `ver` / `modificar`. Los recursos están en `permisos_repo.RECURSOS` (empresa, talleres, usuarios, empleados, clientes, vehiculos, proveedores, citas, recepciones, inspecciones, cotizaciones, ordenes, inventario, facturacion, reportes).
+- Un permiso es `(recurso, acción)` con acciones `ver` / `modificar`. Los recursos están en `permisos_repo.RECURSOS` (empresa, talleres, usuarios, empleados, clientes, vehiculos, proveedores, citas, recepciones, inspecciones, cotizaciones, ordenes, inventario, facturacion, reportes, gastos, notificaciones). Configurar WhatsApp (preferencias, envío masivo, prueba) exige además `empresa`/`modificar`.
 - Roles de sistema: `ADMIN_SISTEMA`, `ADMIN_EMPRESA`, `ADMIN_TALLER`, `ASESOR`, `MECANICO`, `CAJERO`. Los roles personalizados son posibles y pueden tener el flag `ver_todos_talleres`.
 - En tiempo de ejecución la fuente de verdad son las tablas `Rol`/`Recurso`/`Permiso`/`PermisoEspecial`, con overrides por empresa (`PermisoEmpresa`, `PermisoEspecialEmpresa`). `MATRIZ_ROLES` es la semilla: se siembra con una señal `post_migrate` (`authentication/signals.py`) o con `python manage.py seed_permisos`.
 - Jerarquía `NIVELES_ROLES`: un usuario no puede otorgar un rol igual o superior al suyo (`puede_otorgar`).
-- Si añades un recurso nuevo: agrégalo a `RECURSOS`, a `MATRIZ_ROLES`, a `NOMBRES_RECURSOS` y protege el viewset con `TieneRecurso`.
+- Si añades un recurso nuevo: agrégalo a `RECURSOS`, a `MATRIZ_ROLES`, a `NOMBRES_RECURSOS` y protege el viewset con `TieneRecurso`. La semilla solo corre sobre una base vacía: para las bases existentes añade una migración de datos idempotente (ver `authentication/migrations/0013_recursos_gastos_notificaciones.py`).
 
 ### Borrado lógico híbrido (`is_active` + `deleted_at`)
 | Estado | `is_active` | `deleted_at` | Visible | Bloquea duplicados |

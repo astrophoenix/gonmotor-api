@@ -1,5 +1,6 @@
-from rest_framework import viewsets
+from rest_framework import permissions, viewsets
 
+from apps.authentication.permissions import TieneRecurso
 from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
@@ -12,6 +13,7 @@ from .serializers import GastoSerializer
 
 class GastoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = GastoSerializer
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('gastos')]
     queryset = Gasto.objects.select_related('taller', 'creado_por', 'empresa')
     # Taller activo (`X-Taller-ID`); el filtro manual `?taller_id=` manda si viene.
     taller_filter_field = 'taller'
@@ -24,8 +26,9 @@ class GastoViewSet(FiltroTallerMixin, viewsets.ModelViewSet):
             return queryset.none()
 
         empresa_id = get_empresa_id_desde_request(request)
-        if empresa_id:
-            queryset = queryset.filter(empresa_id=empresa_id)
+        if not empresa_id:
+            return queryset.none()
+        queryset = queryset.filter(empresa_id=empresa_id)
 
         fecha_desde = self.request.query_params.get('fecha_desde')
         if fecha_desde:

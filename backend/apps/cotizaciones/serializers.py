@@ -8,6 +8,7 @@ from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
 )
+from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarUsuariosEmpresaMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
@@ -56,7 +57,9 @@ def url_imagen_absoluta(request, url):
     return url
 
 
-class DetalleServicioCotizacionSerializer(serializers.ModelSerializer):
+class DetalleServicioCotizacionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'cotizacion'
+
     class Meta:
         model = DetalleServicioCotizacion
         fields = [
@@ -75,7 +78,9 @@ class DetalleServicioCotizacionSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
-class DetalleRepuestoCotizacionSerializer(serializers.ModelSerializer):
+class DetalleRepuestoCotizacionSerializer(ValidarDocumentoPadreMixin, serializers.ModelSerializer):
+    campo_documento = 'cotizacion'
+
     class Meta:
         model = DetalleRepuestoCotizacion
         fields = [
@@ -94,7 +99,9 @@ class DetalleRepuestoCotizacionSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'subtotal', 'monto_iva']
 
 
-class CotizacionSerializer(serializers.ModelSerializer):
+class CotizacionSerializer(ValidarUsuariosEmpresaMixin, serializers.ModelSerializer):
+    campos_usuario = ('asesor', 'aceptada_por')
+
     servicios = DetalleServicioCotizacionSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoCotizacionSerializer(many=True, read_only=True)
     observaciones = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -176,12 +183,22 @@ class CotizacionSerializer(serializers.ModelSerializer):
         empresa_id = get_empresa_id_desde_request(request) if request else None
         instance = self.instance
 
+        # Cliente y vehículo se validan también al editar: una cotización no se
+        # puede reasignar a datos de otra empresa.
+        cliente = attrs.get('cliente')
+        vehiculo = attrs.get('vehiculo')
+        if cliente is not None and getattr(instance, 'cliente_id', None) != cliente.pk:
+            if cliente.empresa_id != empresa_id:
+                raise serializers.ValidationError({'cliente': 'El cliente no pertenece a tu empresa.'})
+        if vehiculo is not None and getattr(instance, 'vehiculo_id', None) != vehiculo.pk:
+            if not empresa_id or not vehiculo.vinculo_de(empresa_id):
+                raise serializers.ValidationError({'vehiculo': 'El vehículo no pertenece a tu empresa.'})
+
         if instance is None:
             if empresa_id:
                 inspeccion = attrs.get('inspeccion_origen')
                 recepcion = attrs.get('recepcion_origen')
-                cliente = attrs.get('cliente')
-                vehiculo = attrs.get('vehiculo')
+                orden = attrs.get('orden_trabajo_origen')
                 if inspeccion is not None and inspeccion.empresa_id != empresa_id:
                     raise serializers.ValidationError(
                         {'inspeccion_origen': 'La inspección no pertenece a tu empresa.'}
@@ -190,10 +207,10 @@ class CotizacionSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {'recepcion_origen': 'La recepción no pertenece a tu empresa.'}
                     )
-                if cliente is not None and cliente.empresa_id != empresa_id:
-                    raise serializers.ValidationError({'cliente': 'El cliente no pertenece a tu empresa.'})
-                if vehiculo is not None and not vehiculo.vinculo_de(empresa_id):
-                    raise serializers.ValidationError({'vehiculo': 'El vehículo no pertenece a tu empresa.'})
+                if orden is not None and orden.empresa_id != empresa_id:
+                    raise serializers.ValidationError(
+                        {'orden_trabajo_origen': 'La orden de trabajo no pertenece a tu empresa.'}
+                    )
             self._derivar_cliente_vehiculo(attrs)
             if not attrs.get('cliente'):
                 raise serializers.ValidationError({'cliente': 'Debes indicar el cliente de la cotización.'})

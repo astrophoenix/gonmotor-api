@@ -411,11 +411,12 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
-        query_empresa_id = self.request.query_params.get('empresa')
-
-        if query_empresa_id:
+        # `?empresa=` solo lo usa el administrador del SaaS: para el resto la
+        # empresa sale de la sesión, nunca de un parámetro que el cliente elige.
+        query_empresa_id = None
+        if self.request.user.is_superuser:
             try:
-                query_empresa_id = int(query_empresa_id)
+                query_empresa_id = int(self.request.query_params.get('empresa') or 0) or None
             except (TypeError, ValueError):
                 query_empresa_id = None
 

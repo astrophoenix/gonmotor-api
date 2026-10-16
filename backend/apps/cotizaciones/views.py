@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
-from apps.core.mixins import FiltroTallerMixin
+from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
     PdfExportService,
@@ -273,24 +273,15 @@ def _check_cotizacion_editable(cotizacion):
         )
 
 
-class DetalleServicioCotizacionViewSet(viewsets.ModelViewSet):
+class DetalleServicioCotizacionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioCotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['created_at', 'id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleServicioCotizacion.objects.none()
-        queryset = DetalleServicioCotizacion.objects.filter(
-            cotizacion__empresa_id=empresa_id
-        ).select_related('cotizacion')
-        cotizacion_id = self.request.query_params.get('cotizacion')
-        if cotizacion_id:
-            queryset = queryset.filter(cotizacion_id=cotizacion_id)
-        return queryset
+    documento_padre = 'cotizacion'
+    documento_query_param = 'cotizacion'
 
     def perform_create(self, serializer):
         _check_cotizacion_editable(serializer.validated_data.get('cotizacion'))
@@ -305,24 +296,15 @@ class DetalleServicioCotizacionViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
 
-class DetalleRepuestoCotizacionViewSet(viewsets.ModelViewSet):
+class DetalleRepuestoCotizacionViewSet(FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoCotizacionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'id']
     ordering = ['created_at', 'id']
 
-    def get_queryset(self):
-        empresa_id = get_empresa_id_desde_request(self.request)
-        if not empresa_id:
-            return DetalleRepuestoCotizacion.objects.none()
-        queryset = DetalleRepuestoCotizacion.objects.filter(
-            cotizacion__empresa_id=empresa_id
-        ).select_related('cotizacion')
-        cotizacion_id = self.request.query_params.get('cotizacion')
-        if cotizacion_id:
-            queryset = queryset.filter(cotizacion_id=cotizacion_id)
-        return queryset
+    documento_padre = 'cotizacion'
+    documento_query_param = 'cotizacion'
 
     def perform_create(self, serializer):
         _check_cotizacion_editable(serializer.validated_data.get('cotizacion'))

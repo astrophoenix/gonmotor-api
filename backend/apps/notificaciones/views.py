@@ -2,6 +2,7 @@ from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.authentication.permissions import EsAdminDeEmpresa, TienePermiso, TieneRecurso
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.empresas.models import Empresa
 from apps.vehiculos.models import Vehiculo
@@ -33,7 +34,7 @@ class EstadoNotificacionesView(APIView):
     prueba (mock), Twilio Sandbox o Meta y si quedó bien configurado.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TienePermiso('notificaciones', 'ver')]
 
     def get(self, request):
         empresa_id = get_empresa_id_desde_request(request)
@@ -57,7 +58,7 @@ class EnviarRecordatorioVehiculoView(APIView):
     WhatsApp de su propietario actual.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TienePermiso('notificaciones', 'modificar')]
 
     def post(self, request):
         serializer = EnviarRecordatorioSerializer(data=request.data)
@@ -127,7 +128,12 @@ class EnviarPruebaWhatsAppView(APIView):
     validar la configuración del proveedor).
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    # Configuración del proveedor: además exige administrar la empresa.
+    permission_classes = [
+        permissions.IsAuthenticated,
+        TienePermiso('notificaciones', 'modificar'),
+        TienePermiso('empresa', 'modificar'),
+    ]
 
     def post(self, request):
         serializer = EnviarPruebaSerializer(data=request.data)
@@ -158,7 +164,12 @@ class EjecutarRecordatoriosView(APIView):
     empresa actual. Con `preview: true` solo lista los candidatos sin enviar.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    # Envío masivo: además exige administrar la empresa.
+    permission_classes = [
+        permissions.IsAuthenticated,
+        TienePermiso('notificaciones', 'modificar'),
+        TienePermiso('empresa', 'modificar'),
+    ]
 
     def post(self, request):
         serializer = EjecutarRecordatoriosSerializer(data=request.data)
@@ -190,7 +201,7 @@ class RecordatoriosListView(APIView):
     `?origen=` y `?limit=` (máx. 50 por defecto).
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, TienePermiso('notificaciones', 'ver')]
 
     def get(self, request):
         empresa_id = get_empresa_id_desde_request(request)
@@ -223,7 +234,8 @@ class RecordatoriosListView(APIView):
 class PreferenciasView(APIView):
     """GET/PATCH /api/notificaciones/preferencias/ — Configuración de alertas."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    # Leer: permiso de notificaciones. Cambiar: además administrar la empresa.
+    permission_classes = [permissions.IsAuthenticated, TieneRecurso('notificaciones'), EsAdminDeEmpresa]
 
     def _preferencia(self, request):
         empresa_id = get_empresa_id_desde_request(request)
