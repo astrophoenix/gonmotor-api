@@ -10,7 +10,8 @@ from rest_framework.response import Response
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.ids_publicos import referencia_corta
-from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
+from apps.core.serializers import FirmaField
+from apps.core.mixins import CreacionIdempotenteMixin, FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -444,12 +445,17 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        firma = request.data.get('firma_cliente')
-        if not firma or not str(firma).startswith('data:image'):
+        # Archivo PNG (app, multipart) o data URL del canvas (web).
+        valor = request.data.get('firma_cliente')
+        if not valor:
             return Response(
                 {'firma_cliente': 'La firma del cliente es obligatoria.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            firma = FirmaField().to_internal_value(valor)
+        except serializers.ValidationError as error:
+            return Response({'firma_cliente': error.detail}, status=status.HTTP_400_BAD_REQUEST)
 
         recepcion.firma_cliente = firma
         recepcion.aceptacion_condiciones = True
@@ -710,7 +716,7 @@ class DetalleRepuestoInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
         super().perform_destroy(instance)
 
 
-class FotoInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class FotoInspeccionViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoInspeccionSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     filter_backends = [filters.OrderingFilter]
@@ -746,7 +752,7 @@ def _check_orden_editable(orden):
         raise
 
 
-class FotoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class FotoOrdenTrabajoViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = FotoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]

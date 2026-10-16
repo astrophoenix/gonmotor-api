@@ -15,11 +15,15 @@ from apps.authentication.utils import get_empresa_id_desde_request, talleres_fil
 from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
 from apps.core.services.text_improver import TextImproverError, mejorar_texto
+from apps.core.utils.images import limites_publicos
 from apps.cotizaciones.models import Cotizacion
 from apps.empresas.models import Taller
-from apps.inventario.models import Repuesto, Servicio
+from apps.inventario.models import Repuesto, RepuestoImagen, Servicio
 from apps.ordenes.models import (
     DetalleServicioInspeccion,
+    FotoInspeccion,
+    FotoOrdenTrabajo,
+    FotoRecepcion,
     InspeccionVehiculo,
     OrdenTrabajo,
     RecepcionVehiculo,
@@ -55,6 +59,27 @@ class HealthCheckView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
+
+class LimitesImagenesView(APIView):
+    """Perfiles y límites de imagen para comprimir antes de subir (web y app).
+
+    Los valores salen de `settings` (configurables por `.env`), así la app no
+    los lleva escritos y se ajustan sin publicar una versión nueva.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [JSONRenderer]
+
+    def get(self, request):
+        return Response({
+            **limites_publicos(),
+            'max_fotos': {
+                'recepcion': len(FotoRecepcion.VISTAS_OBLIGATORIAS),
+                'inspeccion': FotoInspeccion.MAX_FOTOS,
+                'orden_trabajo': FotoOrdenTrabajo.MAX_FOTOS,
+                'repuesto': RepuestoImagen.MAX_IMAGENES,
+            },
+        })
 
 
 class MejorarTextoView(APIView):

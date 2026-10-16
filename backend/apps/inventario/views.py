@@ -11,7 +11,7 @@ from reportlab.platypus import Paragraph
 
 from apps.core.ids_publicos import filtrar_por_id_publico, id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
+from apps.core.mixins import CreacionIdempotenteMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -86,7 +86,7 @@ class RepuestoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
         return Response({'results': data})
 
 
-class RepuestoImagenViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
+class RepuestoImagenViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, viewsets.ModelViewSet):
     serializer_class = RepuestoImagenSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inventario')]
 

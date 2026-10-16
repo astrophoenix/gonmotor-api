@@ -5,7 +5,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from .models import InspeccionVehiculo
-from apps.core.testing import fijar_empresa
+from apps.core.testing import fijar_empresa, firma_data_url, imagen_de_prueba
 
 
 class OrdenesCrudTests(SimpleTestCase):
@@ -1551,7 +1551,7 @@ class RecepcionFirmarApiTests(TestCase):
 
     def test_firma_no_aceptada_pasa_directo_a_aceptada(self):
         respuesta = self.client.post(
-            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+            self._url(), {'firma_cliente': firma_data_url()}, format='json'
         )
 
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
@@ -1559,9 +1559,29 @@ class RecepcionFirmarApiTests(TestCase):
         self.assertEqual(self.recepcion.estado, 'ACEPTADA')
         self.assertTrue(self.recepcion.aceptacion_condiciones)
         self.assertIsNotNone(self.recepcion.fecha_firma_cliente)
-        self.assertEqual(self.recepcion.firma_cliente, 'data:image/png;base64,AAAA')
+        # La firma se guarda como archivo PNG y la API devuelve su URL.
+        self.assertTrue(self.recepcion.firma_cliente.name.endswith('.png'))
+        self.assertTrue(respuesta.data['firma_cliente'].startswith('http'))
         self.assertFalse(self.recepcion.motivo_no_recepcion)
         self.assertEqual(respuesta.data['estado'], 'ACEPTADA')
+
+    def test_firmar_acepta_un_archivo_png(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        archivo = SimpleUploadedFile('firma.png', imagen_de_prueba(400, 100), content_type='image/png')
+        respuesta = self.client.post(self._url(), {'firma_cliente': archivo}, format='multipart')
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.recepcion.refresh_from_db()
+        self.assertTrue(self.recepcion.firma_cliente.name.endswith('.png'))
+
+    def test_rechaza_una_firma_que_no_es_imagen(self):
+        respuesta = self.client.post(
+            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+        )
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
+        self.assertIn('firma_cliente', respuesta.data)
 
     def test_no_permite_firmar_sin_firma(self):
         respuesta = self.client.post(self._url(), {}, format='json')
@@ -1576,7 +1596,7 @@ class RecepcionFirmarApiTests(TestCase):
         self.recepcion.save(update_fields=['estado', 'aceptacion_condiciones'])
 
         respuesta = self.client.post(
-            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+            self._url(), {'firma_cliente': firma_data_url()}, format='json'
         )
 
         self.assertEqual(respuesta.status_code, 400, respuesta.content)
@@ -1586,7 +1606,7 @@ class RecepcionFirmarApiTests(TestCase):
         from .models import InspeccionVehiculo
 
         firma = self.client.post(
-            self._url(), {'firma_cliente': 'data:image/png;base64,AAAA'}, format='json'
+            self._url(), {'firma_cliente': firma_data_url()}, format='json'
         )
         self.assertEqual(firma.status_code, 200, firma.content)
         type(self.recepcion).objects.filter(pk=self.recepcion.pk).update(motivo_ingreso='Mantenimiento de 10.000 km')

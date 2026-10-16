@@ -223,8 +223,9 @@ class Vehiculo(UuidPublicoModel, SoftDeleteModel):
         upload_to='vehiculos/%Y/%m/%d',
         blank=True,
         null=True,
-        help_text="JPG, PNG o WebP. Máximo 2MB. Se optimiza automáticamente."
+        help_text="Se guarda en WebP, máximo 1600 px por lado."
     )
+    miniatura = models.ImageField(upload_to='vehiculos/miniaturas/', blank=True, null=True)
     # Las empresas que trabajan con el vehículo. El vínculo tiene estado
     # propio (VehiculoEmpresa): es lo que cada empresa suspende o elimina.
     # Para escribir usar `vincular_empresa` / `desvincular_empresa`.

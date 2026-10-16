@@ -4,7 +4,7 @@ from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 
 from .models import Repuesto, RepuestoImagen, Servicio
-from apps.core.serializers import ModelSerializerPublico
+from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico
 
 
 def url_imagen_absoluta(request, url):
@@ -17,21 +17,12 @@ def url_imagen_absoluta(request, url):
 
 
 class RepuestoImagenSerializer(ModelSerializerPublico):
-    MAX_BYTES = 5 * 1024 * 1024
+    imagen = ImagenProcesadaField(perfil='repuesto', campo_miniatura='miniatura')
 
     class Meta:
         model = RepuestoImagen
         fields = ['id', 'repuesto', 'imagen', 'es_principal', 'created_at']
         read_only_fields = ['id', 'created_at']
-
-    def validate_imagen(self, imagen):
-        if imagen is None:
-            raise serializers.ValidationError('La imagen es obligatoria.')
-        if imagen.size > self.MAX_BYTES:
-            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
-        if imagen.content_type not in RepuestoImagen.TIPOS_PERMITIDOS:
-            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
-        return imagen
 
     def validate(self, attrs):
         repuesto = attrs.get('repuesto') or getattr(self.instance, 'repuesto', None)

@@ -1,9 +1,10 @@
 from django.urls import path
-from .views import HealthCheckView, MejorarTextoView, DashboardView, DashboardV2View
+from .views import HealthCheckView, LimitesImagenesView, MejorarTextoView, DashboardView, DashboardV2View
 from .busqueda import BusquedaGlobalView
 
 urlpatterns = [
     path('health/', HealthCheckView.as_view(), name='health-check'),
+    path('limites-imagenes/', LimitesImagenesView.as_view(), name='limites-imagenes'),
     path('mejorar-texto/', MejorarTextoView.as_view(), name='mejorar-texto'),
     path('buscar/', BusquedaGlobalView.as_view(), name='busqueda-global'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),

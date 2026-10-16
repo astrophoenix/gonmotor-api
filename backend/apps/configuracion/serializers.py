@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.empresas.models import Empresa, Taller
 from apps.empresas.services import TIPOS_VALIDOS, ultimo_numero_emitido
-from apps.core.serializers import ModelSerializerPublico
+from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico
 
 _ETIQUETAS_SECUENCIA = {
     'recepcion': 'Recepción',
@@ -251,6 +251,8 @@ class TallerConfigSerializer(ModelSerializerPublico):
 
 class EmpresaConfigSerializer(ModelSerializerPublico):
     """Serializa los datos fiscales y corporativos de la empresa del taller."""
+
+    logo = ImagenProcesadaField(perfil='logo', required=False, allow_null=True)
 
     class Meta:
         model = Empresa

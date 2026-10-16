@@ -56,14 +56,15 @@ gonmotor-api/
 | `apps/authentication/permisos_repo.py` | `MATRIZ_ROLES` (semilla), jerarquía de roles, lectura/escritura de permisos en BD. |
 | `apps/ordenes/relaciones_flujo.py` | Grafo de vínculos entre cita, recepción, inspección, cotización y orden (FKs existentes), compartido por los cuatro editables. |
 | `apps/core/services/text_improver.py` | Mejora de texto vía LLM compatible con OpenAI (por defecto Groq). Descubre el modelo disponible si `AI_TEXT_MODEL` está vacío. |
-| `apps/core/utils/{pdf_export,excel_export,images}.py` | Exportación PDF (reportlab), Excel (openpyxl) y procesado de imágenes (Pillow). |
+| `apps/core/utils/{pdf_export,excel_export}.py` | Exportación PDF (reportlab) y Excel (openpyxl). |
+| `apps/core/utils/images.py` + `apps/core/archivos.py` | Servicio único de imágenes (ver «Imágenes») y borrado de archivos reemplazados/borrados. |
 | `apps/notificaciones/services/` | `whatsapp.py` (proveedores mock/Twilio/Meta), `recordatorios.py`, `mensajes.py`, `telefonos.py`. |
 
 ### Rutas (`config/urls.py`)
 
 | Prefijo | App |
 |---|---|
-| `api/core/` | health, `mejorar-texto/`, `buscar/`, `dashboard/`, `dashboard-v2/` |
+| `api/core/` | health, `limites-imagenes/`, `mejorar-texto/`, `buscar/`, `dashboard/`, `dashboard-v2/` |
 | `api/auth/` | `login/`, `select-company/`, `register/`, `refresh/`, `me/`, `talleres/`, password reset/change, `roles/`, `recursos/`, `usuarios/`, `empleados/` |
 | `api/token/refresh/` | refresco JWT (alias) |
 | `api/clientes/`, `api/proveedores/`, `api/vehiculos/`, `api/empresas/`, `api/citas/`, `api/gastos/` | CRUD de cada app |
@@ -83,15 +84,16 @@ La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export
 - **djangorestframework-simplejwt** (access 60 min, refresh 30 días, rotación + blacklist)
 - **PostgreSQL** vía `psycopg2-binary` (también en local; el `db.sqlite3` del directorio es residual)
 - `python-decouple` (config por `.env`), `django-cors-headers`, `django-countries`
-- `reportlab` (PDF), `openpyxl` (Excel), `Pillow` (imágenes), `requests` (LLM, WhatsApp)
-- Producción: `gunicorn`, `whitenoise` (estáticos comprimidos), SMTP para correo
+- `reportlab` (PDF), `openpyxl` (Excel), `Pillow` + `pillow-heif` (imágenes, HEIC), `requests` (LLM, WhatsApp)
+- Producción: `gunicorn` (2 workers × 2 hilos: una subida lenta o un PDF no bloquea al resto), `whitenoise` (estáticos comprimidos), SMTP para correo
 - Idioma `es-ec`, zona horaria `America/Guayaquil`
 
 ## 4. Reglas de arquitectura y flujos
 
 ### Configuración y entorno
 - Activar el venv antes de cualquier comando: `cd backend && source venv/bin/activate`.
-- `backend/.env` es obligatorio: `SECRET_KEY` y `DB_NAME/USER/PASSWORD/HOST/PORT` no tienen valor por defecto. Opcionales: `DB_SSLMODE`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, `WHATSAPP_*`, `AI_TEXT_*`, `THROTTLE_*`, `EXPORT_MAX_FILAS_PDF` (default 5000) y `EXPORT_MAX_FILAS_EXCEL` (default 20000): máximo de filas de los exportes de listados; por encima responden 400 pidiendo filtrar (`apps/core/utils/export_limits.py`).
+- `backend/.env` es obligatorio: `SECRET_KEY` y `DB_NAME/USER/PASSWORD/HOST/PORT` no tienen valor por defecto. Opcionales: `DB_SSLMODE`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, `WHATSAPP_*`, `AI_TEXT_*`, `THROTTLE_*`, `EXPORT_MAX_FILAS_PDF` (default 5000) y `EXPORT_MAX_FILAS_EXCEL` (default 20000): máximo de filas de los exportes de listados; por encima responden 400 pidiendo filtrar (`apps/core/utils/export_limits.py`). `IMAGEN_MAX_MB` (default 15) e `IMAGEN_MAX_MEGAPIXELES` (default 60): límites de las imágenes subidas.
+- Los tests escriben los archivos subidos en un `MEDIA_ROOT` temporal (`base.py` lo cambia al correr `manage.py test`).
 - `local.py`: `DEBUG=True`, `ALLOWED_HOSTS=['*']`, email por consola. `production.py`: HTTPS/HSTS, whitenoise, SMTP, logging a consola.
 - CORS permite la cabecera `x-taller-id` (la empresa viaja en el JWT, no hay cabecera de empresa); si se añade una cabecera nueva desde el frontend hay que agregarla a `CORS_ALLOW_HEADERS`.
 
@@ -137,6 +139,14 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Listados con documentos anidados (recepción dentro de la orden, inspección dentro de la recepción): usar `_recepciones_con_relaciones()` / `_inspecciones_con_relaciones()` de `apps/ordenes/views.py`. Nada de `.filter()`/`.order_by()`/`.last()` sobre relaciones precargadas en `to_representation` (ignoran la precarga): resolver en memoria sobre `.all()`. Rol de un usuario en la empresa: `rol_de_usuario_en_empresa(user_id, empresa_id, request)` (2 consultas por petición). Regresión: `apps/ordenes/tests_consultas_listados.py` exige que las consultas no crezcan con las filas.
 - Respuestas armadas a mano: `id_publico(obj)`, nunca `obj.id`/`obj.pk` (tampoco dentro de textos o URLs: `referencia_corta(obj)` para un `#ABC123` legible). Entradas fuera de serializers (query params, cuerpos de acciones): `por_id_publico(qs, valor)`. Tests: enviar `str(obj.uuid)`.
 
+### Imágenes
+- **Toda imagen subida pasa por `procesar_imagen(archivo, perfil)`** (`apps/core/utils/images.py`): verifica que sea una imagen real (JPG, PNG, WebP, HEIC), aplica los límites de bytes y megapíxeles, endereza según el EXIF, borra los metadatos (GPS, modelo del teléfono), limita el lado mayor y guarda con nombre UUID. Perfiles: `evidencia` 1920 px (fotos de recepción, inspección y orden), `vehiculo` 1600, `repuesto` 1200, `avatar` 512, `logo` 1024 sin pérdida (conserva transparencia), `firma` PNG ≤ 300 KB. Fotos en WebP calidad 80; las de evidencia, vehículo y repuesto generan `miniatura` (400/300 px).
+- En serializers: `ImagenProcesadaField(perfil=..., campo_miniatura='miniatura')` (`apps/core/serializers.py`); `ModelSerializerPublico` guarda la miniatura y, al leer, la sustituye por la imagen si falta. Firma: `FirmaField` (archivo o data URL del canvas). Fuera de serializers, llamar a `procesar_imagen` directamente (fotos de recepción, acción `vehiculos/{id}/imagen/`). Nunca asignar un archivo subido a un `ImageField` sin pasar por el servicio.
+- `GET /api/core/limites-imagenes/` publica perfiles y límites para que la web y la app compriman antes de subir; los límites viven en `settings`.
+- Altas de fotos reintentables: `CreacionIdempotenteMixin` (`apps/core/mixins.py`) acepta un `id` (UUID) generado por el cliente; si ya existe responde 200 con la misma foto.
+- Archivos: `apps/core/archivos.py` borra el archivo reemplazado o el de una fila borrada físicamente **al confirmar la transacción** (señales para todo modelo con `FileField`). El borrado lógico conserva los archivos. Restos antiguos: `python manage.py limpiar_media_huerfana [--aplicar]`.
+- Tests: `apps/core/tests_imagenes.py`; helpers `imagen_de_prueba()` y `firma_data_url()` en `apps/core/testing.py`.
+
 ### Roles y permisos
 - Un permiso es `(recurso, acción)` con acciones `ver` / `modificar`. Los recursos están en `permisos_repo.RECURSOS` (empresa, talleres, usuarios, empleados, clientes, vehiculos, proveedores, citas, recepciones, inspecciones, cotizaciones, ordenes, inventario, facturacion, reportes, gastos, notificaciones). Configurar WhatsApp (preferencias, envío masivo, prueba) exige además `empresa`/`modificar`.
 - Roles de sistema: `ADMIN_SISTEMA`, `ADMIN_EMPRESA`, `ADMIN_TALLER`, `ASESOR`, `MECANICO`, `CAJERO`. Los roles personalizados son posibles y pueden tener el flag `ver_todos_talleres`.
@@ -161,7 +171,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 
 ### Flujo del taller
 - Recepción, inspección, cotización y orden están enlazadas por FKs; `relaciones_flujo.py` centraliza su lectura y edición. Cualquier cambio de vínculos entre estas entidades va ahí, no en cada serializer.
-- `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`).
+- `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
 
 ### Integraciones externas
@@ -177,6 +187,7 @@ python manage.py runserver 0.0.0.0:8000
 python manage.py makemigrations && python manage.py migrate
 python manage.py test apps.<app>          # por app; requiere Postgres levantado
 python manage.py seed_permisos | seed_clientes | seed_vehiculos
+python manage.py limpiar_media_huerfana   # vista previa; --aplicar para borrar
 ```
 
 Hay tests en casi todas las apps (los más extensos: `authentication`, `ordenes`, `citas`, `cotizaciones`, `notificaciones`, `core`). Al tocar el contexto tenant o los permisos, corre `apps.authentication` y `apps.core`.

@@ -25,7 +25,8 @@ from .models import (
     OrdenTrabajo,
     RecepcionVehiculo,
 )
-from apps.core.serializers import ModelSerializerPublico
+from apps.core.serializers import FirmaField, ImagenProcesadaField, ModelSerializerPublico
+from apps.core.utils.images import ImagenInvalida, procesar_imagen
 
 
 def conservar_sucursal(validated_data):
@@ -256,18 +257,12 @@ class DetalleRepuestoInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSeria
 
 class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'inspeccion'
+    imagen = ImagenProcesadaField(perfil='evidencia', campo_miniatura='miniatura')
 
     class Meta:
         model = FotoInspeccion
         fields = ['id', 'inspeccion', 'imagen', 'descripcion', 'created_at']
         read_only_fields = ['id', 'created_at']
-
-    def validate_imagen(self, imagen):
-        if imagen.size > 5 * 1024 * 1024:
-            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
-        if imagen.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
-            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
-        return imagen
 
     def validate(self, attrs):
         inspeccion = attrs.get('inspeccion')
@@ -295,18 +290,12 @@ class FotoInspeccionSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublic
 
 class FotoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
+    imagen = ImagenProcesadaField(perfil='evidencia', campo_miniatura='miniatura')
 
     class Meta:
         model = FotoOrdenTrabajo
         fields = ['id', 'orden_trabajo', 'imagen', 'descripcion', 'created_at']
         read_only_fields = ['id', 'created_at']
-
-    def validate_imagen(self, imagen):
-        if imagen.size > 5 * 1024 * 1024:
-            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
-        if imagen.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
-            raise serializers.ValidationError('Formato no permitido. Solo JPG, PNG o WebP.')
-        return imagen
 
     def validate(self, attrs):
         orden_trabajo = attrs.get('orden_trabajo')
@@ -679,6 +668,7 @@ class InspeccionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMix
 
 class FotoRecepcionSerializer(ModelSerializerPublico):
     tipo_vista_display = serializers.CharField(source='get_tipo_vista_display', read_only=True)
+    imagen = ImagenProcesadaField(perfil='evidencia', campo_miniatura='miniatura', read_only=True)
 
     class Meta:
         model = FotoRecepcion
@@ -696,6 +686,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
     campos_usuario = ('recibido_por',)
     inspecciones = InspeccionVehiculoSerializer(many=True, read_only=True)
     fotos = FotoRecepcionSerializer(many=True, read_only=True)
+    firma_cliente = FirmaField(required=False, allow_null=True)
     cotizaciones_generadas = serializers.SerializerMethodField()
     orden_trabajo_numero = serializers.SerializerMethodField()
 
@@ -788,11 +779,17 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
         """
         archivos = request.FILES or {}
         fotos = {}
+        errores = {}
         for tipo in FotoRecepcion.VISTAS_OBLIGATORIAS:
             campo = f'foto_{tipo}'
             archivo = archivos.get(campo)
             if archivo:
-                fotos[tipo] = archivo
+                try:
+                    fotos[tipo] = procesar_imagen(archivo, 'evidencia')
+                except ImagenInvalida as error:
+                    errores[campo] = [str(error)]
+        if errores:
+            raise serializers.ValidationError(errores)
         return fotos
 
     def _validar_bloque_fotos(self, fotos, vistas_adicionales=None):
@@ -826,13 +823,14 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
 
     def _guardar_fotos(self, instance, fotos):
         """Crea el bloque de fotos de la recepción (reemplaza cada vista existente)."""
-        for tipo, archivo in fotos.items():
+        for tipo, procesada in fotos.items():
             valor = tipo.value if isinstance(tipo, FotoRecepcion.TipoVista) else tipo
             instance.fotos.filter(tipo_vista=valor).delete()
             FotoRecepcion.objects.create(
                 recepcion=instance,
                 tipo_vista=valor,
-                imagen=archivo,
+                imagen=procesada.archivo,
+                miniatura=procesada.miniatura,
             )
 
     def validate(self, attrs):
@@ -1030,6 +1028,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                         'tipo_vista': f.tipo_vista,
                         'tipo_vista_display': f.get_tipo_vista_display(),
                         'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
+                        'miniatura': url_imagen_absoluta(request, (f.miniatura or f.imagen).url if f.imagen else None),
                         'descripcion': f.descripcion,
                     }
                     for f in r.fotos.all()
@@ -1053,6 +1052,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                     {
                         'id': id_publico(f),
                         'imagen': url_imagen_absoluta(request, f.imagen.url if f.imagen else None),
+                        'miniatura': url_imagen_absoluta(request, (f.miniatura or f.imagen).url if f.imagen else None),
                         'descripcion': f.descripcion,
                         'created_at': f.created_at,
                     }

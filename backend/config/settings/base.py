@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 import django_countries
@@ -176,6 +178,9 @@ STATICFILES_DIRS = [
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+if sys.argv[1:2] == ['test']:
+    # Los tests suben imágenes: a un directorio temporal, no al media/ real.
+    MEDIA_ROOT = Path(tempfile.mkdtemp(prefix='gonmotor-test-media-'))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -296,3 +301,9 @@ WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')
 # responde 400 pidiendo filtrar: generar todo en memoria agota la instancia.
 EXPORT_MAX_FILAS_PDF = config('EXPORT_MAX_FILAS_PDF', cast=int, default=5000)
 EXPORT_MAX_FILAS_EXCEL = config('EXPORT_MAX_FILAS_EXCEL', cast=int, default=20000)
+
+# Imágenes subidas (apps/core/utils/images.py). Son la red de seguridad para
+# fotos que llegan sin comprimir (HEIC, celulares de 50 MP): lo normal es que
+# el cliente las reduzca antes a ~400 KB. Se publican en /api/core/limites-imagenes/.
+IMAGEN_MAX_MB = config('IMAGEN_MAX_MB', cast=int, default=15)
+IMAGEN_MAX_MEGAPIXELES = config('IMAGEN_MAX_MEGAPIXELES', cast=int, default=60)

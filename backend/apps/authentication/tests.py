@@ -197,22 +197,24 @@ class AvatarUploadTests(APITestCase):
 		self.assertEqual(resp.status_code, 400)
 		self.assertIn('avatar', resp.data)
 
-	def test_rechaza_imagen_muy_grande(self):
-		from django.core.files.uploadedfile import SimpleUploadedFile
-		from io import BytesIO
-		from PIL import Image
-		import os
+	def test_reduce_una_foto_grande_a_512_px(self):
+		from apps.core.testing import imagen_de_prueba
+		from apps.authentication.models import UserProfile
 
-		buf = BytesIO()
-		ruido = Image.frombytes('RGB', (2200, 2200), os.urandom(2200 * 2200 * 3))
-		ruido.save(buf, format='PNG')
-		foto = SimpleUploadedFile('grande.png', buf.getvalue(), content_type='image/png')
-		self.assertGreater(foto.size, 1024 * 1024)
-		resp = self.client.patch(
-			'/api/auth/me/',
-			{'avatar': foto},
-			format='multipart',
-		)
+		foto = self.SimpleUploadedFile('grande.jpg', imagen_de_prueba(2200, 1600, 'JPEG'), content_type='image/jpeg')
+		resp = self.client.patch('/api/auth/me/', {'avatar': foto}, format='multipart')
+
+		self.assertEqual(resp.status_code, 200, resp.content)
+		avatar = UserProfile.objects.get(user=self.user).avatar
+		self.assertTrue(avatar.name.endswith('.webp'))
+		self.assertEqual((avatar.width, avatar.height), (512, 372))
+
+	def test_rechaza_imagen_muy_grande(self):
+		from django.test import override_settings
+
+		foto = self.SimpleUploadedFile('grande.png', b'x' * (1024 * 1024 + 1), content_type='image/png')
+		with override_settings(IMAGEN_MAX_MB=1):
+			resp = self.client.patch('/api/auth/me/', {'avatar': foto}, format='multipart')
 		self.assertEqual(resp.status_code, 400)
 		self.assertIn('avatar', resp.data)
 

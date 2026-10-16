@@ -18,6 +18,7 @@ from rest_framework import serializers
 from rest_framework.relations import PKOnlyObject
 
 from .ids_publicos import campo_uuid, es_usuario, id_publico, tiene_id_publico, uuid_por_pk
+from .utils.images import ImagenInvalida, archivo_desde_data_url, procesar_imagen
 
 
 class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
@@ -91,6 +92,55 @@ class RelacionPublicaField(serializers.PrimaryKeyRelatedField):
         return id_publico(value, request)
 
 
+class ImagenProcesadaField(serializers.ImageField):
+    """Imagen que pasa por ``procesar_imagen`` con el perfil indicado.
+
+    Con ``campo_miniatura``, ``ModelSerializerPublico`` guarda también la
+    miniatura en ese campo del modelo y, al leer, la reemplaza por la imagen
+    completa si falta (fotos subidas antes de existir las miniaturas).
+    """
+
+    def __init__(self, perfil, campo_miniatura=None, **kwargs):
+        self.perfil = perfil
+        self.campo_miniatura = campo_miniatura
+        super().__init__(**kwargs)
+
+    def _archivo(self, data):
+        # Sin la validación de Pillow de DRF: `procesar_imagen` hace la suya
+        # (incluye HEIC, píxeles máximos y archivos falsos).
+        return serializers.FileField.to_internal_value(self, data)
+
+    def to_internal_value(self, data):
+        try:
+            procesada = procesar_imagen(self._archivo(data), self.perfil)
+        except ImagenInvalida as error:
+            raise serializers.ValidationError(str(error))
+        procesada.archivo.miniatura = procesada.miniatura
+        return procesada.archivo
+
+
+class FirmaField(ImagenProcesadaField):
+    """Firma del canvas: acepta un archivo (app, multipart) o un data URL
+    ``data:image/png;base64,...`` (web). Se guarda como PNG."""
+
+    def __init__(self, **kwargs):
+        super().__init__(perfil='firma', **kwargs)
+
+    def _archivo(self, data):
+        try:
+            archivo = archivo_desde_data_url(data, nombre='firma.png')
+        except ImagenInvalida as error:
+            raise serializers.ValidationError(str(error))
+        return archivo if archivo is not None else super()._archivo(data)
+
+
+def _campos_imagen_con_miniatura(serializer):
+    return [
+        campo for campo in serializer.fields.values()
+        if isinstance(campo, ImagenProcesadaField) and campo.campo_miniatura
+    ]
+
+
 class ModelSerializerPublico(serializers.ModelSerializer):
     serializer_related_field = RelacionPublicaField
 
@@ -99,4 +149,21 @@ class ModelSerializerPublico(serializers.ModelSerializer):
         if 'id' in fields and tiene_id_publico(self.Meta.model):
             fuente = 'profile.uuid' if es_usuario(self.Meta.model) else 'uuid'
             fields['id'] = serializers.UUIDField(source=fuente, read_only=True)
+        for campo in list(fields.values()):
+            if isinstance(campo, ImagenProcesadaField) and campo.campo_miniatura:
+                fields[campo.campo_miniatura] = serializers.ImageField(read_only=True)
         return fields
+
+    def to_internal_value(self, data):
+        validados = super().to_internal_value(data)
+        for campo in _campos_imagen_con_miniatura(self):
+            if campo.source in validados:
+                validados[campo.campo_miniatura] = getattr(validados[campo.source], 'miniatura', None)
+        return validados
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        for campo in _campos_imagen_con_miniatura(self):
+            if campo.campo_miniatura in rep and not rep[campo.campo_miniatura]:
+                rep[campo.campo_miniatura] = rep.get(campo.field_name)
+        return rep

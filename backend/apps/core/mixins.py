@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 from django.http import Http404
 
@@ -67,6 +68,39 @@ class LookupPublicoMixin:
 
     lookup_field = 'uuid'
     lookup_url_kwarg = 'pk'
+
+
+class CreacionIdempotenteMixin:
+    """Alta reintentable: el cliente puede enviar el ``id`` (UUID) del registro.
+
+    Si ese registro ya existe (reintento tras un corte de red, doble clic) se
+    responde 200 con el existente en vez de crear un duplicado. Pensado para
+    la subida de fotos desde el celular, donde la app reintenta los envíos.
+    Un ``id`` que ya usa otro registro fuera del alcance de la petición se
+    rechaza sin revelar nada de él.
+    """
+
+    def create(self, request, *args, **kwargs):
+        valor = request.data.get('id')
+        if not valor:
+            return super().create(request, *args, **kwargs)
+        try:
+            id_cliente = uuid.UUID(str(valor))
+        except ValueError:
+            raise drf_serializers.ValidationError({'id': 'Identificador no válido.'})
+        existente = self.get_queryset().filter(uuid=id_cliente).first()
+        if existente is not None:
+            return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        if self.get_queryset().model._base_manager.filter(uuid=id_cliente).exists():
+            raise drf_serializers.ValidationError({'id': 'El identificador ya está en uso.'})
+        self._uuid_cliente = id_cliente
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        uuid_cliente = getattr(self, '_uuid_cliente', None)
+        if uuid_cliente is None:
+            return super().perform_create(serializer)
+        serializer.save(uuid=uuid_cliente)
 
 
 class FiltroDocumentoPadreMixin:

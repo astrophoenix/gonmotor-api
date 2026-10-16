@@ -3,9 +3,8 @@ from django.utils import timezone
 from .models import Vehiculo, VehiculoPropietario, vincular_empresa
 from apps.core.ids_publicos import id_publico
 from apps.clientes.models import Cliente
-from apps.core.utils.images import validate_image_extension
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.core.serializers import ModelSerializerPublico, RelacionPublicaField
+from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico, RelacionPublicaField
 
 
 class EstadoPorEmpresaMixin:
@@ -66,7 +65,7 @@ class ClienteNullablePkField(RelacionPublicaField):
 
 
 class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
-    imagen = serializers.ImageField(required=False, allow_null=True)
+    imagen = ImagenProcesadaField(perfil='vehiculo', campo_miniatura='miniatura', required=False, allow_null=True)
     cliente_id = ClienteNullablePkField(
         queryset=Cliente.objects.none(),
         write_only=True,
@@ -104,19 +103,6 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
             # (recurso de reactivación/inactive_duplicate).
             'placa': {'validators': []},
         }
-
-    def validate_imagen(self, value):
-        if not value:
-            return value
-
-        validate_image_extension(value)
-
-        if value.size > 2 * 1024 * 1024:
-            raise serializers.ValidationError(
-                'La imagen no debe superar los 2MB.'
-            )
-
-        return value
 
     def _aplicar_propietario(self, instance, cliente):
         if cliente is not None:
@@ -193,6 +179,9 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
     def update(self, instance, validated_data):
         cliente = validated_data.pop('cliente_id', None)
         imagen = validated_data.pop('imagen', None)
+        if imagen is None:
+            # `imagen: null` aquí significa "sin cambios": la miniatura tampoco cambia.
+            validated_data.pop('miniatura', None)
         is_active = validated_data.pop('is_active', None)
         has_cliente = 'cliente_id' in self.get_initial()
 
@@ -217,6 +206,7 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
 
 
 class VehiculoSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
+    imagen = ImagenProcesadaField(perfil='vehiculo', campo_miniatura='miniatura', required=False, allow_null=True)
     cliente_nombre = serializers.SerializerMethodField()
     cliente_id = serializers.SerializerMethodField()
 
@@ -234,19 +224,6 @@ class VehiculoSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
     def get_cliente_id(self, obj):
         propietario = self._propietario_actual(obj)
         return id_publico(propietario.cliente) if propietario else None
-
-    def validate_imagen(self, value):
-        if not value:
-            return value
-
-        validate_image_extension(value)
-
-        if value.size > 2 * 1024 * 1024:
-            raise serializers.ValidationError(
-                'La imagen no debe superar los 2MB.'
-            )
-
-        return value
 
     class Meta:
         model = Vehiculo

@@ -159,7 +159,6 @@ class RepuestoImagen(UuidPublicoModel, models.Model):
     """
 
     MAX_IMAGENES = 3
-    TIPOS_PERMITIDOS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 
     repuesto = models.ForeignKey(
         Repuesto,
@@ -170,8 +169,9 @@ class RepuestoImagen(UuidPublicoModel, models.Model):
     imagen = models.ImageField(
         upload_to='repuestos/imagenes/',
         verbose_name='Imagen',
-        help_text='JPG, PNG o WebP. Máximo 5MB.',
+        help_text='Se guarda en WebP, máximo 1200 px por lado.',
     )
+    miniatura = models.ImageField(upload_to='repuestos/imagenes/miniaturas/', blank=True, null=True)
     es_principal = models.BooleanField(
         default=False,
         verbose_name='Imagen principal',

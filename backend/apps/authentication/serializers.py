@@ -17,7 +17,7 @@ from .models import UserProfile
 from .models import UsuarioEmpresa
 
 from .permisos_repo import nombre_rol
-from apps.core.serializers import ModelSerializerPublico
+from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico
 
 
 def _taller_sesion_nombre(user, empresa):
@@ -398,24 +398,8 @@ class UserProfileUpdateSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
     last_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
     telefono = serializers.CharField(required=False, allow_blank=True, default='')
-    avatar = serializers.ImageField(required=False, allow_null=True)
+    avatar = ImagenProcesadaField(perfil='avatar', required=False, allow_null=True)
     remove_avatar = serializers.BooleanField(required=False, default=False)
-
-    FORMATOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp']
-    MAX_AVATAR_BYTES = 1024 * 1024
-
-    def validate_avatar(self, value):
-        if value is None:
-            return value
-        if value.content_type not in self.FORMATOS_PERMITIDOS:
-            raise serializers.ValidationError(
-                'Formato de imagen no válido. Usa JPG, PNG o WebP.'
-            )
-        if value.size > self.MAX_AVATAR_BYTES:
-            raise serializers.ValidationError(
-                'La imagen supera el tamaño máximo de 1 MB.'
-            )
-        return value
 
     def validate_email(self, value):
         user = self.context.get('request').user
@@ -447,8 +431,7 @@ class UserProfileUpdateSerializer(serializers.Serializer):
             if 'telefono' in profile_data:
                 profile.telefono = profile_data['telefono']
             if remove_avatar or avatar is None and 'avatar' in self.initial_data:
-                if profile.avatar:
-                    profile.avatar.delete(save=False)
+                # El archivo se borra al confirmar la transacción (apps/core/archivos.py).
                 profile.avatar = None
             elif avatar is not None:
                 profile.avatar = avatar
@@ -463,6 +446,8 @@ class UserProfileSerializer(ModelSerializerPublico):
     `rol`, `empresa` y `talleres` viven en `UsuarioEmpresa`, no en el perfil:
     declararlos aquí hacía estallar el serializer con `ImproperlyConfigured`.
     """
+
+    avatar = ImagenProcesadaField(perfil='avatar', required=False, allow_null=True)
 
     class Meta:
         model = UserProfile

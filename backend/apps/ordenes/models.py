@@ -486,11 +486,12 @@ class RecepcionVehiculo(UuidPublicoModel, BaseTallerModel):
         null=True,
         verbose_name='Observaciones / Descripción de Golpes, Rayones o Estado de Pintura',
     )
-    firma_cliente = models.TextField(
+    firma_cliente = models.ImageField(
+        upload_to='ordenes/firmas/',
         blank=True,
         null=True,
         verbose_name='Firma del cliente',
-        help_text='Firma digital del cliente aceptando la recepción (base64)',
+        help_text='Firma digital del cliente aceptando la recepción (PNG)',
     )
     fecha_firma_cliente = models.DateTimeField(
         null=True,
@@ -932,6 +933,7 @@ class FotoRecepcion(UuidPublicoModel, models.Model):
         verbose_name='Vista fotográfica'
     )
     imagen = models.ImageField(upload_to='ordenes/recepcion_fotos/')
+    miniatura = models.ImageField(upload_to='ordenes/recepcion_fotos/miniaturas/', blank=True, null=True)
     descripcion = models.CharField(max_length=100, blank=True, null=True, verbose_name='Ej: Rayón puerta izquierda')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -956,6 +958,7 @@ class FotoInspeccion(UuidPublicoModel, models.Model):
         verbose_name='Inspección',
     )
     imagen = models.ImageField(upload_to='ordenes/inspeccion_fotos/')
+    miniatura = models.ImageField(upload_to='ordenes/inspeccion_fotos/miniaturas/', blank=True, null=True)
     descripcion = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -980,6 +983,7 @@ class FotoOrdenTrabajo(UuidPublicoModel, models.Model):
         verbose_name='Orden de Trabajo',
     )
     imagen = models.ImageField(upload_to='ordenes/orden_fotos/')
+    miniatura = models.ImageField(upload_to='ordenes/orden_fotos/miniaturas/', blank=True, null=True)
     descripcion = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 

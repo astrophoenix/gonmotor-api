@@ -26,6 +26,7 @@ from rest_framework.decorators import action
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from apps.core.filters import BusquedaIndexadaFilter
+from apps.core.utils.images import ImagenInvalida, procesar_imagen
 
 
 
@@ -167,13 +168,22 @@ class VehiculoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             file = request.FILES.get('imagen')
             if not file:
                 return Response({'detail': 'No se envió el archivo.'}, status=status.HTTP_400_BAD_REQUEST)
-            vehiculo.imagen = file
+            try:
+                procesada = procesar_imagen(file, 'vehiculo')
+            except ImagenInvalida as error:
+                return Response({'imagen': [str(error)]}, status=status.HTTP_400_BAD_REQUEST)
+            vehiculo.imagen = procesada.archivo
+            vehiculo.miniatura = procesada.miniatura
             vehiculo.save()
-            return Response({'imagen': vehiculo.imagen.url if vehiculo.imagen else None})
+            return Response({
+                'imagen': request.build_absolute_uri(vehiculo.imagen.url),
+                'miniatura': request.build_absolute_uri(vehiculo.miniatura.url),
+            })
         if request.method == 'DELETE':
             if vehiculo.imagen:
-                vehiculo.imagen.delete(save=False)
+                # Los archivos se borran al confirmar la transacción (apps/core/archivos.py).
                 vehiculo.imagen = None
+                vehiculo.miniatura = None
                 vehiculo.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
