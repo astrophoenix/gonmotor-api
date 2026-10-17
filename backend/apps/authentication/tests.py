@@ -1345,10 +1345,30 @@ class EmpresaConfigPermisosTests(EscenarioMixin, APITestCase):
 		cliente = self._cliente(gerente)
 		resp = cliente.post(
 			'/api/configuracion/sucursales/',
-			{'nombre': 'Sucursal F2', 'direccion': 'Av. Norte', 'codigo_sucursal': 'SUC-F2'},
+			{'nombre': 'Sucursal F2', 'ciudad': 'Quito', 'direccion': 'Av. Norte', 'codigo_sucursal': 'SUC-F2'},
 			format='json',
 		)
 		self.assertEqual(resp.status_code, 201, resp.content)
+
+	def test_sucursal_exige_ciudad(self):
+		gerente = User.objects.create_user(username='gerente-ciudad', password='x')
+		_asignar(gerente, self.empresa_a, 'ADMIN_TALLER', [self.a1])
+		cliente = self._cliente(gerente)
+		resp = cliente.post(
+			'/api/configuracion/sucursales/',
+			{'nombre': 'Sucursal F3', 'direccion': 'Av. Sur', 'codigo_sucursal': 'SUC-F3'},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 400, resp.content)
+		self.assertEqual(str(resp.data['ciudad'][0]), 'La ciudad es obligatoria.')
+
+		resp = cliente.patch(
+			f'/api/configuracion/sucursales/{self.a1.uuid}/',
+			{'ciudad': '   '},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 400, resp.content)
+		self.assertEqual(str(resp.data['ciudad'][0]), 'La ciudad es obligatoria.')
 
 	def test_solo_admin_sistema_crea_empresas(self):
 		dueno = User.objects.create_user(username='dueno-create', password='x')

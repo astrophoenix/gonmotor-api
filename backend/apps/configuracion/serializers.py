@@ -75,6 +75,12 @@ class TallerConfigSerializer(ModelSerializerPublico):
             'created_at',
             'updated_at',
         ]
+        extra_kwargs = {
+            'ciudad': {
+                'required': True,
+                'error_messages': {'required': 'La ciudad es obligatoria.'},
+            },
+        }
 
     def validate_nombre(self, value):
         value = (value or '').strip()
@@ -95,7 +101,10 @@ class TallerConfigSerializer(ModelSerializerPublico):
         return value[:10]
 
     def validate_ciudad(self, value):
-        return (value or '').strip()[:100]
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('La ciudad es obligatoria.')
+        return value[:100]
 
     def validate_telefono(self, value):
         return (value or '').replace(' ', '').strip()[:20]
