@@ -33,7 +33,7 @@ from io import BytesIO
 
 from django.utils import timezone
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     BaseDocTemplate,
@@ -121,6 +121,11 @@ NOTA_TABLA = _estilo('CotNotaTabla', 7, color=GRIS_SUAVE, interlinea=9)
 VACIO = _estilo('CotVacio', 8, 'Helvetica-Oblique', LST_GRIS_TEXTO)
 
 TEXTO = _estilo('CotTexto', 8, color=LST_GRIS_TEXTO, interlinea=10.5)
+# Condiciones: justificadas, con sangría francesa para que la viñeta quede sola.
+CONDICION = _estilo(
+    'CotCondicion', 8, color=LST_GRIS_TEXTO, alineacion=TA_JUSTIFY, interlinea=10.5,
+    leftIndent=8, bulletIndent=0, bulletFontSize=8, spaceAfter=1.5,
+)
 SON = _estilo('CotSon', 8, interlinea=10.5)
 TOTAL_ETIQUETA = _estilo('CotTotalEtiqueta', 8.5, color=LST_GRIS_TEXTO, alineacion=TA_RIGHT, interlinea=11)
 TOTAL_VALOR = _estilo('CotTotalValor', 8.5, alineacion=TA_RIGHT, interlinea=11)
@@ -692,7 +697,7 @@ def _condiciones(doc: _Documento) -> list:
     if any(getattr(i, 'es_opcional', False) for i in items):
         texto.append('Los ítems marcados como «Opcional» son recomendaciones del taller y están incluidos en el total.')
     texto.extend(condiciones_de_empresa(doc.empresa))
-    return [Paragraph(f'• {_escape_xml(t)}', TEXTO) for t in texto]
+    return [Paragraph(_escape_xml(t), CONDICION, bulletText='•') for t in texto]
 
 
 def _firmas(doc: _Documento, ancho: float) -> Table:
