@@ -668,17 +668,10 @@ def _tabla_totales(cotizacion, lineas_tasas, ancho: float) -> Table:
     return tabla
 
 
-CONDICIONES_POR_DEFECTO = (
-    'Los valores son referenciales y pueden variar si al desarmar se encuentran daños ocultos; '
-    'todo trabajo adicional requiere autorización previa del cliente.',
-    'El taller no se responsabiliza por objetos de valor dejados en el vehículo.',
-)
-
-
 def condiciones_de_empresa(empresa) -> list:
     """
     Condiciones configuradas en ``DetalleEmpresa.condiciones`` (una por línea,
-    sin viñetas iniciales). Sin detalle o sin texto: las condiciones por defecto.
+    sin viñetas iniciales). Sin detalle o sin texto: ninguna.
     """
     detalle = getattr(empresa, 'detalle', None) if empresa is not None else None
     texto = getattr(detalle, 'condiciones', '') or ''
@@ -686,7 +679,7 @@ def condiciones_de_empresa(empresa) -> list:
         re.sub(r'^[\s•\-*·]+', '', linea).strip()
         for linea in texto.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     ]
-    return [linea for linea in lineas if linea] or list(CONDICIONES_POR_DEFECTO)
+    return [linea for linea in lineas if linea]
 
 
 def _condiciones(doc: _Documento) -> list:

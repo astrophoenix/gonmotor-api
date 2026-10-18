@@ -6,7 +6,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.authentication.tests import EscenarioMixin, _asignar
 from apps.core.testing import fijar_empresa
-from apps.cotizaciones.pdf import CONDICIONES_POR_DEFECTO, condiciones_de_empresa
+from apps.cotizaciones.pdf import condiciones_de_empresa
 from apps.empresas.models import DetalleEmpresa
 
 
@@ -53,13 +53,13 @@ class CondicionesEmpresaApiTests(EscenarioMixin, APITestCase):
 
 
 class CondicionesEnPdfTests(SimpleTestCase):
-    """El PDF imprime una condición por línea o, sin configurar, las por defecto."""
+    """El PDF imprime una condición por línea; sin configurar, ninguna extra."""
 
     def test_una_condicion_por_linea_sin_vinetas(self):
         empresa = SimpleNamespace(detalle=SimpleNamespace(condiciones='- Anticipo 60%.\n\n• Validez sujeta a stock.'))
         self.assertEqual(condiciones_de_empresa(empresa), ['Anticipo 60%.', 'Validez sujeta a stock.'])
 
-    def test_sin_condiciones_usa_las_por_defecto(self):
+    def test_sin_condiciones_no_agrega_ninguna(self):
         for empresa in (None, SimpleNamespace(), SimpleNamespace(detalle=SimpleNamespace(condiciones='  '))):
             with self.subTest(empresa=empresa):
-                self.assertEqual(condiciones_de_empresa(empresa), list(CONDICIONES_POR_DEFECTO))
+                self.assertEqual(condiciones_de_empresa(empresa), [])
