@@ -581,6 +581,7 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'cliente': str(self.cliente.uuid),
                 'vehiculo': str(self.vehiculo.uuid),
                 'estado': 'PENDIENTE',
+                'fecha_ingreso': '2026-10-01T08:30:00Z',
                 'prioridad': 'MEDIA',
                 'tipo_trabajo': 'MANTENIMIENTO',
             },
@@ -1742,6 +1743,7 @@ class OrdenSucursalConservadaTests(TestCase):
             'estado': 'PENDIENTE',
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
+            'fecha_ingreso': '2026-10-01T08:30:00Z',
             **extra,
         }
 
@@ -1752,6 +1754,58 @@ class OrdenSucursalConservadaTests(TestCase):
 
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(OrdenTrabajo.objects.get(uuid=resp.data['id']).sucursal_id, self.taller_activo.pk)
+
+    def test_fecha_ingreso_editable(self):
+        """La fecha de ingreso la registra el usuario al crear y al editar."""
+        from datetime import datetime, timezone as dt_timezone
+
+        from .models import OrdenTrabajo
+
+        al_crear = datetime(2026, 10, 1, 8, 30, tzinfo=dt_timezone.utc)
+        resp = self.client.post(
+            '/api/ordenes/ordenes-trabajo/',
+            self._payload(fecha_ingreso=al_crear.isoformat()),
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        orden = OrdenTrabajo.objects.get(uuid=resp.data['id'])
+        self.assertEqual(orden.fecha_ingreso, al_crear)
+
+        al_editar = datetime(2026, 10, 2, 14, 15, tzinfo=dt_timezone.utc)
+        resp = self.client.patch(
+            f'/api/ordenes/ordenes-trabajo/{orden.uuid}/',
+            {'fecha_ingreso': al_editar.isoformat()},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        orden.refresh_from_db()
+        self.assertEqual(orden.fecha_ingreso, al_editar)
+
+    def test_fecha_ingreso_obligatoria(self):
+        """Sin fecha de ingreso no se crea la orden, y al editar no puede quedar vacía."""
+        payload = self._payload()
+        payload.pop('fecha_ingreso')
+        resp = self.client.post('/api/ordenes/ordenes-trabajo/', payload, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(str(resp.data['fecha_ingreso'][0]), 'La fecha de ingreso es obligatoria.')
+
+        creada = self.client.post('/api/ordenes/ordenes-trabajo/', self._payload(), format='json').data
+        for vacio in (None, ''):
+            resp = self.client.patch(
+                f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
+                {'fecha_ingreso': vacio},
+                format='json',
+            )
+            self.assertEqual(resp.status_code, 400, vacio)
+            self.assertIn('fecha_ingreso', resp.data)
+
+        # Un PATCH que no envía el campo (p. ej. cambio de estado) conserva la fecha.
+        resp = self.client.patch(
+            f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
+            {'prioridad': 'ALTA'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
 
     def test_editar_con_sucursal_null_conserva_el_taller(self):
         from .models import OrdenTrabajo
