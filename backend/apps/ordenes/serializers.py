@@ -1047,6 +1047,9 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         rep['mecanico_nombre'] = (
             instance.mecanico_principal.get_full_name() or instance.mecanico_principal.username
         ) if instance.mecanico_principal_id else None
+        rep['mecanico_rol'], rep['mecanico_rol_display'] = rol_de_usuario_en_empresa(
+            instance.mecanico_principal_id, instance.empresa_id, request
+        )
         rep['cotizacion_origen_numero'] = (
             instance.cotizacion_origen.numero_cotizacion if instance.cotizacion_origen_id else None
         )
