@@ -9,10 +9,28 @@ from rest_framework.test import APIClient, APITestCase
 from apps.vehiculos.models import Vehiculo
 
 from .models import Cotizacion
-from .pdf import _consolidar
+from .pdf import _consolidar, monto_en_letras
 from .serializers import transicion_estado_valida
 from .views import _validar_origen_cotizacion, _validar_origen_inspeccion
 from apps.core.testing import fijar_empresa
+
+
+class MontoEnLetrasTests(SimpleTestCase):
+    """El «Son:» del PDF escribe el total en letras, con centavos en /100."""
+
+    def test_montos_habituales(self):
+        casos = {
+            '0': 'Cero con 00/100 dólares',
+            '1': 'Un con 00/100 dólares',
+            '100': 'Cien con 00/100 dólares',
+            '248.91': 'Doscientos cuarenta y ocho con 91/100 dólares',
+            '1001.5': 'Mil un con 50/100 dólares',
+            '21000': 'Veintiún mil con 00/100 dólares',
+            '1000000': 'Un millón con 00/100 dólares',
+        }
+        for monto, esperado in casos.items():
+            with self.subTest(monto=monto):
+                self.assertEqual(monto_en_letras(Decimal(monto)), esperado)
 
 
 class ConsolidarConceptosTests(SimpleTestCase):
