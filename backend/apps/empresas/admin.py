@@ -2,7 +2,13 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from apps.core.admin import SoftDeleteAdminMixin
-from .models import Empresa, Taller
+from .models import DetalleEmpresa, Empresa, Taller
+
+
+class DetalleEmpresaInline(admin.StackedInline):
+    model = DetalleEmpresa
+    can_delete = False
+    fields = ('condiciones',)
 
 
 class TallerInline(admin.TabularInline):
@@ -29,7 +35,7 @@ class EmpresaAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_filter = ('is_active', 'created_at')
     search_fields = ('nombre_comercial', 'razon_social', 'ruc', 'email_contacto')
     readonly_fields = ('created_at', 'updated_at', 'logo_preview')
-    inlines = [TallerInline]
+    inlines = [DetalleEmpresaInline, TallerInline]
     
     fieldsets = (
         ('Información Principal', {

@@ -267,7 +267,7 @@ class EmpresaConfigViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
         empresa_id = self.get_empresa_id(self.request)
         if not empresa_id:
             return Empresa.objects.none()
-        return Empresa.objects.filter(pk=empresa_id, is_active=True)
+        return Empresa.objects.filter(pk=empresa_id, is_active=True).select_related('detalle')
 
     def list(self, request, *args, **kwargs):
         empresa_id = self.get_empresa_id(request)
@@ -277,7 +277,7 @@ class EmpresaConfigViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         try:
-            empresa = Empresa.objects.get(id=empresa_id, is_active=True)
+            empresa = Empresa.objects.select_related('detalle').get(id=empresa_id, is_active=True)
         except Empresa.DoesNotExist:
             return Response(
                 {"detail": "La empresa en sesión no existe o está inactiva."},
