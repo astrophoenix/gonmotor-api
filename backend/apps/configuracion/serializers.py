@@ -1,8 +1,9 @@
 import copy
+import re
 
 from rest_framework import serializers
 
-from apps.empresas.models import Empresa, Taller
+from apps.empresas.models import DetalleEmpresa, Empresa, Taller
 from apps.empresas.services import TIPOS_VALIDOS, ultimo_numero_emitido
 from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico
 
@@ -258,10 +259,27 @@ class TallerConfigSerializer(ModelSerializerPublico):
         return self._get_ejemplo(obj, 'ot')
 
 
+# Mismos caracteres que ``sanitizeObservaciones`` del frontend (sanitize.js).
+_CONDICIONES_NO_PERMITIDOS = re.compile(
+    r'[^a-zA-ZÁÉÍÓÚÜáéíóúüÑñ0-9\s.,;:!?¿¡()\-_\'"’‘“”…@/\\|#$%\[\]{}*+=]'
+)
+
+
 class EmpresaConfigSerializer(ModelSerializerPublico):
-    """Serializa los datos fiscales y corporativos de la empresa del taller."""
+    """Serializa los datos fiscales y corporativos de la empresa del taller.
+
+    ``condiciones`` vive en ``DetalleEmpresa`` (1 a 1) y se imprime en el PDF
+    de la cotización; el detalle se crea al guardar si aún no existe.
+    """
 
     logo = ImagenProcesadaField(perfil='logo', required=False, allow_null=True)
+    condiciones = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=DetalleEmpresa.CONDICIONES_MAX,
+        trim_whitespace=False,
+        write_only=True,  # se lee del detalle en ``to_representation``
+    )
 
     class Meta:
         model = Empresa
@@ -273,9 +291,32 @@ class EmpresaConfigSerializer(ModelSerializerPublico):
             'email_contacto',
             'telefono',
             'logo',
+            'condiciones',
             'is_active',
         ]
         read_only_fields = ['id', 'is_active']
+
+    def validate_condiciones(self, value):
+        texto = (value or '').replace('\r\n', '\n').replace('\r', '\n')
+        texto = _CONDICIONES_NO_PERMITIDOS.sub('', texto)
+        return '\n'.join(linea.rstrip() for linea in texto.split('\n')).strip()
+
+    def to_representation(self, instance):
+        datos = super().to_representation(instance)
+        detalle = getattr(instance, 'detalle', None) if instance.pk else None
+        datos['condiciones'] = detalle.condiciones if detalle else ''
+        return datos
+
+    def update(self, instance, validated_data):
+        condiciones = validated_data.pop('condiciones', None)
+        instance = super().update(instance, validated_data)
+        if condiciones is not None:
+            DetalleEmpresa.objects.update_or_create(
+                empresa=instance, defaults={'condiciones': condiciones},
+            )
+            # La relación inversa en caché quedaría desactualizada.
+            instance._state.fields_cache.pop('detalle', None)
+        return instance
 
     def validate_nombre_comercial(self, value):
         value = (value or '').strip()

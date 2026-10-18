@@ -3,7 +3,7 @@ from datetime import time
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from apps.core.ids_publicos import UuidPublicoModel
-from apps.core.models import BaseEmpresaModel, SoftDeleteModel
+from apps.core.models import BaseEmpresaModel, BaseModel, SoftDeleteModel
 
 
 class Empresa(UuidPublicoModel, SoftDeleteModel):
@@ -54,6 +54,37 @@ class Empresa(UuidPublicoModel, SoftDeleteModel):
 
     def __str__(self):
         return f"{self.nombre_comercial} ({self.ruc})"
+
+
+class DetalleEmpresa(BaseModel):
+    """
+    Configuración documental de la empresa (1 a 1): textos que la empresa
+    personaliza para sus documentos, como las condiciones de la cotización.
+    No es un recurso propio de la API: se edita desde la configuración de la
+    empresa (``/api/configuracion/empresa/``).
+    """
+    CONDICIONES_MAX = 1000
+
+    empresa = models.OneToOneField(
+        Empresa,
+        on_delete=models.CASCADE,
+        related_name='detalle',
+        verbose_name='Empresa',
+    )
+    condiciones = models.TextField(
+        max_length=CONDICIONES_MAX,
+        blank=True,
+        default='',
+        verbose_name='Condiciones de la cotización',
+        help_text='Se imprimen en el PDF de la cotización; una condición por línea.',
+    )
+
+    class Meta:
+        verbose_name = 'Detalle de empresa'
+        verbose_name_plural = 'Detalles de empresa'
+
+    def __str__(self):
+        return f'Detalle de {self.empresa}'
 
 
 class Taller(UuidPublicoModel, BaseEmpresaModel):
