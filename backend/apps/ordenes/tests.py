@@ -584,6 +584,7 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'fecha_ingreso': '2026-10-01T08:30:00Z',
                 'prioridad': 'MEDIA',
                 'tipo_trabajo': 'MANTENIMIENTO',
+                'kilometraje': self.vehiculo.kilometraje_actual,
             },
             format='json',
         )
@@ -1743,6 +1744,7 @@ class OrdenSucursalConservadaTests(TestCase):
             'estado': 'PENDIENTE',
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
+            'kilometraje': self.vehiculo.kilometraje_actual,
             'fecha_ingreso': '2026-10-01T08:30:00Z',
             **extra,
         }

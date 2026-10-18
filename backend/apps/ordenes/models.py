@@ -102,6 +102,13 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
     fecha_ingreso = models.DateTimeField(default=timezone.now)
     fecha_entrega = models.DateTimeField(blank=True, null=True)
 
+    # Lectura del odómetro de la visita: obligatoria para el historial del
+    # vehículo. Si no llega, se toma de la recepción/inspección o del vehículo.
+    kilometraje = models.PositiveIntegerField(
+        verbose_name='Kilometraje',
+        help_text='Lectura del odómetro del vehículo en esta orden de trabajo',
+    )
+
     subtotal_servicios = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_repuestos = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_base_0 = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -140,6 +147,31 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 
     def __str__(self):
         return f'OT {self.numero_orden} - {self.vehiculo.placa} ({self.get_estado_display()})'
+
+    @staticmethod
+    def kilometraje_de_visita(vehiculo=None, recepcion=None, inspeccion=None):
+        """Lectura más alta registrada en la visita; si no hay, la del vehículo."""
+        lecturas = [
+            km for km in (
+                getattr(recepcion, 'kilometraje_ingreso', None),
+                getattr(inspeccion, 'kilometraje_diagnostico', None),
+            )
+            if km is not None
+        ]
+        if lecturas:
+            return max(lecturas)
+        return getattr(vehiculo, 'kilometraje_actual', None) or 0
+
+    def save(self, *args, **kwargs):
+        if self.kilometraje is None and self.vehiculo_id:
+            self.kilometraje = self.kilometraje_de_visita(self.vehiculo)
+        # El odómetro maestro solo sube (misma regla que la inspección).
+        if self.vehiculo_id and self.kilometraje is not None:
+            vehiculo = self.vehiculo
+            if self.kilometraje > (vehiculo.kilometraje_actual or 0):
+                vehiculo.kilometraje_actual = self.kilometraje
+                vehiculo.save(update_fields=['kilometraje_actual', 'updated_at'])
+        super().save(*args, **kwargs)
 
 
     def calcular_totales(self):

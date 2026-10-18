@@ -75,7 +75,7 @@ class ApiIdPublicoTests(TestCase):
     def test_fk_se_escribe_y_lee_por_uuid(self):
         respuesta = self.client.post('/api/ordenes/ordenes-trabajo/', {
             'cliente': str(self.cliente.uuid), 'vehiculo': str(self.vehiculo.uuid),
-            'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO',
+            'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO', 'kilometraje': 0,
             'fecha_ingreso': '2026-10-01T08:30:00Z',
         }, format='json')
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
