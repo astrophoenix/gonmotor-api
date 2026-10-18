@@ -98,7 +98,8 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 
     observaciones = models.TextField(blank=True, null=True, help_text='Notas visibles para el cliente')
 
-    fecha_ingreso = models.DateTimeField(auto_now_add=True)
+    # Editable: el usuario puede registrar la fecha y hora reales de ingreso.
+    fecha_ingreso = models.DateTimeField(default=timezone.now)
     fecha_entrega = models.DateTimeField(blank=True, null=True)
 
     # Lectura del odómetro de la visita: obligatoria para el historial del

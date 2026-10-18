@@ -956,6 +956,19 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'created_at',
             'updated_at',
         ]
+        # Fecha de ingreso obligatoria: la registra el usuario al crear y no
+        # puede quedar vacía al editar (PATCH sin el campo la conserva).
+        extra_kwargs = {
+            'fecha_ingreso': {
+                'required': True,
+                'allow_null': False,
+                'error_messages': {
+                    'required': 'La fecha de ingreso es obligatoria.',
+                    'null': 'La fecha de ingreso es obligatoria.',
+                    'invalid': 'Ingresa una fecha y hora de ingreso válidas.',
+                },
+            },
+        }
 
     def validate(self, attrs):
         estado = attrs.get('estado')

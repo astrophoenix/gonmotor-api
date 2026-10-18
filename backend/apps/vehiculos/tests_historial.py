@@ -204,6 +204,7 @@ class KilometrajeOrdenTests(HistorialBase):
             'estado': 'PENDIENTE',
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
+            'fecha_ingreso': '2026-10-01T08:30:00Z',
             **extra,
         }
 

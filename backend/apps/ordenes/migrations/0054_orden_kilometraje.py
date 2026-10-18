@@ -37,7 +37,7 @@ def rellenar_kilometraje(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('ordenes', '0052_miniaturas'),
+        ('ordenes', '0053_fecha_ingreso_editable'),
     ]
 
     operations = [
