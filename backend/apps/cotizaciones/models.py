@@ -276,6 +276,7 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
             cotizacion_origen=self,
             numero_orden=numero_orden,
             tipo_trabajo=tipo_trabajo,
+            kilometraje=OrdenTrabajo.kilometraje_de_visita(vehiculo, recepcion, inspeccion),
             observaciones=inspeccion.diagnostico_tecnico if inspeccion else None,
         )
 

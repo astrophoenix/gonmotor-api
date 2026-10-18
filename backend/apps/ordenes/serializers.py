@@ -922,6 +922,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'observaciones',
             'fecha_ingreso',
             'fecha_entrega',
+            'kilometraje',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -966,7 +967,30 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                 raise serializers.ValidationError(
                     {'motivo_espera': 'Debes indicar el motivo de la espera (repuestos, aprobación del cliente, etc.).'}
                 )
+        self._validar_kilometraje(attrs)
         return attrs
+
+    def _validar_kilometraje(self, attrs):
+        """Obligatorio y sin bajar el odómetro del vehículo.
+
+        Se permite conservar la lectura ya guardada: otra visita posterior pudo
+        subir el odómetro del vehículo después de crear la orden.
+        """
+        if 'kilometraje' not in attrs:
+            return
+        kilometraje = attrs['kilometraje']
+        vehiculo = attrs.get('vehiculo') or (self.instance.vehiculo if self.instance else None)
+        km_vehiculo = getattr(vehiculo, 'kilometraje_actual', None) or 0
+        conserva_lectura = self.instance is not None and self.instance.kilometraje == kilometraje
+        if kilometraje < km_vehiculo and not conserva_lectura:
+            raise serializers.ValidationError(
+                {
+                    'kilometraje': (
+                        'El kilometraje no puede ser menor al registrado del vehículo '
+                        f'({km_vehiculo} km).'
+                    )
+                }
+            )
 
     def update(self, instance, validated_data):
         conservar_sucursal(validated_data)

@@ -125,6 +125,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Sin empresa en contexto → `queryset.none()`; nunca devolver datos sin filtrar.
 - Al crear, `empresa` (y el taller activo) se asignan desde el contexto del request, normalmente en el `create()` del serializer, con `empresa` en `read_only_fields`; nunca desde el payload.
 - `FiltroTallerMixin` lo usan hoy los viewsets del flujo: citas, recepciones, inspecciones, cotizaciones y órdenes.
+- **Excepción deliberada**: `GET /api/vehiculos/{id}/historial/` (`apps/vehiculos/historial.py`) lee los documentos del flujo de **todos** los talleres de la empresa, sin recorte por taller ni por `X-Taller-ID` (decisión de producto: el técnico debe ver qué se hizo en otra sede). Cada documento lleva `accesible=False` si su taller está fuera del alcance del usuario; su ficha sigue protegida por taller. No copiar este patrón a otros endpoints.
 - Defaults DRF: `IsAuthenticated`, `PageNumberPagination` con `PAGE_SIZE=10`, throttling `300/min` usuario y `60/min` anónimo.
 - Mensajes de error y respuestas en español.
 
@@ -171,6 +172,8 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 
 ### Flujo del taller
 - Recepción, inspección, cotización y orden están enlazadas por FKs; `relaciones_flujo.py` centraliza su lectura y edición. Cualquier cambio de vínculos entre estas entidades va ahí, no en cada serializer.
+- **Kilometraje de la orden**: `OrdenTrabajo.kilometraje` es obligatorio en la API (no menor al `kilometraje_actual` del vehículo, salvo conservar la lectura guardada); si es mayor, sube el odómetro del vehículo. Al generar la orden desde una cotización se toma con `OrdenTrabajo.kilometraje_de_visita()` (lectura más alta de la recepción/inspección, o la del vehículo).
+- **Historial del vehículo**: agrupa en memoria los documentos enlazados en visitas (union-find sobre las mismas FKs) en un número fijo de consultas; regresión en `apps/vehiculos/tests_historial.py`.
 - `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
 

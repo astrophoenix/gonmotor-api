@@ -302,7 +302,7 @@ class ApiSoftDeleteTest(TestCase):
         vehiculo_otra = Vehiculo.objects.create(placa='LEAK002', marca='Kia', modelo='Rio')
         vehiculo_otra.empresas.add(self.otra)
         base = {'cliente': str(cliente.uuid), 'vehiculo': str(vehiculo.uuid), 'estado': 'PENDIENTE',
-                'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO'}
+                'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO', 'kilometraje': 0}
 
         casos = {
             'cliente': {**base, 'cliente': str(cliente_otra.uuid)},

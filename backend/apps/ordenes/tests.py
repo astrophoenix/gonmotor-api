@@ -583,6 +583,7 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'estado': 'PENDIENTE',
                 'prioridad': 'MEDIA',
                 'tipo_trabajo': 'MANTENIMIENTO',
+                'kilometraje': self.vehiculo.kilometraje_actual,
             },
             format='json',
         )
@@ -1742,6 +1743,7 @@ class OrdenSucursalConservadaTests(TestCase):
             'estado': 'PENDIENTE',
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
+            'kilometraje': self.vehiculo.kilometraje_actual,
             **extra,
         }
 

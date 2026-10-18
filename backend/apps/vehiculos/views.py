@@ -18,7 +18,9 @@ from apps.core.utils.pdf_export import (
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
 from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
-from apps.core.ids_publicos import filtrar_por_id_publico
+from django.utils.dateparse import parse_date
+from apps.core.ids_publicos import filtrar_por_id_publico, por_id_publico
+from .historial import construir_historial
 from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
 from .serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
@@ -160,6 +162,31 @@ class VehiculoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             'tipo': tipo_choices,
             'paises': paises,
         })
+
+    @action(detail=True, methods=['get'])
+    def historial(self, request, pk=None):
+        """Visitas y eventos del vehículo en la empresa activa (todos sus talleres)."""
+        vehiculo = self.get_object()
+        empresa_id = get_empresa_id_desde_request(request)
+        params = request.query_params
+        filtros = {
+            'q': params.get('q'),
+            'tipo': params.get('tipo_trabajo') or None,
+            'desde': parse_date(params.get('desde') or '') if params.get('desde') else None,
+            'hasta': parse_date(params.get('hasta') or '') if params.get('hasta') else None,
+            'taller_pk': None,
+        }
+        if params.get('taller'):
+            taller = por_id_publico(Taller.objects.filter(empresa_id=empresa_id), params['taller']).first()
+            # Un taller que no se resuelve no amplía el resultado: no devuelve nada.
+            filtros['taller_pk'] = taller.pk if taller else -1
+
+        indicadores, pendientes, entradas = construir_historial(request, vehiculo, empresa_id, filtros)
+        pagina = self.paginate_queryset(entradas)
+        respuesta = self.get_paginated_response(pagina)
+        respuesta.data['indicadores'] = indicadores
+        respuesta.data['pendientes'] = pendientes
+        return respuesta
 
     @action(detail=True, methods=['post', 'delete'], url_path='imagen')
     def imagen(self, request, pk=None):
