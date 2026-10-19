@@ -302,6 +302,22 @@ class _Chips(Flowable):
             c.drawCentredString(x + w / 2, base + 4.3, codigo)
 
 
+class _NuevaHoja(Flowable):
+    """Salto de página que no deja una hoja en blanco: si el contenido anterior
+    ya llenó la hoja (el marco está al inicio), no ocupa nada."""
+
+    def wrap(self, ancho, alto):
+        if getattr(self, '_frame', None) is not None and self._frame._atTop:
+            return 0, 0
+        return 0, alto + 1  # no cabe → la plantilla pasa a la hoja siguiente
+
+    def split(self, *_):
+        return []
+
+    def draw(self):
+        pass
+
+
 class _Testigo(Flowable):
     """Pieza de la cuadrícula de testigos: encendido en color, apagado en gris."""
 
@@ -825,7 +841,7 @@ def exportar_inspeccion_pdf(
         *_fase_testigos(doc_datos, ancho),
         Spacer(1, ESPACIO_FASE),
         *_fase_evidencia(doc_datos, ancho),
-        Spacer(1, ESPACIO_FASE - 10),
+        _NuevaHoja(),  # el plan de trabajo siempre abre hoja
         *_fase_plan(doc_datos, ancho),
         Spacer(1, ESPACIO_FASE * 1.2),
         *_cierre(doc_datos, ancho),
