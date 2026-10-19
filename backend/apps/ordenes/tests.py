@@ -2037,3 +2037,30 @@ class IconosSvgPdfTests(SimpleTestCase):
 
         self.assertEqual(codigos_dtc(' p0301, P0420;p0301\nP0171 '), ['P0301', 'P0420', 'P0171'])
         self.assertEqual(codigos_dtc(None), [])
+
+
+class NuevaHojaPdfTests(SimpleTestCase):
+    """El plan de trabajo abre hoja nueva sin dejar hojas en blanco."""
+
+    def _paginas(self, alto_relleno):
+        from io import BytesIO
+
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        from .pdf_inspeccion import _NuevaHoja
+
+        doc = SimpleDocTemplate(BytesIO(), pagesize=A4)
+        estilo = getSampleStyleSheet()['Normal']
+        doc.build([Spacer(1, alto_relleno), _NuevaHoja(), Paragraph('Plan', estilo)])
+        return doc.page
+
+    def test_salta_si_la_hoja_tiene_contenido(self):
+        self.assertEqual(self._paginas(100), 2)
+
+    def test_no_deja_hoja_en_blanco_si_la_anterior_quedo_llena(self):
+        from reportlab.lib.pagesizes import A4
+
+        alto_marco = A4[1] - 2 * 72 - 12  # márgenes por defecto y padding del marco
+        self.assertEqual(self._paginas(alto_marco), 2)
