@@ -403,7 +403,7 @@ def _preparar_foto(archivo, ancho_pt, alto_pt):
         imagen.save(salida, 'JPEG', quality=82, optimize=True)
         return salida.getvalue()
     except Exception:
-        logger.warning('No se pudo incrustar la foto %s en el PDF de la inspección', archivo.name)
+        logger.warning('No se pudo incrustar la foto %s en el PDF', archivo.name)
         return None
 
 
@@ -633,20 +633,15 @@ def _fase_testigos(doc: _DocumentoInspeccion, ancho: float) -> list:
     return [KeepTogether(flujo[:5]), *flujo[5:]]
 
 
-def _fase_evidencia(doc: _DocumentoInspeccion, ancho: float) -> list:
-    encabezado = _EncabezadoFase(3, 'Evidencia fotográfica', doc.resumenes()['evidencia'], ancho)
-    if not doc.fotos:
-        # Mismo aire inferior que deja la última fila de fotos.
-        return [KeepTogether([
-            encabezado, Spacer(1, 9), _caja_vacia('No se registraron fotos de los hallazgos.', ancho), Spacer(1, 10),
-        ])]
-
+def filas_de_fotos(fotos, ancho: float) -> list:
+    """Fotos recortadas a 4:3, ``FOTOS_POR_FILA`` por fila y numeradas con su
+    descripción al pie. La comparten la inspección y la orden de trabajo."""
     separacion = 10
     ancho_foto = (ancho - separacion * (FOTOS_POR_FILA - 1)) / FOTOS_POR_FILA
     alto_foto = ancho_foto * PROPORCION_FOTO
 
     celdas = []
-    for numero, foto in enumerate(doc.fotos, start=1):
+    for numero, foto in enumerate(fotos, start=1):
         contenido = _preparar_foto(foto.imagen, ancho_foto, alto_foto) or _preparar_foto(
             foto.miniatura, ancho_foto, alto_foto,
         )
@@ -663,21 +658,33 @@ def _fase_evidencia(doc: _DocumentoInspeccion, ancho: float) -> list:
         pie = f'<b>{numero}</b>' + (f' · {descripcion}' if descripcion else '')
         celdas.append([imagen, Spacer(1, 4), Paragraph(pie, PIE_FOTO)])
 
-    filas = [celdas[n:n + FOTOS_POR_FILA] for n in range(0, len(celdas), FOTOS_POR_FILA)]
-    flujo = [encabezado, Spacer(1, 9)]
-    for indice, fila in enumerate(filas):
+    tablas = []
+    for n in range(0, len(celdas), FOTOS_POR_FILA):
+        fila = celdas[n:n + FOTOS_POR_FILA]
         fila = fila + [''] * (FOTOS_POR_FILA - len(fila))
         contenido = []
         anchos = []
-        for n, celda in enumerate(fila):
-            contenido += [celda] + ([''] if n < FOTOS_POR_FILA - 1 else [])
-            anchos += [ancho_foto] + ([separacion] if n < FOTOS_POR_FILA - 1 else [])
+        for i, celda in enumerate(fila):
+            contenido += [celda] + ([''] if i < FOTOS_POR_FILA - 1 else [])
+            anchos += [ancho_foto] + ([separacion] if i < FOTOS_POR_FILA - 1 else [])
         tabla = Table([contenido], colWidths=anchos)
         tabla.setStyle(TableStyle(SIN_PADDING + [
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]))
-        flujo.append(tabla)
+        tablas.append(tabla)
+    return tablas
+
+
+def _fase_evidencia(doc: _DocumentoInspeccion, ancho: float) -> list:
+    encabezado = _EncabezadoFase(3, 'Evidencia fotográfica', doc.resumenes()['evidencia'], ancho)
+    if not doc.fotos:
+        # Mismo aire inferior que deja la última fila de fotos.
+        return [KeepTogether([
+            encabezado, Spacer(1, 9), _caja_vacia('No se registraron fotos de los hallazgos.', ancho), Spacer(1, 10),
+        ])]
+
+    flujo = [encabezado, Spacer(1, 9), *filas_de_fotos(doc.fotos, ancho)]
     # El encabezado no se queda solo al pie de una página: viaja con la 1.ª fila.
     return [KeepTogether(flujo[:3]), *flujo[3:]]
 

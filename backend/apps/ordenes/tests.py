@@ -2001,6 +2001,91 @@ class ExportarPdfInspeccionApiTests(_BaseRelacionesFlujoApiTests):
         self.assertEqual(self.client.get(self._url(ajena)).status_code, 404)
 
 
+
+class ExportarPdfOrdenApiTests(_BaseRelacionesFlujoApiTests):
+    """``GET /api/ordenes/ordenes-trabajo/<id>/exportar-pdf/``: documento para el cliente."""
+
+    def _url(self, orden=None):
+        return f'/api/ordenes/ordenes-trabajo/{(orden or self.orden).uuid}/exportar-pdf/'
+
+    def _assert_pdf(self, respuesta, numero='OT-GRA-0001'):
+        self.assertEqual(respuesta.status_code, 200, getattr(respuesta, 'content', b''))
+        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        self.assertIn(f'orden_{numero}.pdf', respuesta['Content-Disposition'])
+        contenido = b''.join(respuesta.streaming_content)
+        self.assertTrue(contenido.startswith(b'%PDF'))
+        return contenido
+
+    def test_descarga_orden_con_trabajo_valores_y_fotos(self):
+        from django.contrib.auth import get_user_model
+        from django.core.files.base import ContentFile
+
+        from .models import DetalleRepuestoOrdenTrabajo, DetalleServicioOrdenTrabajo, FotoOrdenTrabajo
+
+        tecnico = get_user_model().objects.create_user(
+            username='tecnico', first_name='Pedro', last_name='Jama', password='x',
+        )
+        DetalleServicioOrdenTrabajo.objects.create(
+            orden_trabajo=self.orden, descripcion='Rectificado de discos', horas_aplicadas=Decimal('1.5'),
+            precio_unitario=Decimal('20.00'), mecanico_asignado=tecnico, completado=True, servicio_codigo='SRV-01',
+        )
+        DetalleServicioOrdenTrabajo.objects.create(
+            orden_trabajo=self.orden, descripcion='Alineación', precio_unitario=Decimal('15.00'),
+            descuento=Decimal('5.00'),
+        )
+        DetalleRepuestoOrdenTrabajo.objects.create(
+            orden_trabajo=self.orden, descripcion='Pastillas', precio_unitario=Decimal('48.50'),
+            subtotal=Decimal('48.50'), iva_porcentaje=Decimal('0'),
+        )
+        self.orden.calcular_totales()
+        foto = FotoOrdenTrabajo(orden_trabajo=self.orden, descripcion='Pastillas nuevas')
+        foto.imagen.save('pastillas.jpg', ContentFile(imagen_de_prueba(400, 300, 'JPEG')))
+        FotoOrdenTrabajo.objects.create(orden_trabajo=self.orden, imagen='no/existe.jpg')
+        self.recepcion.orden_trabajo = self.orden
+        self.recepcion.save()
+        self.inspeccion.orden_trabajo = self.orden
+        self.inspeccion.save()
+        self.OrdenTrabajo.objects.filter(pk=self.orden.pk).update(
+            estado='EN_ESPERA', motivo_espera='Repuestos', observaciones='Revisar suspensión.',
+            cotizacion_origen=self.cotizacion, asesor=tecnico, mecanico_principal=tecnico,
+        )
+
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_orden_sin_items_ni_fotos_no_falla(self):
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_orden_entregada(self):
+        from django.utils import timezone
+
+        self.OrdenTrabajo.objects.filter(pk=self.orden.pk).update(estado='ENTREGADO', fecha_entrega=timezone.now())
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_texto_con_caracteres_de_markup_no_rompe_el_pdf(self):
+        from .models import DetalleServicioOrdenTrabajo
+
+        self.cliente.nombre = 'Pérez & Hijos <SA>'
+        self.cliente.save()
+        DetalleServicioOrdenTrabajo.objects.create(
+            orden_trabajo=self.orden, descripcion='Presión < 20 psi & <b>fuga</b>', precio_unitario=Decimal('10.00'),
+        )
+        self.OrdenTrabajo.objects.filter(pk=self.orden.pk).update(observaciones='<i>Nota</i> & más')
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_requiere_autenticacion(self):
+        from rest_framework.test import APIClient
+
+        self.assertEqual(APIClient().get(self._url()).status_code, 401)
+
+    def test_no_filtra_ordenes_de_otra_empresa(self):
+        from apps.empresas.models import Empresa
+
+        otra = Empresa.objects.create(nombre_comercial='Otra', ruc='777777777777')
+        ajena = self.OrdenTrabajo.objects.create(
+            empresa=otra, cliente=self.cliente, vehiculo=self.vehiculo, numero_orden='OT-AJENA',
+        )
+        self.assertEqual(self.client.get(self._url(ajena)).status_code, 404)
+
 class IconosSvgPdfTests(SimpleTestCase):
     """Los testigos del PDF usan los mismos paths SVG que la web."""
 
