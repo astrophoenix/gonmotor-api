@@ -264,6 +264,10 @@ CORS_ALLOW_HEADERS = [
     'x-taller-id',
 ]
 
+# La web lee el nombre de los PDF/Excel descargados de esta cabecera; sin
+# exponerla, el navegador la oculta en peticiones de otro origen.
+CORS_EXPOSE_HEADERS = ['content-disposition']
+
 # Tiempo de vida del token de recuperación en segundos (3600 = 1 hora)
 PASSWORD_RESET_TIMEOUT = 3600  # 1 hora
 

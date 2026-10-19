@@ -1926,3 +1926,114 @@ class SalidaRecepcionAlEntregarOrdenTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.recepcion.refresh_from_db()
         self.assertIsNone(self.recepcion.fecha_salida)
+
+
+class ExportarPdfInspeccionApiTests(_BaseRelacionesFlujoApiTests):
+    """``GET /api/ordenes/inspecciones/<id>/exportar-pdf/``: informe para el cliente."""
+
+    def _url(self, inspeccion=None):
+        return f'/api/ordenes/inspecciones/{(inspeccion or self.inspeccion).uuid}/exportar-pdf/'
+
+    def _assert_pdf(self, respuesta, numero='INS-GRA-0001'):
+        self.assertEqual(respuesta.status_code, 200, getattr(respuesta, 'content', b''))
+        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        self.assertIn(f'inspeccion_{numero}.pdf', respuesta['Content-Disposition'])
+        contenido = b''.join(respuesta.streaming_content)
+        self.assertTrue(contenido.startswith(b'%PDF'))
+        return contenido
+
+    def test_descarga_informe_con_las_cuatro_fases(self):
+        from django.core.files.base import ContentFile
+
+        from .models import DetalleRepuestoInspeccion, DetalleServicioInspeccion, FotoInspeccion
+
+        InspeccionVehiculo.objects.filter(pk=self.inspeccion.pk).update(
+            motivo_ingreso='Vibración al frenar',
+            codigos_dtc='p0301, P0171;P0301',
+            diagnostico_tecnico='Discos con alabeo.\nPastillas al límite.',
+            recomendaciones='Cambiar discos y pastillas.',
+            testigo_check_engine=True,
+            testigo_abs=True,
+            otros_testigos_observaciones='ABS intermitente',
+            estado='FINALIZADA',
+        )
+        foto = FotoInspeccion(inspeccion=self.inspeccion, descripcion='Disco delantero')
+        foto.imagen.save('disco.jpg', ContentFile(imagen_de_prueba(400, 300, 'JPEG')))
+        FotoInspeccion.objects.create(inspeccion=self.inspeccion, imagen='no/existe.jpg')
+        DetalleServicioInspeccion.objects.create(
+            inspeccion=self.inspeccion, descripcion='Rectificado de discos', horas_estimadas='1.5', prioridad='ALTA',
+        )
+        DetalleRepuestoInspeccion.objects.create(
+            inspeccion=self.inspeccion, descripcion='Pastillas', cantidad=1, prioridad='BAJA', es_sugerido=True,
+        )
+        self.cotizacion.inspeccion_origen = self.inspeccion
+        self.cotizacion.save()
+
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_informe_sin_datos_no_falla(self):
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_inspeccion_desde_recepcion_sin_cliente_propio(self):
+        inspeccion = InspeccionVehiculo.objects.create(
+            empresa=self.empresa, recepcion=self.recepcion, numero_inspeccion='INS-GRA-0002',
+        )
+        self._assert_pdf(self.client.get(self._url(inspeccion)), 'INS-GRA-0002')
+
+    def test_texto_con_caracteres_de_markup_no_rompe_el_pdf(self):
+        self.cliente.nombre = 'Pérez & Hijos <SA>'
+        self.cliente.save()
+        InspeccionVehiculo.objects.filter(pk=self.inspeccion.pk).update(
+            diagnostico_tecnico='Presión < 20 psi & fuga', codigos_dtc='<b>P0300</b>',
+        )
+        self._assert_pdf(self.client.get(self._url()))
+
+    def test_requiere_autenticacion(self):
+        from rest_framework.test import APIClient
+
+        self.assertEqual(APIClient().get(self._url()).status_code, 401)
+
+    def test_no_filtra_inspecciones_de_otra_empresa(self):
+        from apps.empresas.models import Empresa
+
+        otra = Empresa.objects.create(nombre_comercial='Otra', ruc='777777777777')
+        ajena = InspeccionVehiculo.objects.create(empresa=otra, numero_inspeccion='INS-AJENA')
+        self.assertEqual(self.client.get(self._url(ajena)).status_code, 404)
+
+
+class IconosSvgPdfTests(SimpleTestCase):
+    """Los testigos del PDF usan los mismos paths SVG que la web."""
+
+    def test_todos_los_testigos_se_interpretan(self):
+        from apps.core.utils.svg_path import segmentos_svg
+
+        from .testigos import TESTIGOS
+
+        campos = {f.name for f in InspeccionVehiculo._meta.fields if f.name.startswith('testigo_')}
+        self.assertEqual({t[0] for t in TESTIGOS}, campos)
+        for campo, _, color, path in TESTIGOS:
+            with self.subTest(campo=campo):
+                segmentos = segmentos_svg(path)
+                self.assertIn(color, ('red', 'yellow', 'green'))
+                self.assertEqual(segmentos[0][0], 'M')
+                for segmento in segmentos:
+                    for valor in segmento[1:]:
+                        self.assertTrue(-1 <= valor <= 25, (campo, segmento))
+
+    def test_arcos_con_banderas_pegadas_y_comandos_relativos(self):
+        from apps.core.utils.svg_path import segmentos_svg
+
+        segmentos = segmentos_svg('M0 0a1 1 0 011 1h2v-1zM5,5Q6,6 7,5T9,5')
+        self.assertEqual(segmentos[1][0], 'C')
+        self.assertAlmostEqual(segmentos[1][-2], 1)
+        self.assertAlmostEqual(segmentos[1][-1], 1)
+        self.assertEqual(segmentos[2], ('L', 3, 1))
+        self.assertEqual(segmentos[3], ('L', 3, 0))
+        self.assertEqual(segmentos[4], ('Z',))
+        self.assertEqual(segmentos[-1][-2:], (9.0, 5.0))
+
+    def test_codigos_dtc_normalizados(self):
+        from .pdf_inspeccion import codigos_dtc
+
+        self.assertEqual(codigos_dtc(' p0301, P0420;p0301\nP0171 '), ['P0301', 'P0420', 'P0171'])
+        self.assertEqual(codigos_dtc(None), [])
