@@ -11,7 +11,11 @@ from django.apps import apps
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
+
+from apps.authentication.permisos_repo import permisos_en_request
+from apps.authentication.utils import get_contexto_desde_request
 
 from apps.core.ids_publicos import id_publico, por_id_publico, referencia_corta
 
@@ -25,6 +29,15 @@ MODELO_POR_TIPO = {
     'inspeccion': ('ordenes', 'InspeccionVehiculo'),
     'cotizacion': ('cotizaciones', 'Cotizacion'),
     'orden': ('ordenes', 'OrdenTrabajo'),
+}
+
+# Recurso de permisos de cada tipo del flujo (`permisos_repo.RECURSOS`).
+RECURSO_POR_TIPO = {
+    'cita': 'citas',
+    'recepcion': 'recepciones',
+    'inspeccion': 'inspecciones',
+    'cotizacion': 'cotizaciones',
+    'orden': 'ordenes',
 }
 
 
@@ -311,11 +324,23 @@ def _validar_cotizacion_libre(cotizacion):
         raise _error('No se puede relacionar una cotización ya convertida en orden.')
 
 
-def _buscar_relacionada(tipo, entidad_id, empresa_id):
-    """Entidad del flujo por su ID público (UUID), dentro de la empresa."""
+def _buscar_relacionada(tipo, entidad_id, request):
+    """Entidad del flujo por su ID público (UUID) dentro del alcance del usuario.
+
+    Empresa activa y talleres permitidos (`para_request`), igual que los
+    listados: no se puede enlazar lo que el usuario no puede ver.
+    """
     app_label, model_name = MODELO_POR_TIPO[tipo]
     modelo = apps.get_model(app_label, model_name)
-    return por_id_publico(modelo.objects.filter(empresa_id=empresa_id), entidad_id).first()
+    return por_id_publico(modelo.objects.para_request(request), entidad_id).first()
+
+
+def _exigir_modificar(request, tipo):
+    """Un vínculo cambia los dos documentos: hay que poder modificar el relacionado."""
+    contexto = get_contexto_desde_request(request)
+    permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+    if 'modificar' not in permisos.get(RECURSO_POR_TIPO[tipo], ()):
+        raise PermissionDenied('No tienes permiso para modificar el documento relacionado.')
 
 
 # ---------------------------------------------------------------------------
@@ -634,8 +659,9 @@ OPERACIONES = {
 }
 
 
-def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion):
-    relacionada = _buscar_relacionada(tipo, entidad_id, entidad.empresa_id)
+def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion, request):
+    _exigir_modificar(request, tipo)
+    relacionada = _buscar_relacionada(tipo, entidad_id, request)
     if relacionada is None:
         raise _error('No se encontró la entidad en la empresa actual.')
     if accion == 'vincular':
@@ -647,7 +673,7 @@ def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion):
         desvincular(entidad, tipo, relacionada)
 
 
-def aplicar_relacion(entidad, tipo_entidad, data):
+def aplicar_relacion(entidad, tipo_entidad, data, request):
     tipo = data.get('tipo')
     entidad_id = data.get('id')
     accion = data.get('accion')
@@ -659,7 +685,7 @@ def aplicar_relacion(entidad, tipo_entidad, data):
         raise _error('Debes indicar la entidad relacionada.', campo='id')
     try:
         with transaction.atomic():
-            actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion)
+            actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion, request)
     except IntegrityError as error:
         raise _error(
             'La relación ya existe o entra en conflicto con otra relación del flujo.'
@@ -670,4 +696,4 @@ def aplicar_relacion(entidad, tipo_entidad, data):
 def responder_relaciones(request, entidad, tipo_entidad):
     if request.method == 'GET':
         return Response(serializar_relaciones(entidad, tipo_entidad))
-    return Response(aplicar_relacion(entidad, tipo_entidad, request.data))
+    return Response(aplicar_relacion(entidad, tipo_entidad, request.data, request))

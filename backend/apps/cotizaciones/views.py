@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.authentication.permissions import TieneRecurso
+from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.ids_publicos import filtrar_por_id_publico, referencia_corta
 from apps.core.mixins import FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin
 from apps.core.utils.pdf_export import (
@@ -195,6 +195,16 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
     def perform_update(self, serializer):
         super().perform_update(serializer)
 
+    def destroy(self, request, *args, **kwargs):
+        # Una vez enviada ya hay un cliente de por medio: se conserva el registro.
+        cotizacion = self.get_object()
+        if cotizacion.estado != Cotizacion.EstadoCotizacion.PENDIENTE:
+            raise serializers.ValidationError(
+                'Solo se puede eliminar una cotización pendiente. '
+                f'Esta cotización está "{cotizacion.get_estado_display()}".'
+            )
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=['get', 'post'])
     def relaciones(self, request, pk=None):
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
@@ -217,7 +227,16 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
             'total': cotizacion.total,
         })
 
-    @action(detail=True, methods=['post'])
+    @action(
+        detail=True,
+        methods=['post'],
+        # Genera una orden de trabajo: además de la cotización, hay que poder crearla.
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TieneRecurso('cotizaciones'),
+            TienePermiso('ordenes', 'modificar'),
+        ],
+    )
     def generar_orden(self, request, pk=None):
         cotizacion = self.get_object()
         metodo = request.data.get('metodo_aceptacion')

@@ -696,6 +696,10 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
         read_only_fields = [
             'id',
             'numero_recepcion',
+            # La empresa sale del contexto al crear y no cambia nunca; la orden
+            # se enlaza con la acción `relaciones` (valida alcance y permisos).
+            'empresa',
+            'orden_trabajo',
             'fecha_firma_cliente',
             'aceptacion_condiciones',
             # El formulario se envía como multipart (fotos): un BooleanField

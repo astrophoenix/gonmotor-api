@@ -402,6 +402,26 @@ def catalogo_acciones():
 # Escritura (roles personalizados)
 # ---------------------------------------------------------------------------
 
+# El flujo del taller se consulta como un bloque: los documentos se muestran
+# anidados unos dentro de otros (la recepción trae su inspección y cotizaciones,
+# la orden sus recepciones…), así que ver uno sin ver los demás no es coherente.
+# `modificar` sigue siendo independiente por documento.
+RECURSOS_FLUJO = ('citas', 'recepciones', 'inspecciones', 'cotizaciones', 'ordenes')
+
+
+def validar_bloque_flujo(ver_por_recurso):
+    """Exige ver todo el flujo o nada de él. `ver_por_recurso`: `{codigo: bool}`."""
+    con_ver = [r for r in RECURSOS_FLUJO if ver_por_recurso.get(r)]
+    if not con_ver or len(con_ver) == len(RECURSOS_FLUJO):
+        return
+    faltantes = [NOMBRES_RECURSOS[r] for r in RECURSOS_FLUJO if r not in con_ver]
+    raise ValidationError(
+        'El flujo del taller se consulta completo: si el rol ve '
+        f'{NOMBRES_RECURSOS[con_ver[0]]}, también debe poder ver '
+        f'{", ".join(faltantes)}.'
+    )
+
+
 def _normalizar_permiso(ver, modificar):
     """Invariante ver/modificar: modificar implica ver."""
     if modificar:
@@ -423,6 +443,8 @@ def guardar_permisos(rol, items):
             bool(item.get('ver')), bool(item.get('modificar'))
         )
         nuevo[recurso_codigo] = (recursos[recurso_codigo], ver, modificar)
+
+    validar_bloque_flujo({codigo: ver for codigo, (_, ver, _) in nuevo.items()})
 
     Permiso.objects.filter(rol=rol).delete()
     filas = [
@@ -493,6 +515,13 @@ def guardar_permisos_empresa(rol, empresa_id, items):
             bool(item.get('ver')), bool(item.get('modificar'))
         )
         nuevo[recurso_codigo] = (recursos[recurso_codigo], ver, modificar)
+
+    # Resultado efectivo: la matriz global del rol con estos overrides encima.
+    efectivos = {
+        codigo: 'ver' in acciones for codigo, acciones in permisos_de_rol(rol.codigo).items()
+    }
+    efectivos.update({codigo: ver for codigo, (_, ver, _) in nuevo.items()})
+    validar_bloque_flujo(efectivos)
 
     PermisoEmpresa.objects.filter(rol=rol, empresa_id=empresa_id).delete()
     filas = [

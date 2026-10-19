@@ -134,6 +134,18 @@ class FirmaField(ImagenProcesadaField):
         return archivo if archivo is not None else super()._archivo(data)
 
 
+def _fuera_de_alcance(objeto, request):
+    """`objeto` es de un modelo con tenant y no está en el alcance de la petición.
+
+    Mismo criterio que los listados (`para_request`): empresa activa y, si el
+    modelo cuelga de un taller, talleres permitidos del usuario.
+    """
+    modelo = type(objeto)
+    if not getattr(modelo, 'empresa_lookup', None) or not hasattr(modelo.objects, 'para_request'):
+        return False
+    return not modelo.objects.para_request(request).filter(pk=objeto.pk).exists()
+
+
 def _campos_imagen_con_miniatura(serializer):
     return [
         campo for campo in serializer.fields.values()
@@ -142,7 +154,24 @@ def _campos_imagen_con_miniatura(serializer):
 
 
 class ModelSerializerPublico(serializers.ModelSerializer):
+    """Base de todos los serializers de la API.
+
+    Además del ID público, aplica dos reglas de aislamiento que ningún
+    serializer puede olvidar:
+
+    - `empresa` es siempre de solo lectura: sale del contexto de la sesión.
+    - Toda FK escrita hacia un registro con tenant (cliente, documento del
+      flujo, repuesto…) debe estar en el alcance del usuario: su empresa y, si
+      el registro cuelga de un taller, sus talleres permitidos. Un valor igual
+      al que ya tiene la instancia no se revalida.
+    """
+
     serializer_related_field = RelacionPublicaField
+
+    def get_extra_kwargs(self):
+        extra = super().get_extra_kwargs()
+        extra.setdefault('empresa', {})['read_only'] = True
+        return extra
 
     def get_fields(self):
         fields = super().get_fields()
@@ -154,12 +183,47 @@ class ModelSerializerPublico(serializers.ModelSerializer):
                 fields[campo.campo_miniatura] = serializers.ImageField(read_only=True)
         return fields
 
+    def run_validation(self, data=serializers.empty):
+        # Después de las validaciones propias del serializer: si alguna ya
+        # rechaza el valor, su mensaje (más específico) es el que se ve. Esta
+        # es la red de seguridad para lo que ninguna validación propia cubra.
+        validados = super().run_validation(data)
+        if validados is not None:
+            self._validar_alcance_relaciones(validados)
+        return validados
+
     def to_internal_value(self, data):
         validados = super().to_internal_value(data)
         for campo in _campos_imagen_con_miniatura(self):
             if campo.source in validados:
                 validados[campo.campo_miniatura] = getattr(validados[campo.source], 'miniatura', None)
         return validados
+
+    def _validar_alcance_relaciones(self, validados):
+        request = self.context.get('request')
+        if request is None:
+            return
+        instancia = None if isinstance(self.instance, (list, tuple)) else self.instance
+        errores = {}
+        for nombre, campo in self.fields.items():
+            if campo.read_only or campo.source not in validados:
+                continue
+            if not isinstance(campo, (serializers.RelatedField, serializers.ManyRelatedField)):
+                continue
+            valor = validados[campo.source]
+            muchos = isinstance(campo, serializers.ManyRelatedField)
+            objetos = list(valor or []) if muchos else [valor]
+            actual = None if (muchos or instancia is None) else getattr(instancia, f'{campo.source}_id', None)
+            for objeto in objetos:
+                if objeto is None or getattr(objeto, 'pk', None) is None:
+                    continue
+                if actual is not None and objeto.pk == actual:
+                    continue
+                if _fuera_de_alcance(objeto, request):
+                    errores[nombre] = ['El registro indicado no existe o está fuera de tu alcance.']
+                    break
+        if errores:
+            raise serializers.ValidationError(errores)
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)

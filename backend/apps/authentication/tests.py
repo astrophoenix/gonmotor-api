@@ -1650,3 +1650,70 @@ class LoginMensajesErrorTests(EscenarioMixin, APITestCase):
 		resp = self._login('ana', 'mala')
 		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn('incorrectos', resp.data['detail'][0])
+
+
+class BloqueFlujoPermisosTests(EscenarioMixin, APITestCase):
+	"""El flujo del taller (citas → órdenes) se consulta completo o no se consulta.
+
+	`modificar` sigue siendo independiente por documento.
+	"""
+
+	FLUJO = ('citas', 'recepciones', 'inspecciones', 'cotizaciones', 'ordenes')
+
+	def setUp(self):
+		super().setUp()
+		self.dueno = User.objects.create_user(username='dueno-flujo', password='x')
+		_asignar(self.dueno, self.empresa_a, 'ADMIN_EMPRESA', [self.a1])
+		self.cliente = APIClient()
+		self.cliente.force_authenticate(self.dueno)
+		fijar_empresa(self.cliente, str(self.empresa_a.uuid))
+
+	def _rol_personalizado(self):
+		return self.cliente.post('/api/auth/roles/', {'nombre': 'Rol flujo'}, format='json').json()
+
+	def _put(self, rol_id, permisos):
+		return self.cliente.put(f'/api/auth/roles/{rol_id}/permisos/', {'permisos': permisos}, format='json')
+
+	def test_la_matriz_semilla_respeta_el_bloque(self):
+		for rol, recursos in MATRIZ_ROLES.items():
+			con_ver = {r for r in self.FLUJO if r in recursos}
+			self.assertIn(len(con_ver), (0, len(self.FLUJO)), f'{rol}: {sorted(con_ver)}')
+
+	def test_rechaza_ver_parte_del_flujo(self):
+		rol = self._rol_personalizado()
+		resp = self._put(rol['id'], [
+			{'recurso': 'recepciones', 'ver': True, 'modificar': True},
+			{'recurso': 'clientes', 'ver': True, 'modificar': False},
+		])
+		self.assertEqual(resp.status_code, 400, resp.content)
+		self.assertIn('flujo del taller', resp.json()['detail'])
+		self.assertIn('Cotizaciones', resp.json()['detail'])
+		self.assertEqual(permisos_de_rol(rol['codigo']), {})
+
+	def test_acepta_todo_el_flujo_con_modificar_independiente(self):
+		rol = self._rol_personalizado()
+		permisos = [{'recurso': r, 'ver': True, 'modificar': r == 'ordenes'} for r in self.FLUJO]
+		resp = self._put(rol['id'], permisos)
+		self.assertEqual(resp.status_code, 200, resp.content)
+		efectivo = permisos_de_rol(rol['codigo'])
+		self.assertEqual(efectivo['ordenes'], ['ver', 'modificar'])
+		self.assertEqual(efectivo['cotizaciones'], ['ver'])
+
+	def test_acepta_rol_sin_flujo(self):
+		rol = self._rol_personalizado()
+		resp = self._put(rol['id'], [{'recurso': 'gastos', 'ver': True, 'modificar': True}])
+		self.assertEqual(resp.status_code, 200, resp.content)
+
+	def test_override_de_empresa_no_rompe_el_bloque(self):
+		asesor = Rol.objects.get(codigo='ASESOR')
+		resp = self._put(asesor.uuid, [{'recurso': 'cotizaciones', 'ver': False, 'modificar': False}])
+		self.assertEqual(resp.status_code, 400, resp.content)
+		self.assertFalse(PermisoEmpresa.objects.filter(rol=asesor, empresa=self.empresa_a).exists())
+
+	def test_override_de_empresa_puede_quitar_todo_el_flujo(self):
+		asesor = Rol.objects.get(codigo='ASESOR')
+		resp = self._put(asesor.uuid, [{'recurso': r, 'ver': False, 'modificar': False} for r in self.FLUJO])
+		self.assertEqual(resp.status_code, 200, resp.content)
+		efectivo = permisos_de_rol('ASESOR', self.empresa_a.pk)
+		self.assertTrue(all(r not in efectivo or not efectivo[r] for r in self.FLUJO))
+

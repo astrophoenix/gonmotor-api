@@ -18,7 +18,7 @@ from .ics import SALT_ENLACE_CITA_ICS, respuesta_ics
 from .models import Cita
 from .serializers import CitaSerializer
 from .services import disponibilidad, resolver_taller_de_cita
-from apps.authentication.permissions import TieneRecurso
+from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.filters import BusquedaIndexadaFilter
 
 
@@ -212,7 +212,17 @@ class CitaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, FiltroTallerMixin,
         """Archivo `.ics` de la cita para agregarla a un calendario."""
         return respuesta_ics(self.get_object())
 
-    @action(detail=True, methods=['post'])
+    @action(
+        detail=True,
+        methods=['post'],
+        # Convertir crea una recepción: además de modificar la cita, el rol
+        # debe poder crear recepciones (si no, sería una puerta lateral).
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TieneRecurso('citas'),
+            TienePermiso('recepciones', 'modificar'),
+        ],
+    )
     def convertir_a_recepcion(self, request, pk=None):
         cita = self.get_object()
         try:

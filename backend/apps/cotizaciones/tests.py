@@ -661,3 +661,31 @@ class ExportarPdfCotizacionTests(CotizacionAsesorApiTests):
 
         respuesta = self.client.get(f'/api/cotizaciones/{ajena.uuid}/exportar-pdf/')
         self.assertEqual(respuesta.status_code, 404)
+
+
+class EliminarCotizacionTests(CotizacionAsesorApiTests):
+    """Solo se elimina una cotización pendiente: enviada ya involucra al cliente."""
+
+    def _cotizacion(self, estado):
+        return Cotizacion.objects.create(
+            empresa=self.empresa, sucursal=self.taller, cliente=self.cliente,
+            vehiculo=self.vehiculo, estado=estado, numero_cotizacion=f'DEL-{estado}',
+        )
+
+    def test_elimina_pendiente(self):
+        cot = self._cotizacion(Cotizacion.EstadoCotizacion.PENDIENTE)
+        resp = self.client.delete(f'/api/cotizaciones/{cot.uuid}/')
+        self.assertIn(resp.status_code, (200, 204), resp.content)
+        self.assertFalse(Cotizacion.objects.filter(pk=cot.pk).exists())
+
+    def test_no_elimina_en_otros_estados(self):
+        for estado in Cotizacion.EstadoCotizacion.values:
+            if estado == Cotizacion.EstadoCotizacion.PENDIENTE:
+                continue
+            with self.subTest(estado=estado):
+                cot = self._cotizacion(estado)
+                resp = self.client.delete(f'/api/cotizaciones/{cot.uuid}/')
+                self.assertEqual(resp.status_code, 400, resp.content)
+                self.assertIn('Solo se puede eliminar una cotización pendiente', str(resp.json()))
+                self.assertTrue(Cotizacion.objects.filter(pk=cot.pk).exists())
+

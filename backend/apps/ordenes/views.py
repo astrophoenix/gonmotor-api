@@ -10,7 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.authentication.utils import get_empresa_id_desde_request
-from apps.authentication.permissions import TieneRecurso
+from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.ids_publicos import referencia_corta
 from apps.core.serializers import FirmaField
 from apps.core.mixins import CreacionIdempotenteMixin, FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
@@ -268,6 +268,17 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'orden')
 
+    def destroy(self, request, *args, **kwargs):
+        # Solo se elimina una orden que aún no empezó: con trabajo iniciado
+        # (o entregada/anulada) el registro se conserva como historial.
+        orden = self.get_object()
+        if orden.estado != OrdenTrabajo.EstadoOrden.PENDIENTE:
+            raise serializers.ValidationError(
+                'Solo se puede eliminar una orden de trabajo pendiente. '
+                f'Esta orden está "{orden.get_estado_display()}".'
+            )
+        return super().destroy(request, *args, **kwargs)
+
 
 def parsear_fecha(valor):
     """Convierte 'YYYY-MM-DD' en date; un valor inválido se ignora en vez de romper la petición."""
@@ -516,7 +527,17 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'recepcion')
 
-    @action(detail=True, methods=['post'], url_path='crear-inspeccion')
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='crear-inspeccion',
+        # Crea una inspección: además de la recepción, hay que poder crearla.
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TieneRecurso('recepciones'),
+            TienePermiso('inspecciones', 'modificar'),
+        ],
+    )
     def crear_inspeccion(self, request, pk=None):
         recepcion = self.get_object()
         if recepcion.estado != 'ACEPTADA':

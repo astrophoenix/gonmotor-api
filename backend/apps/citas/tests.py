@@ -918,3 +918,57 @@ class FiltroTallerCitasTest(AgendaCitasBase):
         self.assertEqual(resp.json()['count'], 0)
 
 
+class ConvertirARecepcionPermisosTest(AgendaCitasBase):
+    """Convertir una cita crea una recepción: exige poder modificar ambas."""
+
+    def _cliente_con_rol(self, rol):
+        user = User.objects.create_user(username=f'conv_{uuid4().hex[:8]}', password='x')
+        relacion = UsuarioEmpresa.objects.create(user=user, empresa=self.empresa, rol=rol)
+        relacion.talleres.set([self.taller])
+        client = APIClient()
+        client.force_authenticate(user=user)
+        fijar_empresa(client, str(self.empresa.uuid))
+        return client
+
+    def _cita(self):
+        return Cita.objects.create(
+            empresa=self.empresa,
+            taller=self.taller,
+            cliente=self.cliente,
+            vehiculo=self.vehiculo,
+            fecha_cita=self.manana,
+            hora_cita='09:00',
+            duracion_minutos=60,
+            motivo='MANTENIMIENTO',
+        )
+
+    def _convertir(self, client, cita):
+        return client.post(f'{LISTADO}{cita.uuid}/convertir_a_recepcion/', {}, format='json')
+
+    def test_asesor_puede_convertir(self):
+        cita = self._cita()
+        resp = self._convertir(self._cliente_con_rol('ASESOR'), cita)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        cita.refresh_from_db()
+        self.assertIsNotNone(cita.recepcion_generada_id)
+
+    def test_sin_modificar_recepciones_no_convierte(self):
+        from apps.authentication.models import Rol
+        from apps.authentication.permisos_repo import guardar_permisos_empresa
+
+        # El ASESOR de esta empresa conserva citas pero solo consulta recepciones.
+        guardar_permisos_empresa(
+            Rol.objects.get(codigo='ASESOR'),
+            self.empresa.id,
+            [{'recurso': 'recepciones', 'ver': True, 'modificar': False}],
+        )
+        cita = self._cita()
+        resp = self._convertir(self._cliente_con_rol('ASESOR'), cita)
+        self.assertEqual(resp.status_code, 403, resp.content)
+        cita.refresh_from_db()
+        self.assertIsNone(cita.recepcion_generada_id)
+
+    def test_solo_consulta_de_citas_no_convierte(self):
+        cita = self._cita()
+        resp = self._convertir(self._cliente_con_rol('MECANICO'), cita)
+        self.assertEqual(resp.status_code, 403, resp.content)
