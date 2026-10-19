@@ -221,3 +221,49 @@ class BusquedaGlobalTallerTest(TestCase):
             ENDPOINT, {'q': 'FIL-N-0002'}, HTTP_X_TALLER_ID=str(self.central.uuid)
         )
         self.assertEqual(respuesta.data['total'], 0)
+
+
+class BusquedaGlobalPermisosTest(TestCase):
+    """Solo aparecen los grupos que el rol puede consultar (permiso `ver`)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.inventario.models import Repuesto
+        from apps.proveedores.models import Proveedor
+
+        cls.empresa = Empresa.objects.create(nombre_comercial='Taller Permisos', ruc=_ruc_unico())
+        cls.taller = Taller.objects.create(empresa=cls.empresa, nombre='Central', codigo_sucursal='001', direccion='x')
+        Cliente.objects.create(empresa=cls.empresa, identificacion='1711111111', nombre='Zafiro Cliente')
+        Proveedor.objects.create(empresa=cls.empresa, identificacion='1792222222001', nombre='Zafiro Proveedor')
+        Repuesto.objects.create(empresa=cls.empresa, codigo='ZAF-01', nombre='Zafiro Filtro')
+
+    def _buscar_como(self, rol):
+        user = User.objects.create_user(username=f'busq_{rol}_{uuid4().hex[:6]}', password='x')
+        relacion = UsuarioEmpresa.objects.create(user=user, empresa=self.empresa, rol=rol)
+        relacion.talleres.set([self.taller])
+        cliente = APIClient()
+        cliente.force_authenticate(user=user)
+        fijar_empresa(cliente, str(self.empresa.uuid))
+        respuesta = cliente.get(ENDPOINT, {'q': 'zafiro'})
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        return {grupo['tipo'] for grupo in respuesta.json()['grupos']}
+
+    def test_mecanico_no_ve_proveedores(self):
+        tipos = self._buscar_como('MECANICO')
+        self.assertIn('clientes', tipos)
+        self.assertIn('repuestos', tipos)
+        self.assertNotIn('proveedores', tipos)
+
+    def test_asesor_ve_proveedores(self):
+        self.assertIn('proveedores', self._buscar_como('ASESOR'))
+
+    def test_sin_inventario_no_ve_repuestos(self):
+        from apps.authentication.models import Rol
+        from apps.authentication.permisos_repo import guardar_permisos_empresa
+
+        guardar_permisos_empresa(
+            Rol.objects.get(codigo='MECANICO'),
+            self.empresa.id,
+            [{'recurso': 'inventario', 'ver': False, 'modificar': False}],
+        )
+        self.assertNotIn('repuestos', self._buscar_como('MECANICO'))

@@ -24,7 +24,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.ids_publicos import id_publico, referencia_corta
-from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permisos_repo import permisos_en_request
+from apps.authentication.utils import get_contexto_desde_request, get_empresa_id_desde_request
 from apps.clientes.models import Cliente
 from apps.cotizaciones.models import Cotizacion
 from apps.inventario.models import Repuesto, Servicio
@@ -325,6 +326,10 @@ def _buscar_servicios(empresa_id, q, talleres=None):
 
 
 # Orden de presentación de los grupos en el buscador (los más usados primero).
+# Recurso de permisos que exige cada grupo (`ver`). Repuestos y servicios
+# comparten `inventario`; el resto coincide con su tipo.
+RECURSO_POR_TIPO = {'repuestos': 'inventario', 'servicios': 'inventario'}
+
 BUSCADORES = (
     ('clientes', 'Clientes', _buscar_clientes),
     ('vehiculos', 'Vehículos', _buscar_vehiculos),
@@ -379,7 +384,12 @@ class BusquedaGlobalView(APIView):
 
         grupos = []
         talleres = _talleres_desde_request(request)
+        contexto = get_contexto_desde_request(request)
+        permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
         for tipo, etiqueta, buscador in BUSCADORES:
+            # Solo lo que el rol puede consultar: la búsqueda no es otra puerta.
+            if 'ver' not in permisos.get(RECURSO_POR_TIPO.get(tipo, tipo), ()):
+                continue
             resultados = buscador(empresa_id, q, talleres)
             if resultados:
                 grupos.append(_grupo(tipo, etiqueta, resultados))
