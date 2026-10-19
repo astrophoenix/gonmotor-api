@@ -100,7 +100,6 @@ logger = logging.getLogger(__name__)
 GRIS_BORDE = colors.HexColor('#D1D5DB')      # contorno de piezas apagadas / vacías
 GRIS_APAGADO = colors.HexColor('#BFC5CD')    # ícono de un testigo apagado
 GRIS_ETIQUETA_OFF = colors.HexColor('#9CA3AF')
-AMBAR = colors.HexColor('#D97706')           # recomendaciones y códigos DTC
 AMBAR_SUAVE = colors.HexColor('#FFFBEB')
 
 # Testigo encendido: (ícono, contorno, fondo). Mismos tonos que la web.
@@ -392,19 +391,10 @@ def _preparar_foto(archivo, ancho_pt, alto_pt):
         return None
 
 
-def _bloque_texto(texto, ancho, color_barra=COLOR_MARCA, vacio='Sin registro.'):
-    """Texto con una barra de color a la izquierda (sin relleno: poca tinta)."""
+def _bloque_texto(texto, vacio='Sin registro.'):
+    """Texto de una fase alineado con su subtítulo; vacío, en cursiva gris."""
     contenido = _texto(texto)
-    parrafo = Paragraph(contenido, TEXTO_BLOQUE) if contenido else Paragraph(vacio, VACIO)
-    tabla = Table([[parrafo]], colWidths=[ancho])
-    tabla.setStyle(TableStyle([
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LINEBEFORE', (0, 0), (0, -1), 2.2, color_barra if contenido else GRIS_BORDE),
-    ]))
-    return tabla
+    return Paragraph(contenido, TEXTO_BLOQUE) if contenido else Paragraph(vacio, VACIO)
 
 
 def _caja_vacia(texto, ancho):
@@ -556,7 +546,7 @@ def _fase_diagnostico(doc: _DocumentoInspeccion, ancho: float) -> list:
     fila = Table(
         [[
             [Paragraph('MOTIVO DE INGRESO', SUBTITULO), Spacer(1, 4),
-             _bloque_texto(i.motivo_ingreso, mitad, vacio='Sin motivo registrado.')],
+             _bloque_texto(i.motivo_ingreso, vacio='Sin motivo registrado.')],
             '',
             [Paragraph('CÓDIGOS DE FALLA (DTC)', SUBTITULO), Spacer(1, 4), *dtc],
         ]],
@@ -570,10 +560,10 @@ def _fase_diagnostico(doc: _DocumentoInspeccion, ancho: float) -> list:
         fila,
         Spacer(1, 10),
         Paragraph('DIAGNÓSTICO TÉCNICO', SUBTITULO), Spacer(1, 4),
-        _bloque_texto(i.diagnostico_tecnico, ancho, vacio='Sin diagnóstico registrado.'),
+        _bloque_texto(i.diagnostico_tecnico, vacio='Sin diagnóstico registrado.'),
         Spacer(1, 10),
         Paragraph('RECOMENDACIONES', SUBTITULO), Spacer(1, 4),
-        _bloque_texto(i.recomendaciones, ancho, AMBAR, vacio='Sin recomendaciones registradas.'),
+        _bloque_texto(i.recomendaciones, vacio='Sin recomendaciones registradas.'),
     ]
 
 
@@ -623,7 +613,7 @@ def _fase_testigos(doc: _DocumentoInspeccion, ancho: float) -> list:
     ]
     if i.otros_testigos_observaciones:
         flujo += [Spacer(1, 8), Paragraph('OBSERVACIONES DEL TABLERO', SUBTITULO), Spacer(1, 4),
-                  _bloque_texto(i.otros_testigos_observaciones, ancho)]
+                  _bloque_texto(i.otros_testigos_observaciones)]
     return [KeepTogether(flujo[:5]), *flujo[5:]]
 
 
