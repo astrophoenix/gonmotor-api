@@ -334,7 +334,13 @@ def _consolidar_todos(items_servicios, items_repuestos) -> list:
 # ---------------------------------------------------------------------------
 
 class _Documento:
-    """Datos derivados de la cotización que comparten bloques y callbacks."""
+    """Datos derivados de la cotización que comparten bloques y callbacks.
+
+    El PDF de la inspección (``apps/ordenes/pdf_inspeccion.py``) hereda la
+    cabecera, el pie y los bloques de datos: cambia ``TIPO`` y ``meta()``.
+    """
+
+    TIPO = 'COTIZACIÓN'
 
     def __init__(self, cotizacion, empresa, taller, usuario, logo):
         self.cotizacion = cotizacion
@@ -392,14 +398,11 @@ class _Documento:
             izquierda = Table([[empresa]], colWidths=[ancho_izq])
         izquierda.setStyle(TableStyle(SIN_PADDING + [('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
 
-        meta = [f'Emitida: {_fecha(self.emitida)}'] if self.emitida else []
-        if self.vence:
-            meta.append(f'Válida hasta: {_fecha(self.vence)}')
         derecha = [
-            Paragraph('COTIZACIÓN', DOC_TIPO),
+            Paragraph(self.TIPO, DOC_TIPO),
             Paragraph(_escape_xml(f'Nº {self.numero}' if self.numero else ''), DOC_NUMERO),
             Spacer(1, 2),
-            *[Paragraph(_escape_xml(linea), DOC_META) for linea in meta],
+            *[Paragraph(_escape_xml(linea), DOC_META) for linea in self.meta()],
         ]
 
         tabla = Table([[izquierda, derecha]], colWidths=[ancho_izq, ancho_der])
@@ -410,6 +413,13 @@ class _Documento:
             ('LINEBELOW', (0, 0), (-1, -1), 1.0, NEGRO),
         ]))
         return tabla
+
+    def meta(self) -> list:
+        """Líneas bajo el número del documento."""
+        meta = [f'Emitida: {_fecha(self.emitida)}'] if self.emitida else []
+        if self.vence:
+            meta.append(f'Válida hasta: {_fecha(self.vence)}')
+        return meta
 
     # -- cliente · vehículo · cotización ------------------------------------
 
@@ -527,7 +537,7 @@ class _Documento:
         x0 = doc.leftMargin
         x1 = doc.pagesize[0] - doc.rightMargin
         y = doc.pagesize[1] - LST_MARGEN_SUPERIOR - 8
-        texto = ' · '.join(p for p in (self.identidad['nombre'], f'COTIZACIÓN Nº {self.numero}') if p)
+        texto = ' · '.join(p for p in (self.identidad['nombre'], f'{self.TIPO} Nº {self.numero}') if p)
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(LST_GRIS_TEXTO)
         canvas.drawString(x0, y, _recortar_texto(f'{texto} (continuación)', 'Helvetica', 8, x1 - x0))

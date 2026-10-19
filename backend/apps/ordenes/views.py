@@ -1,7 +1,9 @@
 import datetime
 import logging
+from io import BytesIO
 
 from django.db.models import Prefetch
+from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -37,6 +39,7 @@ from .models import (
     RecepcionVehiculo,
     TipoTrabajo,
 )
+from .pdf_inspeccion import exportar_inspeccion_pdf
 from .relaciones_flujo import responder_relaciones
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
@@ -602,6 +605,38 @@ class InspeccionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
                 status=500,
             )
+
+    @action(detail=True, methods=['get'], url_path='exportar-pdf', url_name='exportar-pdf')
+    def exportar_pdf(self, request, pk=None):
+        """
+        Informe PDF de UNA inspección para el cliente: las cuatro fases
+        (diagnóstico, testigos, evidencia y plan de trabajo), sin precios.
+        Disponible en cualquier estado. ``get_object()`` respeta empresa y
+        taller: una inspección ajena responde 404.
+        """
+        inspeccion = self.get_object()
+
+        usuario = ''
+        if request.user and request.user.is_authenticated:
+            usuario = request.user.get_full_name() or getattr(request.user, 'username', '') or ''
+
+        buffer = BytesIO()
+        exportar_inspeccion_pdf(
+            buffer,
+            inspeccion,
+            empresa=inspeccion.empresa,
+            taller=inspeccion.sucursal,
+            usuario=usuario,
+        )
+        buffer.seek(0)
+
+        numero = inspeccion.numero_inspeccion or referencia_corta(inspeccion).lstrip('#')
+        return FileResponse(
+            buffer,
+            content_type='application/pdf',
+            filename=f'inspeccion_{numero}.pdf',
+            as_attachment=True,
+        )
 
     def get_queryset(self):
         empresa_id = get_empresa_id_desde_request(self.request)
