@@ -13,7 +13,6 @@ Página 1:
   ├──────────────────────────────────────────────────────────────────┤
   │ CLIENTE            │ VEHÍCULO            │ INSPECCIÓN             │
   ├──────────────────────────────────────────────────────────────────┤
-  │ (1)───────────(2)───────────(3)───────────(4)   resumen de fases  │
   │ ① DIAGNÓSTICO     motivo · DTC · diagnóstico · recomendaciones    │
   │ ② TESTIGOS        cuadrícula 10×2, encendido en color / apagado   │
   │ ③ EVIDENCIA       fotos de los hallazgos (3 por fila)             │
@@ -128,8 +127,6 @@ PPP_FOTO = 170               # resolución de las fotos incrustadas
 
 FASE_TITULO = _estilo('InsFaseTitulo', 10.5, 'Helvetica-Bold', COLOR_MARCA, charSpace=0.8)
 FASE_RESUMEN = _estilo('InsFaseResumen', 8, color=GRIS_SUAVE, alineacion=TA_RIGHT)
-PASO_TITULO = _estilo('InsPasoTitulo', 8, 'Helvetica-Bold', alineacion=TA_CENTER, interlinea=10)
-PASO_RESUMEN = _estilo('InsPasoResumen', 7.5, color=GRIS_SUAVE, alineacion=TA_CENTER, interlinea=9.5)
 SUBTITULO = _estilo('InsSubtitulo', 7, 'Helvetica-Bold', GRIS_SUAVE, charSpace=0.8)
 TEXTO_BLOQUE = _estilo('InsTextoBloque', 8.5, interlinea=11.5)
 TESTIGO_ON = _estilo('InsTestigoOn', 6.5, 'Helvetica-Bold', alineacion=TA_CENTER, interlinea=7.5)
@@ -226,48 +223,6 @@ class _EncabezadoFase(Flowable):
         resumen.drawOn(c, self.ancho - ancho_resumen, cy - alto_r / 2 + 1)
         c.setStrokeColor(NEGRO)
         c.setLineWidth(1)
-        c.line(0, 0, self.ancho, 0)
-
-
-class _ResumenFases(Flowable):
-    """Las cuatro fases como pasos conectados, con lo registrado en cada una."""
-
-    def __init__(self, fases, ancho):
-        super().__init__()
-        self.fases = fases  # [(titulo, resumen, con_datos)]
-        self.ancho = ancho
-        self.columna = ancho / len(fases)
-        self._parrafos = [
-            (Paragraph(titulo, PASO_TITULO), Paragraph(_escape_xml(resumen), PASO_RESUMEN))
-            for titulo, resumen, _ in fases
-        ]
-        self.alto_textos = max(
-            p.wrap(self.columna - 8, 40)[1] + r.wrap(self.columna - 8, 40)[1]
-            for p, r in self._parrafos
-        )
-
-    RADIO = 9
-
-    def wrap(self, *_):
-        return self.ancho, self.RADIO * 2 + 6 + self.alto_textos + 12
-
-    def draw(self):
-        c = self.canv
-        alto = self.wrap()[1]
-        cy = alto - 6 - self.RADIO
-        c.setStrokeColor(GRIS_BORDE)
-        c.setLineWidth(1)
-        c.line(self.columna / 2, cy, self.ancho - self.columna / 2, cy)
-        for i, ((titulo, resumen), (_, _, con_datos)) in enumerate(zip(self._parrafos, self.fases)):
-            cx = self.columna * i + self.columna / 2
-            _circulo_numero(c, cx, cy, self.RADIO, i + 1, relleno=con_datos)
-            y = cy - self.RADIO - 4
-            _, alto_t = titulo.wrap(self.columna - 8, 40)
-            titulo.drawOn(c, cx - (self.columna - 8) / 2, y - alto_t)
-            _, alto_r = resumen.wrap(self.columna - 8, 40)
-            resumen.drawOn(c, cx - (self.columna - 8) / 2, y - alto_t - alto_r)
-        c.setStrokeColor(LST_GRIS_FILA)
-        c.setLineWidth(0.4)
         c.line(0, 0, self.ancho, 0)
 
 
@@ -584,16 +539,6 @@ class _DocumentoInspeccion(_Documento):
             'plan': plan,
         }
 
-    def resumen_fases(self, ancho: float) -> _ResumenFases:
-        r = self.resumenes()
-        i = self.inspeccion
-        return _ResumenFases([
-            ('Diagnóstico', r['diagnostico'], bool(i.diagnostico_tecnico or self.dtc or i.motivo_ingreso)),
-            ('Testigos', r['testigos'], bool(self.testigos_on)),
-            ('Evidencia', r['evidencia'], bool(self.fotos)),
-            ('Plan de trabajo', r['plan'], bool(self.servicios or self.repuestos)),
-        ], ancho)
-
 
 # ---------------------------------------------------------------------------
 # FASES
@@ -740,10 +685,10 @@ def _fase_plan(doc: _DocumentoInspeccion, ancho: float) -> list:
 
     columnas = [
         ('#', 0.28, 'L'),
-        ('Descripción', 3.9, 'L'),
+        ('Descripción', 3.6, 'L'),
         ('Cant.', 0.7, 'R'),
         ('Prioridad', 0.9, 'L'),
-        ('Tipo', 0.9, 'L'),
+        ('Requerimiento', 1.2, 'L'),
     ]
     factor = ancho / sum(a for _, a, _ in columnas)
     anchos = [a * factor for _, a, _ in columnas]
@@ -884,9 +829,7 @@ def exportar_inspeccion_pdf(
         NextPageTemplate('cn'),
         doc_datos.cabecera(ancho),
         doc_datos.datos(ancho),
-        Spacer(1, 10),
-        doc_datos.resumen_fases(ancho),
-        Spacer(1, ESPACIO_FASE - 4),
+        Spacer(1, ESPACIO_FASE),
         *_fase_diagnostico(doc_datos, ancho),
         Spacer(1, ESPACIO_FASE),
         *_fase_testigos(doc_datos, ancho),
