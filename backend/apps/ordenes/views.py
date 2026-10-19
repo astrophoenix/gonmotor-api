@@ -2,7 +2,7 @@ import datetime
 import logging
 from io import BytesIO
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, prefetch_related_objects
 from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
@@ -40,6 +40,7 @@ from .models import (
     TipoTrabajo,
 )
 from .pdf_inspeccion import exportar_inspeccion_pdf
+from .pdf_orden import exportar_orden_pdf
 from .relaciones_flujo import responder_relaciones
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
@@ -178,6 +179,39 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
                 status=500,
             )
+
+    @action(detail=True, methods=['get'], url_path='exportar-pdf', url_name='exportar-pdf')
+    def exportar_pdf(self, request, pk=None):
+        """
+        PDF de UNA orden de trabajo para el cliente: trabajo con valores y
+        evidencia fotográfica. Disponible en cualquier estado. ``get_object()``
+        respeta empresa y taller: una orden ajena responde 404.
+        """
+        orden = self.get_object()
+        # Técnico de cada servicio en una sola consulta (las líneas ya vienen precargadas).
+        prefetch_related_objects([orden], 'servicios__mecanico_asignado')
+
+        usuario = ''
+        if request.user and request.user.is_authenticated:
+            usuario = request.user.get_full_name() or getattr(request.user, 'username', '') or ''
+
+        buffer = BytesIO()
+        exportar_orden_pdf(
+            buffer,
+            orden,
+            empresa=orden.empresa,
+            taller=orden.sucursal,
+            usuario=usuario,
+        )
+        buffer.seek(0)
+
+        numero = orden.numero_orden or referencia_corta(orden).lstrip('#')
+        return FileResponse(
+            buffer,
+            content_type='application/pdf',
+            filename=f'orden_{numero}.pdf',
+            as_attachment=True,
+        )
 
     def get_queryset(self):
         # `para_request` encadena, con las funciones de authentication.utils:
