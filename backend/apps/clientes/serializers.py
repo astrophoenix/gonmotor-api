@@ -3,7 +3,7 @@ from django.db import transaction
 import json
 from .models import Cliente
 from apps.core.ids_publicos import id_publico, por_id_publico
-from apps.vehiculos.models import Vehiculo, VehiculoEmpresa, VehiculoPropietario, vincular_empresa
+from apps.vehiculos.models import Vehiculo, VehiculoEmpresa, VehiculoPropietario, asignar_propietario_actual, vincular_empresa
 from apps.vehiculos.serializers import VehiculoSerializer, VehiculoNestedSerializer
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.cotizaciones.models import Cotizacion
@@ -132,11 +132,9 @@ class ClienteSerializer(ModelSerializerPublico):
             if empresa_id:
                 vincular_empresa(vehiculo, empresa_id)
 
-            VehiculoPropietario.objects.update_or_create(
-                vehiculo=vehiculo,
-                cliente=cliente,
-                defaults={'es_actual': True}
-            )
+            # Mismo criterio que la pantalla de vehículos: un dueño actual por
+            # empresa (cierra al anterior de esta empresa, no toca otras).
+            asignar_propietario_actual(vehiculo, cliente)
             vehiculos_actuales_ids.add(vehiculo.id)
 
         relaciones_actuales = VehiculoPropietario.objects.filter(

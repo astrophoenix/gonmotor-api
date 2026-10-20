@@ -62,11 +62,22 @@ class ClientePropietarioSerializerTest(TestCase):
         self.assertTrue(v.propietarios.filter(es_actual=True, cliente_id=self.cliente2.id).exists())
 
     def test_update_clear_cliente(self):
+        from rest_framework.test import APIRequestFactory
+
+        from apps.authentication.models import UsuarioEmpresa
+
         v = self._create(cliente_id=str(self.cliente1.uuid))
+        # Quitar el dueño cierra el de la empresa activa: como en la API, hay
+        # un request con la empresa de la sesión en el token.
+        UsuarioEmpresa.objects.create(user=self.user, empresa=self.empresa, rol='ADMIN_EMPRESA')
+        request = APIRequestFactory().patch('/api/vehiculos/')
+        request.user = self.user
+        request.auth = {'empresa_id': str(self.empresa.uuid)}
         s = VehiculoNestedSerializer(
             instance=v,
             data={'cliente_id': ''},
             partial=True,
+            context={'request': request},
         )
         self.assertTrue(s.is_valid(), s.errors)
         s.save()

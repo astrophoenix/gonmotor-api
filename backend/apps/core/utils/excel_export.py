@@ -72,6 +72,19 @@ ALINEACION_DERECHA = Alignment(horizontal='right', vertical='center', wrap_text=
 ALINEACION_IZQUIERDA = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
 
+def neutralizar_formula(celda):
+    """Guarda como texto un valor que openpyxl tomaría por fórmula.
+
+    openpyxl escribe como fórmula todo texto que empieza con «=». En un Excel
+    con datos de usuarios (nombres, motivos, filas importadas) eso permite que
+    un registro malicioso se ejecute al abrir el archivo (p. ej. un
+    `=HYPERLINK(...)`). Como texto, el valor se ve igual y no se evalúa.
+    """
+    if isinstance(celda.value, str) and celda.value.startswith('='):
+        celda.data_type = 's'
+    return celda
+
+
 def _estilo_celda(alineacion: str) -> Alignment:
     """Alignment para una columna ('center', 'left' o 'right')."""
     return Alignment(horizontal=alineacion, vertical='center', wrap_text=True)
@@ -225,7 +238,7 @@ class ExcelExportService:
         for row_data in self._build_data_rows():
             for col_idx, valor in enumerate(row_data, start=1):
                 texto = '' if valor is None else valor
-                celda = ws.cell(row=fila, column=col_idx, value=texto)
+                celda = neutralizar_formula(ws.cell(row=fila, column=col_idx, value=texto))
                 celda.font = FUENTE_DATOS
                 celda.alignment = _estilo_celda(alineaciones[col_idx - 1])
                 celda.border = BORDE_TABLA

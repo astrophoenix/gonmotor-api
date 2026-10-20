@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import (
     AllObjectsManager,
@@ -338,6 +339,42 @@ def vincular_empresa(vehiculo, empresa_id, *, activar=True):
         vinculo.is_active = True
         vinculo.save(update_fields=['is_active', 'updated_at'])
     return vinculo
+
+
+def propietarios_actuales_en(empresa_id):
+    """Relaciones de dueño vigentes cuyo cliente es de `empresa_id`.
+
+    El vehículo es global (placa única) y varias empresas pueden atenderlo,
+    pero cada cliente es de una sola empresa: el «dueño actual» es POR EMPRESA.
+    Toda lectura del dueño debe pasar por aquí (o filtrar igual) para no
+    mostrar ni usar el cliente de otra empresa.
+    """
+    return VehiculoPropietario.objects.filter(es_actual=True, cliente__empresa_id=empresa_id)
+
+
+def propietario_actual(vehiculo, empresa_id):
+    """Dueño actual del vehículo en `empresa_id` (o None)."""
+    if not empresa_id:
+        return None
+    return propietarios_actuales_en(empresa_id).filter(vehiculo=vehiculo).select_related('cliente').first()
+
+
+def asignar_propietario_actual(vehiculo, cliente):
+    """Deja a `cliente` como único dueño actual del vehículo EN SU EMPRESA.
+
+    Cierra (con fecha de fin) las otras relaciones vigentes de esa misma
+    empresa; los dueños de otras empresas no se tocan. Lo usan la pantalla de
+    vehículos, el alta desde la ficha del cliente y la importación.
+    """
+    actuales = vehiculo.propietarios.filter(es_actual=True, cliente__empresa_id=cliente.empresa_id)
+    actuales.exclude(cliente=cliente).update(es_actual=False, fecha_fin=timezone.localdate())
+    if not actuales.filter(cliente=cliente).exists():
+        VehiculoPropietario.objects.update_or_create(
+            vehiculo=vehiculo,
+            cliente=cliente,
+            es_actual=True,
+            defaults={'fecha_fin': None},
+        )
 
 
 def sincronizar_empresas(vehiculo, empresa_ids):

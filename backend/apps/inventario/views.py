@@ -28,6 +28,9 @@ from .serializers import (
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from apps.core.filters import BusquedaIndexadaFilter
+from apps.core.importacion import ErroresImportacionView, ImportarView, PlantillaImportacionView
+
+from .excel_import import ImportadorRepuestos, ImportadorServicios
 
 
 
@@ -456,3 +459,40 @@ class ServicioExcelExportView(APIView):
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
                 status=500,
             )
+
+# --- Importación masiva (núcleo genérico: apps/core/importacion.py) --------
+_PERMISOS_INVENTARIO = [permissions.IsAuthenticated, TieneRecurso('inventario')]
+
+
+class RepuestoImportView(ImportarView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorRepuestos
+
+
+class RepuestoImportErroresView(ErroresImportacionView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorRepuestos
+    nombre_archivo = 'errores_importacion_repuestos.xlsx'
+
+
+class RepuestoImportTemplateView(PlantillaImportacionView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorRepuestos
+    nombre_archivo = 'plantilla_importacion_repuestos.xlsx'
+
+
+class ServicioImportView(ImportarView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorServicios
+
+
+class ServicioImportErroresView(ErroresImportacionView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorServicios
+    nombre_archivo = 'errores_importacion_servicios.xlsx'
+
+
+class ServicioImportTemplateView(PlantillaImportacionView):
+    permission_classes = _PERMISOS_INVENTARIO
+    importador_class = ImportadorServicios
+    nombre_archivo = 'plantilla_importacion_servicios.xlsx'

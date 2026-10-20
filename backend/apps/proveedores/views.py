@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import LookupPublicoMixin, SoftDeleteDestroyMixin
+from apps.core.importacion import ErroresImportacionView, ImportarView, PlantillaImportacionView
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
     PdfExportConfig,
@@ -16,6 +17,7 @@ from apps.core.utils.pdf_export import (
     contexto_reporte,
 )
 
+from .excel_import import ImportadorProveedores
 from .models import Proveedor
 from .serializers import ProveedorListSerializer, ProveedorSerializer
 from apps.authentication.permissions import TieneRecurso
@@ -250,3 +252,24 @@ class ProveedorExcelExportView(APIView):
                 {'detail': f'No se pudo generar el Excel en este momento. ({str(e)})'},
                 status=500
             )
+
+
+# --- Importación masiva (núcleo genérico: apps/core/importacion.py) --------
+_PERMISOS_PROVEEDORES = [permissions.IsAuthenticated, TieneRecurso('proveedores')]
+
+
+class ProveedorImportView(ImportarView):
+    permission_classes = _PERMISOS_PROVEEDORES
+    importador_class = ImportadorProveedores
+
+
+class ProveedorImportErroresView(ErroresImportacionView):
+    permission_classes = _PERMISOS_PROVEEDORES
+    importador_class = ImportadorProveedores
+    nombre_archivo = 'errores_importacion_proveedores.xlsx'
+
+
+class ProveedorImportTemplateView(PlantillaImportacionView):
+    permission_classes = _PERMISOS_PROVEEDORES
+    importador_class = ImportadorProveedores
+    nombre_archivo = 'plantilla_importacion_proveedores.xlsx'

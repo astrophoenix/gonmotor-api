@@ -288,6 +288,11 @@ if sys.argv[1:2] == ['test']:
     # de los límites fijan sus propias tasas con override_settings.
     LIMITES_AUTENTICACION = {clave: '100000/min' for clave in LIMITES_AUTENTICACION}
 
+# Importación masiva desde Excel (`apps/core/importacion.py`): límites por archivo.
+# Cada fila se procesa dos veces (vista previa + importación) dentro de una petición.
+IMPORTACION_MAX_FILAS = config('IMPORTACION_MAX_FILAS', cast=int, default=2000)
+IMPORTACION_MAX_MB = config('IMPORTACION_MAX_MB', cast=int, default=5)
+
 # Días que sigue funcionando el enlace público del .ics después de la fecha de la cita.
 DIAS_VIGENCIA_ENLACE_CITA = config('DIAS_VIGENCIA_ENLACE_CITA', cast=int, default=7)
 

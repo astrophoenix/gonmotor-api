@@ -17,7 +17,7 @@ from apps.core.utils.pdf_export import (
 )
 from apps.empresas.models import Empresa, Taller
 from reportlab.platypus import Paragraph
-from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario
+from .models import Vehiculo, VehiculoEmpresa, VehiculoPropietario, propietarios_actuales_en
 from django.utils.dateparse import parse_date
 from apps.core.ids_publicos import filtrar_por_id_publico, por_id_publico
 from .historial import construir_historial
@@ -130,7 +130,7 @@ class VehiculoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             # Subconsulta en vez de JOIN: no duplica filas, así que el listado
             # no necesita `DISTINCT` (que obligaba a deduplicar todo el tenant).
             propietarios = filtrar_por_id_publico(
-                VehiculoPropietario.objects.filter(es_actual=True), 'cliente', cliente_id
+                propietarios_actuales_en(empresa_id), 'cliente', cliente_id
             )
             queryset = queryset.filter(pk__in=propietarios.values('vehiculo_id'))
 
@@ -138,9 +138,7 @@ class VehiculoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             return queryset.prefetch_related(
                 Prefetch(
                     'propietarios',
-                    queryset=VehiculoPropietario.objects.filter(
-                        es_actual=True
-                    ).select_related('cliente'),
+                    queryset=propietarios_actuales_en(empresa_id).select_related('cliente'),
                     to_attr='propietarios_actuales',
                 ),
             )
@@ -283,9 +281,7 @@ class VehiculoPdfExportView(APIView):
             queryset = _vehiculo_export_queryset(request, empresa_id).order_by('placa').prefetch_related(
                 Prefetch(
                     'propietarios',
-                    queryset=VehiculoPropietario.objects.filter(
-                        es_actual=True
-                    ).select_related('cliente'),
+                    queryset=propietarios_actuales_en(empresa_id).select_related('cliente'),
                     to_attr='propietarios_actuales',
                 ),
             )
@@ -352,9 +348,7 @@ class VehiculoExcelExportView(APIView):
             queryset = _vehiculo_export_queryset(request, empresa_id).order_by('placa').prefetch_related(
                 Prefetch(
                     'propietarios',
-                    queryset=VehiculoPropietario.objects.filter(
-                        es_actual=True
-                    ).select_related('cliente'),
+                    queryset=propietarios_actuales_en(empresa_id).select_related('cliente'),
                     to_attr='propietarios_actuales',
                 ),
             )

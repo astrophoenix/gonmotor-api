@@ -1,547 +1,289 @@
+"""Importación de clientes y sus vehículos desde Excel.
+
+Se apoya en el núcleo `apps.core.importacion`: aquí solo están las columnas,
+las validaciones de cliente y vehículo, y cómo se guardan. Reglas (las mismas
+de la pantalla):
+
+- Una fila por vehículo; las filas se agrupan por la identificación del cliente.
+- Si el cliente o el vehículo existen, solo cambian las celdas con valor.
+- Un cliente o vehículo desactivado no se reactiva; el kilometraje no retrocede.
+- El dueño actual es por empresa (`asignar_propietario_actual`).
+- Las filas con vehículo exigen además `vehiculos/modificar`.
+"""
+
 from collections import OrderedDict
-from io import BytesIO
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.db import transaction
-from django.http import HttpResponse
-from django.utils import timezone
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 
+from apps.authentication.permisos_repo import permisos_en_request
+from apps.authentication.utils import get_contexto_desde_request
 from apps.clientes.models import Cliente
-from apps.vehiculos.models import Vehiculo, VehiculoPropietario, vincular_empresa
+from apps.core.importacion import (
+    Columna,
+    FilaInvalida,
+    Importador,
+    a_entero,
+    a_opcion,
+    limpiar,
+    validar_longitudes,
+)
+from apps.vehiculos.models import Vehiculo, asignar_propietario_actual, vincular_empresa
 
-
-# ---------------------------------------------------------------------------
-# Definición de columnas del archivo de importación (.xlsx)
-# ---------------------------------------------------------------------------
-CLIENT_COLUMNS = [
-    ('tipo_identificacion', 'Tipo Identificación'),
-    ('identificacion', 'Identificación'),
-    ('nombre', 'Nombre'),
-    ('email', 'Email'),
-    ('telefono', 'Teléfono'),
-    ('direccion', 'Dirección'),
-    ('contifico_id', 'ID Contífico'),
-    ('placa', 'Placa'),
-    ('vin', 'Chasis/VIN'),
-    ('numero_motor', 'Nº Motor'),
-    ('marca', 'Marca'),
-    ('modelo', 'Modelo'),
-    ('anio', 'Año'),
-    ('color', 'Color'),
-    ('transmision', 'Transmisión'),
-    ('combustible', 'Combustible'),
-    ('tipo', 'Tipo'),
-    ('pais_origen', 'País de Origen'),
-    ('kilometraje_actual', 'Kilometraje'),
+COLUMNAS = [
+    Columna('tipo_identificacion', 'Tipo Identificación', opciones=tuple(Cliente.TIPO_IDENTIFICACION)),
+    Columna('identificacion', 'Identificación', alias=('identificacion (cedula/ruc)', 'cedula', 'documento', 'ruc')),
+    Columna('nombre', 'Nombre', alias=('nombre o razon social', 'razon social')),
+    Columna('email', 'Email'),
+    Columna('telefono', 'Teléfono'),
+    Columna('direccion', 'Dirección'),
+    Columna('contifico_id', 'ID Contífico'),
+    Columna('placa', 'Placa'),
+    Columna('vin', 'Chasis/VIN', alias=('chasis', 'chasis / vin')),
+    Columna('numero_motor', 'Nº Motor', alias=('numero de motor', 'n de motor', 'motor')),
+    Columna('marca', 'Marca'),
+    Columna('modelo', 'Modelo'),
+    Columna('anio', 'Año'),
+    Columna('color', 'Color'),
+    Columna('transmision', 'Transmisión', opciones=tuple(Vehiculo.TipoTransmision.choices)),
+    Columna('combustible', 'Combustible', alias=('tipo de combustible',), opciones=tuple(Vehiculo.TipoCombustible.choices)),
+    Columna('tipo', 'Tipo', alias=('tipo de vehiculo',), opciones=tuple(Vehiculo.TipoVehiculo.choices)),
+    Columna('pais_origen', 'País de Origen', alias=('pais',)),
+    Columna('kilometraje_actual', 'Kilometraje'),
 ]
 
-CLIENT_FIELDS = ['tipo_identificacion', 'identificacion', 'nombre', 'email', 'telefono', 'direccion', 'contifico_id']
-VEHICLE_FIELDS = ['placa', 'vin', 'numero_motor', 'marca', 'modelo', 'anio', 'color', 'transmision', 'combustible', 'tipo', 'pais_origen', 'kilometraje_actual']
+# (clave, encabezado) en el orden de la plantilla.
+CLIENT_COLUMNS = [(c.clave, c.encabezado) for c in COLUMNAS]
 
-COLUMN_MAP = {key: header for key, header in CLIENT_COLUMNS}
+# Campos que, si la celda viene vacía, NO tocan el valor guardado: el Excel
+# solo agrega o corrige datos, nunca los borra.
+CLIENTE_OPCIONALES = ['tipo_identificacion', 'email', 'telefono', 'direccion', 'contifico_id']
+VEHICULO_OPCIONALES = [
+    'vin', 'numero_motor', 'marca', 'modelo', 'anio', 'color', 'transmision',
+    'combustible', 'tipo', 'pais_origen', 'kilometraje_actual',
+]
 
-# Alias adicionales aceptados para cada columna (para tolerar variantes de escritura).
-HEADER_ALIASES = {
-    'identificacion': ['identificacion (cedula/ruc)', 'cedula', 'documento', 'ruc'],
-    'nombre': ['nombre o razon social', 'razon social'],
-    'numero_motor': ['numero de motor', 'n de motor', 'motor'],
-    'vin': ['chasis', 'chasis / vin'],
-    'tipo': ['tipo de vehiculo'],
-    'combustible': ['tipo de combustible'],
-    'pais_origen': ['pais'],
+# Valores al CREAR un vehículo cuando la celda viene vacía (los mismos del modelo).
+VEHICULO_POR_DEFECTO = {
+    'tipo': Vehiculo.TipoVehiculo.AUTOMOVIL,
+    'transmision': Vehiculo.TipoTransmision.MANUAL,
+    'combustible': Vehiculo.TipoCombustible.GASOLINA,
+    'pais_origen': 'EC',
+    'kilometraje_actual': 0,
 }
 
-
-def _normalize_header(value):
-    import unicodedata
-    text = _clean(value).lower()
-    text = unicodedata.normalize('NFKD', text)
-    text = ''.join(c for c in text if not unicodedata.combining(c))
-    text = text.replace('º', '')
-    text = ' '.join(text.split())
-    return text
+OPCIONES_VEHICULO = (
+    ('tipo', Vehiculo.TipoVehiculo.choices, 'Tipo de Vehículo'),
+    ('transmision', Vehiculo.TipoTransmision.choices, 'Transmisión'),
+    ('combustible', Vehiculo.TipoCombustible.choices, 'Combustible'),
+)
 
 
-def _match_column(header):
-    norm = _normalize_header(header)
-    for key, canonical in COLUMN_MAP.items():
-        if norm == _normalize_header(canonical):
-            return key
-        for alias in HEADER_ALIASES.get(key, []):
-            if norm == _normalize_header(alias):
-                return key
-    return None
-
-
-def _clean(value):
-    """Normaliza un valor leído de Excel a texto (resuelve tipos muy limpios)."""
-    if value is None:
-        return ''
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
-
-
-def _coerce_int(value):
-    value = _clean(value)
-    if not value:
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        raise ValueError(f'"{value}" no es un número entero válido.')
-
-
-def _coerce_choice(value, choices, field_label):
-    value = _clean(value).upper()
-    if not value:
-        return None
-    for code, label in choices:
-        if value == code:
-            return code
-        if value in (label.upper(),):
-            return code
-    raise ValueError(f'"{value}" no es una opción válida para {field_label}.')
-
-
-class ColumnasFaltantesError(ValueError):
-    """El archivo no trae todas las columnas de la plantilla."""
-
-    def __init__(self, columnas):
-        self.columnas = columnas
-        super().__init__(f'Faltan columnas en el archivo: {", ".join(columnas)}')
-
-
-def load_rows_from_xlsx(file):
-    """Lee el archivo .xlsx y devuelve las filas como dicts (sin encabezados)."""
-    wb = load_workbook(file, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
-
-    if not rows:
-        return [], []
-
-    headers_raw = rows[0]
-    headers = [_clean(h) for h in headers_raw]
-
-    index_map = {}
-    for index, header in enumerate(headers):
-        key = _match_column(header)
-        if key and key not in index_map:
-            index_map[key] = index
-
-    missing = [canonical for key, canonical in COLUMN_MAP.items() if key not in index_map]
-    if missing:
-        raise ColumnasFaltantesError(missing)
-
-    data = []
-    for row in rows[1:]:
-        if all((cell is None or _clean(cell) == '') for cell in row):
-            continue
-        record = {}
-        for key, index in index_map.items():
-            raw = row[index] if index < len(row) else None
-            record[key] = _clean(raw)
-        data.append(record)
-
-    return data, headers
-
-
-def _validar_cliente(record):
-    """Valida y devuelve los datos normalizados de un cliente."""
-    nombre = _clean(record.get('nombre'))
-    identificacion = _clean(record.get('identificacion'))
-
-    errores = []
-    if not nombre:
-        errores.append('Falta el nombre o razón social.')
-    if not identificacion:
-        errores.append('Falta la identificación (cédula/RUC).')
-
-    tipo = 'C'
-    if record.get('tipo_identificacion'):
-        try:
-            tipo = _coerce_choice(record['tipo_identificacion'], Cliente.TIPO_IDENTIFICACION, 'Tipo Identificación')
-        except ValueError as e:
-            errores.append(str(e))
-
-    if errores:
-        raise ValueError(' '.join(errores))
-
-    return {
-        'tipo_identificacion': tipo,
-        'identificacion': identificacion,
-        'nombre': nombre,
-        'email': _clean(record.get('email')),
-        'telefono': _clean(record.get('telefono')),
-        'direccion': _clean(record.get('direccion')),
-        'contifico_id': _clean(record.get('contifico_id')),
-    }
-
-
-def _validar_vehiculo(record):
-    """Valida y devuelve los datos normalizados de un vehículo o None si no hay datos de vehículo."""
-    placa = _clean(record.get('placa'))
-
-    fils_con_en_datos = [
-        record.get(k) for k in
-        ['placa', 'vin', 'numero_motor', 'marca', 'modelo', 'anio', 'color', 'tipo', 'pais_origen', 'kilometraje_actual']
-    ]
-    tiene_datos = any(_clean(v) for v in fils_con_en_datos)
-
-    if not tiene_datos:
-        return None
-
-    errores = []
-    if not placa:
-        errores.append('Falta la placa del vehículo.')
-
-    anio = None
-    if record.get('anio'):
-        try:
-            anio = _coerce_int(record['anio'])
-        except ValueError as e:
-            errores.append(str(e))
-
-    tipo = None
-    if record.get('tipo'):
-        try:
-            tipo = _coerce_choice(record['tipo'], Vehiculo.TipoVehiculo.choices, 'Tipo de Vehículo')
-        except ValueError as e:
-            errores.append(str(e))
-    else:
-        tipo = Vehiculo.TipoVehiculo.AUTOMOVIL
-
-    transmision = None
-    if record.get('transmision'):
-        try:
-            transmision = _coerce_choice(record['transmision'], Vehiculo.TipoTransmision.choices, 'Transmisión')
-        except ValueError as e:
-            errores.append(str(e))
-    else:
-        transmision = Vehiculo.TipoTransmision.MANUAL
-
-    combustible = None
-    if record.get('combustible'):
-        try:
-            combustible = _coerce_choice(record['combustible'], Vehiculo.TipoCombustible.choices, 'Combustible')
-        except ValueError as e:
-            errores.append(str(e))
-    else:
-        combustible = Vehiculo.TipoCombustible.GASOLINA
-
-    kilometraje = 0
-    if record.get('kilometraje_actual'):
-        try:
-            kilometraje = _coerce_int(record['kilometraje_actual'])
-        except ValueError as e:
-            errores.append(str(e))
-
-    pais_origen = _clean(record.get('pais_origen')) or 'EC'
-    from django_countries.data import COUNTRIES
-    if pais_origen.upper() not in COUNTRIES:
-        errores.append(f'"{pais_origen}" no es un código de país válido (ISO 3166).')
-
-    if errores:
-        raise ValueError(' '.join(errores))
-
-    return {
-        'placa': placa.upper(),
-        'vin': _clean(record.get('vin')),
-        'numero_motor': _clean(record.get('numero_motor')),
-        'marca': _clean(record.get('marca')),
-        'modelo': _clean(record.get('modelo')),
-        'anio': anio,
-        'color': _clean(record.get('color')),
-        'transmision': transmision,
-        'combustible': combustible,
-        'tipo': tipo,
-        'pais_origen': pais_origen.upper(),
-        'kilometraje_actual': kilometraje,
-    }
-
-
-def _agrupar_por_cliente(rows):
-    """Agrupa filas por identificación del cliente, manteniendo el número de fila original."""
-    grupos = OrderedDict()
-    for numero_fila, record in rows:
-        clave = record.get('identificacion', '').strip()
-        if clave not in grupos:
-            grupos[clave] = []
-        grupos[clave].append((numero_fila, record))
-    return grupos
-
-
-def _resumen_vehiculo(record):
-    placa = _clean(record.get('placa')).upper()
+def _resumen_vehiculo(registro):
+    placa = limpiar(registro.get('placa')).upper()
     if not placa:
         return ''
-    detalle = ' '.join(x for x in [_clean(record.get('marca')), _clean(record.get('modelo'))] if x)
+    detalle = ' '.join(x for x in [limpiar(registro.get('marca')), limpiar(registro.get('modelo'))] if x)
     return f'{placa} · {detalle}' if detalle else placa
 
 
-def importar_clientes_desde_xlsx(file, empresa_id, validar=False):
-    """
-    Procesa un archivo .xlsx de clientes + vehículos de forma tolerante a fallos.
+class ImportadorClientes(Importador):
+    columnas = COLUMNAS
+    hoja = 'Importación Clientes'
+    entidad = 'clientes'
+    instrucciones = [
+        'Obligatorios: Identificación y Nombre. El resto es opcional.',
+        'Una fila por vehículo: si un cliente tiene varios, repite su identificación en cada fila.',
+        'Si el cliente o el vehículo ya existen, solo se actualizan las celdas que tengan valor.',
+        'El kilometraje de un vehículo existente no puede ser menor al registrado.',
+        'País de Origen: código ISO de 2 letras (EC, CO, US…). Vacío = EC.',
+    ]
+    ejemplos = [
+        ['C', '1712345678', 'Juan Pérez', 'juan@correo.com', '0991234567', 'Av. Siempre Viva 123',
+         '', 'PBA1234', 'VIN123456789', 'MOTOR123', 'Toyota', 'Corolla', '2020', 'Rojo',
+         'M', 'GAS', 'AUTO', 'EC', '45000'],
+        ['C', '1712345678', 'Juan Pérez', '', '', '',
+         '', 'PBA5678', 'VIN987654321', '', 'Toyota', 'Hilux', '2019', 'Plata',
+         'M', 'DIE', 'CAMN', 'EC', '82000'],
+    ]
 
-    - Agrupa las filas por identificación del cliente (mismo cliente con varios vehículos).
-    - Cada fila o grupo fallido se registra sin detener el procesamiento.
-    - Con ``validar=True`` ejecuta exactamente la misma lógica dentro de una
-      transacción que se revierte al final: nada se guarda y la respuesta
-      incluye el estado de cada fila (vista previa antes de importar).
+    def __init__(self, empresa_id, request=None, puede_vehiculos=None):
+        super().__init__(empresa_id, request)
+        if puede_vehiculos is None:
+            # Las filas con vehículo exigen además `vehiculos/modificar`: la
+            # importación no es una puerta lateral para editar vehículos.
+            puede_vehiculos = True
+            if request is not None:
+                contexto = get_contexto_desde_request(request)
+                permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+                puede_vehiculos = 'modificar' in permisos.get('vehiculos', ())
+        self.puede_vehiculos = puede_vehiculos
 
-    Devuelve un dict con: total, exitosos, nuevos, actualizados, vehiculos,
-    errores y, al validar, filas.
-    """
-    if not validar:
-        return _procesar_filas(file, empresa_id, validar=False)
-    with transaction.atomic():
-        resultado = _procesar_filas(file, empresa_id, validar=True)
-        transaction.set_rollback(True)
-    return resultado
+    def contadores_extra(self):
+        return {'vehiculos': 0}
 
+    def resumen_fila(self, numero, registro):
+        return {
+            'identificacion': limpiar(registro.get('identificacion')),
+            'nombre': limpiar(registro.get('nombre')),
+            'vehiculo': _resumen_vehiculo(registro),
+        }
 
-def _procesar_filas(file, empresa_id, validar):
-    resultado = {
-        'total': 0,
-        'exitosos': 0,
-        'nuevos': 0,
-        'actualizados': 0,
-        'vehiculos': 0,
-        'errores': [],
-    }
-    filas_estado = {}
+    # --- Validación ---------------------------------------------------------
+    def validar_cliente(self, registro):
+        """Datos normalizados del cliente: solo incluye los opcionales que traen valor."""
+        nombre = limpiar(registro.get('nombre'))
+        # Igual que la pantalla: la identificación se guarda en mayúsculas.
+        identificacion = limpiar(registro.get('identificacion')).upper()
 
-    rows, _headers = load_rows_from_xlsx(file)
-    resultado['total'] = len(rows)
+        errores = []
+        if not nombre:
+            errores.append('Falta el nombre o razón social.')
+        if not identificacion:
+            errores.append('Falta la identificación (cédula/RUC).')
 
-    # Registramos el número de fila real (sumando 1 por la fila de encabezados).
-    filas = [(idx + 2, record) for idx, record in enumerate(rows)]
-    grupos = _agrupar_por_cliente(filas)
+        datos = {'identificacion': identificacion, 'nombre': nombre}
+        datos.update({c: limpiar(registro.get(c)) for c in CLIENTE_OPCIONALES if limpiar(registro.get(c))})
 
-    def registrar_error(numero_fila, identificacion, record, motivo):
-        resultado['errores'].append({
-            'fila': numero_fila,
-            'identificacion': identificacion,
-            'datos': record,
-            'motivo': motivo,
-        })
-        filas_estado[numero_fila] = ('error', motivo)
-
-    for identificacion, filas_grupo in grupos.items():
-        try:
-            datos_cliente = _validar_cliente(filas_grupo[0][1])
-        except Exception as e:
-            # Todas las filas del grupo quedan fuera: se reportan todas para
-            # que el Excel de errores no pierda ninguna.
-            for numero_fila, record in filas_grupo:
-                registrar_error(numero_fila, identificacion, record, str(e))
-            continue
-
-        try:
-            with transaction.atomic():
-                cliente, creado = Cliente.objects.update_or_create(
-                    empresa_id=empresa_id,
-                    identificacion=datos_cliente['identificacion'],
-                    defaults={
-                        'tipo_identificacion': datos_cliente['tipo_identificacion'],
-                        'nombre': datos_cliente['nombre'],
-                        'email': datos_cliente['email'],
-                        'telefono': datos_cliente['telefono'],
-                        'direccion': datos_cliente['direccion'],
-                        'contifico_id': datos_cliente['contifico_id'],
-                        'is_active': True,
-                    },
-                )
-        except Exception as e:
-            motivo = f'No se pudo crear/actualizar el cliente: {e}'
-            for numero_fila, record in filas_grupo:
-                registrar_error(numero_fila, identificacion, record, motivo)
-            continue
-
-        estado_cliente = 'nuevo' if creado else 'actualiza'
-        for numero_fila, record in filas_grupo:
+        if 'tipo_identificacion' in datos:
             try:
-                datos_vehiculo = _validar_vehiculo(record)
-                if not datos_vehiculo:
-                    filas_estado[numero_fila] = (estado_cliente, '')
-                    continue
+                datos['tipo_identificacion'] = a_opcion(
+                    datos['tipo_identificacion'], Cliente.TIPO_IDENTIFICACION, 'Tipo Identificación',
+                )
+            except ValueError as error:
+                errores.append(str(error))
+        if 'email' in datos:
+            try:
+                validate_email(datos['email'])
+            except DjangoValidationError:
+                errores.append(f'El correo electrónico "{datos["email"]}" no es válido.')
 
+        errores += validar_longitudes(Cliente, datos, self.nombres)
+        if errores:
+            raise FilaInvalida(' '.join(errores))
+        return datos
+
+    def validar_vehiculo(self, registro):
+        """Datos del vehículo (solo opcionales con valor), o None si la fila no trae vehículo."""
+        con_valor = [c for c in ['placa', *VEHICULO_OPCIONALES] if limpiar(registro.get(c))]
+        # Transmisión y combustible solos no bastan para considerar que hay vehículo.
+        if not [c for c in con_valor if c not in ('transmision', 'combustible')]:
+            return None
+
+        placa = limpiar(registro.get('placa')).upper()
+        errores = [] if placa else ['Falta la placa del vehículo.']
+        datos = {'placa': placa}
+        datos.update({c: limpiar(registro.get(c)) for c in VEHICULO_OPCIONALES if limpiar(registro.get(c))})
+
+        for campo in ('anio', 'kilometraje_actual'):
+            if campo in datos:
+                try:
+                    datos[campo] = a_entero(datos[campo])
+                except ValueError as error:
+                    errores.append(str(error))
+        for campo, choices, etiqueta in OPCIONES_VEHICULO:
+            if campo in datos:
+                try:
+                    datos[campo] = a_opcion(datos[campo], choices, etiqueta)
+                except ValueError as error:
+                    errores.append(str(error))
+        if 'pais_origen' in datos:
+            from django_countries.data import COUNTRIES
+            datos['pais_origen'] = datos['pais_origen'].upper()
+            if datos['pais_origen'] not in COUNTRIES:
+                errores.append(f'"{datos["pais_origen"]}" no es un código de país válido (ISO 3166).')
+
+        errores += validar_longitudes(Vehiculo, datos, self.nombres)
+        if errores:
+            raise FilaInvalida(' '.join(errores))
+        return datos
+
+    # --- Guardado ---------------------------------------------------------------
+    def guardar_cliente(self, datos):
+        """Crea o actualiza el cliente. Devuelve (cliente, creado)."""
+        existente = Cliente.objects.filter(
+            empresa_id=self.empresa_id, identificacion=datos['identificacion'],
+        ).first()
+        if existente is None:
+            return Cliente.objects.create(
+                empresa_id=self.empresa_id,
+                tipo_identificacion=datos.get('tipo_identificacion', 'C'),
+                **{k: v for k, v in datos.items() if k != 'tipo_identificacion'},
+            ), True
+        if not existente.is_active:
+            raise FilaInvalida(
+                f'Ya existe un cliente desactivado con la identificación {datos["identificacion"]}. '
+                'Actívalo desde el listado de clientes para poder actualizarlo.'
+            )
+        for campo, valor in datos.items():
+            setattr(existente, campo, valor)
+        existente.save(update_fields=[*datos.keys(), 'updated_at'])
+        return existente, False
+
+    def guardar_vehiculo(self, datos, cliente):
+        """Crea o actualiza el vehículo, lo vincula a la empresa y lo asigna al cliente."""
+        existente = Vehiculo.objects.filter(placa=datos['placa']).first()
+        if existente is None:
+            vehiculo = Vehiculo.objects.create(**{**VEHICULO_POR_DEFECTO, **datos})
+        else:
+            vinculo = existente.vinculo_de(self.empresa_id)
+            if vinculo is not None and not vinculo.is_active:
+                raise FilaInvalida(
+                    f'El vehículo {datos["placa"]} está desactivado en tu empresa. '
+                    'Actívalo desde el listado de vehículos para poder actualizarlo.'
+                )
+            km = datos.get('kilometraje_actual')
+            if km is not None and km < (existente.kilometraje_actual or 0):
+                raise FilaInvalida(
+                    f'El kilometraje ({km} km) es menor al registrado para {datos["placa"]} '
+                    f'({existente.kilometraje_actual} km): el odómetro no retrocede.'
+                )
+            for campo, valor in datos.items():
+                setattr(existente, campo, valor)
+            existente.save(update_fields=[*datos.keys(), 'updated_at'])
+            vehiculo = existente
+        vincular_empresa(vehiculo, self.empresa_id, activar=False)
+        asignar_propietario_actual(vehiculo, cliente)
+        return vehiculo
+
+    # --- Proceso ------------------------------------------------------------
+    def procesar(self, filas):
+        grupos = OrderedDict()
+        for numero, registro in filas:
+            grupos.setdefault(limpiar(registro.get('identificacion')).upper(), []).append((numero, registro))
+
+        for identificacion, filas_grupo in grupos.items():
+            try:
+                datos_cliente = self.validar_cliente(filas_grupo[0][1])
                 with transaction.atomic():
-                    vehiculo, _vcreado = Vehiculo.objects.update_or_create(
-                        placa=datos_vehiculo['placa'],
-                        defaults={
-                            'vin': datos_vehiculo['vin'],
-                            'numero_motor': datos_vehiculo['numero_motor'],
-                            'marca': datos_vehiculo['marca'],
-                            'modelo': datos_vehiculo['modelo'],
-                            'anio': datos_vehiculo['anio'],
-                            'color': datos_vehiculo['color'],
-                            'transmision': datos_vehiculo['transmision'],
-                            'combustible': datos_vehiculo['combustible'],
-                            'tipo': datos_vehiculo['tipo'],
-                            'pais_origen': datos_vehiculo['pais_origen'],
-                            'kilometraje_actual': datos_vehiculo['kilometraje_actual'],
-                            'is_active': True,
-                        },
-                    )
-                    vincular_empresa(vehiculo, empresa_id)
+                    cliente, creado = self.guardar_cliente(datos_cliente)
+            except Exception as error:
+                # Todas las filas del grupo quedan fuera: se reportan todas para
+                # que el Excel de errores no pierda ninguna.
+                motivo = self.motivo_de(error)
+                for numero, registro in filas_grupo:
+                    self.registrar_error(numero, identificacion, registro, motivo)
+                continue
 
-                    VehiculoPropietario.objects.update_or_create(
-                        vehiculo=vehiculo,
-                        cliente=cliente,
-                        defaults={'es_actual': True, 'fecha_fin': None},
-                    )
-                resultado['vehiculos'] += 1
-                filas_estado[numero_fila] = (estado_cliente, '')
-            except Exception as e:
-                registrar_error(numero_fila, identificacion, record, str(e))
+            estado = 'nuevo' if creado else 'actualiza'
+            for numero, registro in filas_grupo:
+                try:
+                    datos_vehiculo = self.validar_vehiculo(registro)
+                    if datos_vehiculo:
+                        if not self.puede_vehiculos:
+                            raise FilaInvalida(
+                                'Tu rol no permite registrar ni modificar vehículos: '
+                                'el cliente se importó sin este vehículo.'
+                            )
+                        with transaction.atomic():
+                            self.guardar_vehiculo(datos_vehiculo, cliente)
+                        self.resultado['vehiculos'] += 1
+                    self.marcar(numero, estado)
+                except Exception as error:
+                    self.registrar_error(numero, identificacion, registro, self.motivo_de(error))
 
-        # El cliente quedó guardado aunque alguna de sus filas de vehículo
-        # falle (esas filas van a `errores`): cuenta como importado.
-        resultado['exitosos'] += 1
-        resultado['nuevos' if creado else 'actualizados'] += 1
-
-    if validar:
-        resultado['filas'] = [
-            {
-                'fila': numero_fila,
-                'identificacion': _clean(record.get('identificacion')),
-                'nombre': _clean(record.get('nombre')),
-                'vehiculo': _resumen_vehiculo(record),
-                'estado': filas_estado.get(numero_fila, ('error', ''))[0],
-                'motivo': filas_estado.get(numero_fila, ('error', ''))[1],
-            }
-            for numero_fila, record in filas
-        ]
-
-    return resultado
-
-
-# ---------------------------------------------------------------------------
-# Reporte de errores (.xlsx)
-# ---------------------------------------------------------------------------
-def generar_reporte_errores_xlsx(errores):
-    """Genera un archivo .xlsx con el detalle exacto de los registros que fallaron."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Errores de Importación'
-
-    header_font = Font(bold=True, color='FFFFFF', size=11)
-    header_fill = PatternFill(start_color='b91c1c', end_color='b91c1c', fill_type='solid')
-    header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    cell_alignment = Alignment(vertical='center', wrap_text=True)
-    thin_border = Border(
-        left=Side(style='thin', color='e5e7eb'),
-        right=Side(style='thin', color='e5e7eb'),
-        top=Side(style='thin', color='e5e7eb'),
-        bottom=Side(style='thin', color='e5e7eb'),
-    )
-
-    fecha_hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
-    titulo = ws.cell(row=1, column=1, value=f'Reporte de errores de importación - Generado: {fecha_hora}')
-    titulo.font = Font(bold=True, size=14)
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLUMN_MAP) + 2)
-
-    headers = ['Fila', 'Motivo del Fallo'] + [header for _, header in CLIENT_COLUMNS]
-    header_row = 3
-
-    for col_idx, header_text in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-        cell.border = thin_border
-
-    current_row = header_row + 1
-    for error in errores:
-        motivo = error.get('motivo') or ''
-        ws.cell(row=current_row, column=1, value=error.get('fila') or '')
-        ws.cell(row=current_row, column=2, value=motivo)
-        datos = error.get('datos') or {}
-        for col_idx, (key, _header) in enumerate(CLIENT_COLUMNS, start=3):
-            ws.cell(row=current_row, column=col_idx, value=datos.get(key) or '')
-        for col_idx in range(1, len(headers) + 1):
-            ws.cell(row=current_row, column=col_idx).alignment = cell_alignment
-            ws.cell(row=current_row, column=col_idx).border = thin_border
-        current_row += 1
-
-    for col_idx, _ in enumerate(headers, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 22
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-
-# ---------------------------------------------------------------------------
-# Plantilla oficial de importación (.xlsx)
-# ---------------------------------------------------------------------------
-def generar_plantilla_xlsx():
-    """Genera la plantilla oficial de importación con los encabezados exactos en la primera fila y filas de ejemplo."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Importación Clientes'
-
-    header_font = Font(bold=True, color='FFFFFF', size=11)
-    header_fill = PatternFill(start_color='1f2937', end_color='1f2937', fill_type='solid')
-    header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    cell_alignment = Alignment(vertical='center', wrap_text=True)
-    thin_border = Border(
-        left=Side(style='thin', color='e5e7eb'),
-        right=Side(style='thin', color='e5e7eb'),
-        top=Side(style='thin', color='e5e7eb'),
-        bottom=Side(style='thin', color='e5e7eb'),
-    )
-
-    # Fila 1: encabezados exactos esperados por el backend.
-    header_row = 1
-    for col_idx, (key, header_text) in enumerate(CLIENT_COLUMNS, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-        cell.border = thin_border
-
-    ejemplo = [
-        'C', '1712345678', 'Juan Pérez', 'juan@correo.com', '0991234567', 'Av. Siempre Viva 123',
-        '', 'PBA1234', 'VIN123456789', 'MOTOR123', 'Toyota', 'Corolla', '2020', 'Rojo',
-        'M', 'GAS', 'AUTO', 'EC', '45000',
-    ]
-    ejemplo_veh2 = [
-        'C', '1712345678', 'Juan Pérez', '', '', '',
-        '', 'PBA5678', 'VIN987654321', '', 'Toyota', 'Hilux', '2019', 'Plata',
-        'M', 'DIE', 'CAMN', 'EC', '82000',
-    ]
-
-    example_fill = PatternFill(start_color='fef9c3', end_color='fef9c3', fill_type='solid')
-    for fila, datos in ((2, ejemplo), (3, ejemplo_veh2)):
-        for col_idx, value in enumerate(datos, start=1):
-            cell = ws.cell(row=fila, column=col_idx, value=value or '')
-            cell.alignment = cell_alignment
-            cell.border = thin_border
-            cell.fill = example_fill
-
-    # Nota orientativa fuera del área de datos (columna siguiente a los encabezados).
-    nota_col = len(CLIENT_COLUMNS) + 2
-    ws.cell(row=1, column=nota_col, value='Nota:')
-    nota_cell = ws.cell(
-        row=1, column=nota_col + 1,
-        value=('Si un cliente tiene varios vehículos, repite sus datos personales en cada fila '
-               'agrupadas por su número de identificación. Borra las filas de ejemplo antes de importar.'),
-    )
-    nota_cell.font = Font(size=10, italic=True, color='6b7280')
-
-    for col_idx, (key, _header) in enumerate(CLIENT_COLUMNS, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 20
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
+            # El cliente quedó guardado aunque alguna de sus filas de vehículo
+            # falle (esas filas van a `errores`): cuenta como importado.
+            self.resultado['exitosos'] += 1
+            self.resultado['nuevos' if creado else 'actualizados'] += 1

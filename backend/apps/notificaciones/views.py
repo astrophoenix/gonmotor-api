@@ -81,7 +81,7 @@ class EnviarRecordatorioVehiculoView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        propietario = recordatorios_svc._propietario_actual(vehiculo)
+        propietario = recordatorios_svc._propietario_actual(vehiculo, empresa_id)
         celular = normalizar_celular(propietario.cliente.telefono) if propietario else ''
         if not propietario or not celular:
             return Response(

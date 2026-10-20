@@ -16,11 +16,10 @@ Reglas aplicadas:
 
 from datetime import timedelta
 
-from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.ids_publicos import id_publico
-from apps.vehiculos.models import Vehiculo, VehiculoPropietario
+from apps.vehiculos.models import Vehiculo, propietario_actual
 from .mensajes import construir_mensaje_mantenimiento, construir_mensaje_prueba
 from .telefonos import normalizar_celular
 from .whatsapp import whatsapp_enviar_y_registrar
@@ -34,12 +33,9 @@ def get_preferencia(empresa):
     return preferencia
 
 
-def _propietario_actual(vehiculo):
-    return (
-        VehiculoPropietario.objects.filter(
-            vehiculo=vehiculo, es_actual=True
-        ).select_related('cliente').first()
-    )
+def _propietario_actual(vehiculo, empresa_id):
+    """Dueño actual del vehículo en la empresa que envía (nunca el de otra)."""
+    return propietario_actual(vehiculo, empresa_id)
 
 
 def _condicion_mantenimiento(vehiculo, preferencia):
@@ -87,10 +83,11 @@ def vehiculos_proximos_mantenimiento(empresa_id, preferencia):
         Vehiculo.objects
         .operativos_en(empresa_id)
         .filter(
-            Q(propietarios__es_actual=True),
-            Q(propietarios__cliente__telefono__isnull=False),
+            # En el mismo filter(): las tres condiciones sobre LA MISMA relación.
+            propietarios__es_actual=True,
+            propietarios__cliente__empresa_id=empresa_id,
+            propietarios__cliente__telefono__gt='',
         )
-        .exclude(propietarios__cliente__telefono='')
         .distinct()
     )
 
@@ -105,7 +102,7 @@ def vehiculos_proximos_mantenimiento(empresa_id, preferencia):
         ):
             continue
 
-        propietario = _propietario_actual(vehiculo)
+        propietario = _propietario_actual(vehiculo, empresa_id)
         if not propietario or not normalizar_celular(propietario.cliente.telefono):
             continue
 

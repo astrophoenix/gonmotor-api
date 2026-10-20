@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.db.models import Prefetch
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse
 from apps.core.ids_publicos import id_publico
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
@@ -26,14 +26,9 @@ from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande, validar_limite_exporte
 from apps.core.filters import BusquedaIndexadaFilter
-from .excel_import import (
+from apps.core.importacion import ErroresImportacionView, ImportarView, PlantillaImportacionView
+from .excel_import import ImportadorClientes
 
-    CLIENT_COLUMNS,
-    ColumnasFaltantesError,
-    importar_clientes_desde_xlsx,
-    generar_reporte_errores_xlsx,
-    generar_plantilla_xlsx,
-)
 
 
 
@@ -329,88 +324,19 @@ class ClienteExcelExportView(APIView):
             )
 
 
-class ClienteImportView(APIView):
+# --- Importación masiva (núcleo genérico: apps/core/importacion.py) --------
+class ClienteImportView(ImportarView):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
-    parser_classes = [MultiPartParser, FormParser]
-    renderer_classes = [JSONRenderer]
-
-    def post(self, request):
-        empresa_id = get_empresa_id_desde_request(request)
-
-        if not empresa_id:
-            return Response(
-                {'detail': 'No se pudo determinar la empresa activa.'},
-                status=403
-            )
-
-        archivo = request.FILES.get('archivo')
-        if not archivo:
-            return Response(
-                {'detail': 'No se envió ningún archivo. Debes adjuntar un archivo .xlsx.'},
-                status=400
-            )
-
-        nombre = (archivo.name or '').lower()
-        if not nombre.endswith('.xlsx'):
-            return Response(
-                {'detail': 'El archivo debe tener extensión .xlsx.'},
-                status=400
-            )
-
-        # ?validar=1 → vista previa: misma lógica, nada se guarda.
-        validar = str(request.query_params.get('validar', '')).lower() in ('1', 'true', 'si', 'sí')
-
-        try:
-            resultado = importar_clientes_desde_xlsx(archivo, empresa_id, validar=validar)
-            if resultado['errores'] and not resultado['exitosos'] and not validar:
-                estado = 400
-            else:
-                estado = 200
-            return Response(resultado, status=estado)
-        except ColumnasFaltantesError as e:
-            return Response(
-                {'detail': str(e), 'columnas_faltantes': e.columnas},
-                status=400
-            )
-        except Exception as e:
-            return Response(
-                {'detail': f'No se pudo procesar el archivo. Verifica el formato de las columnas. ({str(e)})'},
-                status=400
-            )
+    importador_class = ImportadorClientes
 
 
-class ClienteImportErroresView(APIView):
+class ClienteImportErroresView(ErroresImportacionView):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
-    renderer_classes = [JSONRenderer]
-
-    def post(self, request):
-        errores = request.data.get('errores')
-        if not isinstance(errores, list):
-            return Response(
-                {'detail': 'El campo "errores" debe ser una lista.'},
-                status=400
-            )
-
-        buffer = generar_reporte_errores_xlsx(errores)
-
-        response = HttpResponse(
-            buffer.read(),
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        response['Content-Disposition'] = 'attachment; filename="errores_importacion_clientes.xlsx"'
-        return response
+    importador_class = ImportadorClientes
+    nombre_archivo = 'errores_importacion_clientes.xlsx'
 
 
-class ClienteImportTemplateView(APIView):
+class ClienteImportTemplateView(PlantillaImportacionView):
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('clientes')]
-    renderer_classes = [JSONRenderer]
-
-    def get(self, request):
-        buffer = generar_plantilla_xlsx()
-
-        response = HttpResponse(
-            buffer.read(),
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        response['Content-Disposition'] = 'attachment; filename="plantilla_importacion_clientes.xlsx"'
-        return response
+    importador_class = ImportadorClientes
+    nombre_archivo = 'plantilla_importacion_clientes.xlsx'

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Vehiculo, VehiculoPropietario, vincular_empresa
+from .models import Vehiculo, asignar_propietario_actual, propietario_actual, vincular_empresa
 from apps.core.ids_publicos import id_publico
 from apps.clientes.models import Cliente
 from apps.authentication.utils import get_empresa_id_desde_request
@@ -106,21 +106,9 @@ class VehiculoNestedSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
 
     def _aplicar_propietario(self, instance, cliente):
         if cliente is not None:
-            relacion_activa = instance.propietarios.filter(es_actual=True).first()
-            if relacion_activa and relacion_activa.cliente_id == cliente.id:
-                return
-            if relacion_activa:
-                relacion_activa.es_actual = False
-                relacion_activa.fecha_fin = timezone.localdate()
-                relacion_activa.save(update_fields=['es_actual', 'fecha_fin'])
-            VehiculoPropietario.objects.update_or_create(
-                vehiculo=instance,
-                cliente=cliente,
-                es_actual=True,
-                defaults={'fecha_fin': None},
-            )
+            asignar_propietario_actual(instance, cliente)
         else:
-            instance.propietarios.filter(es_actual=True).update(
+            instance.propietarios.filter(es_actual=True, cliente__empresa_id=self._empresa_id()).update(
                 es_actual=False,
                 fecha_fin=timezone.localdate(),
             )
@@ -215,7 +203,7 @@ class VehiculoSerializer(EstadoPorEmpresaMixin, ModelSerializerPublico):
         precargados = getattr(obj, 'propietarios_actuales', None)
         if precargados is not None:
             return precargados[0] if precargados else None
-        return obj.propietarios.filter(es_actual=True).select_related('cliente').first()
+        return propietario_actual(obj, self._empresa_id())
 
     def get_cliente_nombre(self, obj):
         propietario = self._propietario_actual(obj)
