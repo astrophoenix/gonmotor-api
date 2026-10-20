@@ -29,7 +29,9 @@ from .serializers import EmpleadoWriteSerializer, EmpleadoReadSerializer
 from .utils import get_empresa_id_desde_request, get_contexto_desde_request, talleres_permitidos, es_admin_talleres
 from .permissions import TienePermiso, TieneRecurso
 from .permisos_repo import (
+    NOMBRES_RECURSOS,
     RECURSOS,
+    acciones_en_request,
     acciones_especiales_de_rol,
     catalogo_acciones,
     catalogo_recursos,
@@ -40,13 +42,14 @@ from .permisos_repo import (
     guardar_permisos_empresa,
     nombre_rol,
     permisos_de_rol,
+    permisos_en_request,
     puede_otorgar_bd,
     restablecer_permisos_empresa,
     roles_otorgables_para,
     roles_visible_para,
     tiene_override_empresa,
 )
-from .models import Permiso, Rol, UserProfile, UsuarioEmpresa
+from .models import AccionEspecial, Permiso, Rol, UserProfile, UsuarioEmpresa
 from apps.core.mixins import LookupPublicoMixin
 from apps.core.ids_publicos import id_publico, por_id_publico
 from apps.empresas.models import Empresa, Taller
@@ -670,7 +673,8 @@ class RolesView(APIView):
                 'nivel': rol.nivel,
                 'ver_todos_talleres': rol.ver_todos_talleres,
                 'is_active': rol.is_active,
-                'editable': True,
+                'editable': _motivo_rol_no_editable(request, contexto, rol) is None,
+                'motivo_no_editable': _motivo_rol_no_editable(request, contexto, rol),
                 'personalizado': tiene_override_empresa(rol, contexto.empresa_id),
                 'usuarios_count': conteos.get(rol.codigo, 0),
             }
@@ -700,7 +704,26 @@ class RolesView(APIView):
         return Response(_rol_payload(rol), status=201)
 
 
-def _rol_payload(rol, contexto=None):
+def _motivo_rol_no_editable(request, contexto, rol):
+    """Por qué la sesión no puede editar `rol` (None si puede).
+
+    Misma regla que aplican las vistas de escritura: hace falta modificar
+    usuarios, nadie edita su propio rol y los de sistema respetan la jerarquía.
+    """
+    if contexto is None or contexto.es_superusuario:
+        return None
+    permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+    if 'modificar' not in permisos.get('usuarios', ()):
+        return 'Tu rol solo permite consultar los roles.'
+    if rol.codigo == contexto.rol:
+        return 'Es tu propio rol: otra persona con permisos debe ajustarlo.'
+    if rol.es_sistema and not puede_otorgar_bd(contexto.rol, rol.codigo):
+        return 'Es un rol de nivel superior al tuyo.'
+    return None
+
+
+def _rol_payload(rol, contexto=None, request=None):
+    motivo = _motivo_rol_no_editable(request, contexto, rol) if request else None
     return {
         'id': id_publico(rol),
         'codigo': rol.codigo,
@@ -710,7 +733,8 @@ def _rol_payload(rol, contexto=None):
         'nivel': rol.nivel,
         'ver_todos_talleres': rol.ver_todos_talleres,
         'is_active': rol.is_active,
-        'editable': True,
+        'editable': motivo is None,
+        'motivo_no_editable': motivo,
         'personalizado': tiene_override_empresa(
             rol, contexto.empresa_id if contexto else None
         ),
@@ -761,7 +785,7 @@ class RolDetailView(APIView):
         if contexto.empresa_id:
             usuarios = usuarios.filter(empresa_id=contexto.empresa_id)
         return Response({
-            **_rol_payload(rol, contexto),
+            **_rol_payload(rol, contexto, request),
             'permisos': permisos,
             'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id),
             'usuarios': [
@@ -784,6 +808,9 @@ class RolDetailView(APIView):
             return Response(
                 {'detail': 'Los roles del sistema no se pueden editar.'}, status=403
             )
+        motivo = _motivo_rol_no_editable(request, contexto, rol)
+        if motivo:
+            return Response({'detail': motivo}, status=403)
         if 'nombre' in request.data:
             nombre = (request.data.get('nombre') or '').strip()
             if not nombre:
@@ -794,7 +821,57 @@ class RolDetailView(APIView):
         if 'is_active' in request.data:
             rol.is_active = bool(request.data.get('is_active'))
         rol.save(update_fields=['nombre', 'descripcion', 'is_active', 'updated_at'])
-        return Response(_rol_payload(rol, contexto))
+        return Response(_rol_payload(rol, contexto, request))
+
+
+def _escalada_de_permisos(request, contexto, rol, empresa_id, permisos=None, acciones=None):
+    """Response 403 si el cambio daría más poder del que tiene quien lo hace.
+
+    - Nadie cambia los permisos de su propio rol (ni para subírselos ni para
+      dejarse fuera por error).
+    - Solo se concede lo que uno mismo tiene: se compara con lo que el rol ya
+      tenía, así que reenviar un permiso existente no cuenta como concederlo.
+    El superusuario queda exento.
+    """
+    if contexto.es_superusuario:
+        return None
+    if rol.codigo == contexto.rol:
+        return Response({'detail': 'No puedes cambiar los permisos de tu propio rol.'}, status=403)
+
+    if permisos is not None:
+        propios = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+        actuales = permisos_de_rol(rol.codigo, empresa_id)
+        excedidos = []
+        for item in permisos:
+            recurso = item.get('recurso')
+            if recurso not in RECURSOS:
+                continue  # lo rechaza la validación del guardado (400)
+            modificar = bool(item.get('modificar'))
+            ver = bool(item.get('ver')) or modificar
+            for accion, pedido in (('ver', ver), ('modificar', modificar)):
+                if (
+                    pedido
+                    and accion not in actuales.get(recurso, ())
+                    and accion not in propios.get(recurso, ())
+                ):
+                    excedidos.append(NOMBRES_RECURSOS.get(recurso, recurso))
+                    break
+        if excedidos:
+            return Response({
+                'detail': 'No puedes conceder permisos que tu rol no tiene: '
+                          f'{", ".join(sorted(set(excedidos)))}.'
+            }, status=403)
+
+    if acciones is not None:
+        propias = acciones_en_request(request, contexto.rol, contexto.empresa_id)
+        actuales = set(acciones_especiales_de_rol(rol.codigo, empresa_id))
+        existentes = set(AccionEspecial.objects.filter(codigo__in=acciones).values_list('codigo', flat=True))
+        nuevas = existentes - actuales - propias
+        if nuevas:
+            return Response({
+                'detail': 'No puedes conceder acciones especiales que tu rol no tiene.'
+            }, status=403)
+    return None
 
 
 def _modo_edicion_rol(request, rol):
@@ -839,6 +916,11 @@ class RolPermisosView(APIView):
                 {'detail': "Se requiere el campo 'permisos' con la lista de recursos."},
                 status=400,
             )
+        escalada = _escalada_de_permisos(
+            request, contexto, rol, contexto.empresa_id if modo == 'empresa' else None, permisos=items,
+        )
+        if escalada:
+            return escalada
         try:
             if modo == 'empresa':
                 guardar_permisos_empresa(rol, contexto.empresa_id, items)
@@ -867,6 +949,9 @@ class RolPermisosView(APIView):
                 {'detail': 'Indica la empresa de la sesión para restablecer su configuración.'},
                 status=400,
             )
+        escalada = _escalada_de_permisos(request, contexto, rol, contexto.empresa_id)
+        if escalada:
+            return escalada
         restablecer_permisos_empresa(rol, contexto.empresa_id)
         return Response({
             'permisos': permisos_de_rol(rol.codigo, contexto.empresa_id),
@@ -896,6 +981,11 @@ class RolAccionesView(APIView):
                 {'detail': "Se requiere el campo 'acciones' con la lista de códigos."},
                 status=400,
             )
+        escalada = _escalada_de_permisos(
+            request, contexto, rol, contexto.empresa_id if modo == 'empresa' else None, acciones=codigos,
+        )
+        if escalada:
+            return escalada
         try:
             if modo == 'empresa':
                 guardar_acciones_empresa(rol, contexto.empresa_id, codigos)
@@ -924,6 +1014,9 @@ class RolAccionesView(APIView):
                 {'detail': 'Indica la empresa de la sesión para restablecer su configuración.'},
                 status=400,
             )
+        escalada = _escalada_de_permisos(request, contexto, rol, contexto.empresa_id)
+        if escalada:
+            return escalada
         restablecer_permisos_empresa(rol, contexto.empresa_id)
         return Response({'acciones': acciones_especiales_de_rol(rol.codigo, contexto.empresa_id)})
 

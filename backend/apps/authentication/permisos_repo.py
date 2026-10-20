@@ -182,6 +182,45 @@ NOMBRES_RECURSOS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Acciones especiales (lo que no cabe en la grilla ver/modificar)
+# ---------------------------------------------------------------------------
+# Catálogo del sistema: (código, nombre, descripción, recurso). El cliente no lo
+# edita; cada rol las recibe o no desde la pantalla de roles.
+ACCIONES_CATALOGO = (
+    (
+        'dashboard_tendencia_financiera',
+        'Ver tendencia financiera y operativa',
+        'Muestra en el panel de inicio el gráfico de ingresos y órdenes del periodo.',
+        'reportes',
+    ),
+    (
+        'dashboard_facturacion',
+        'Ver facturación del mes',
+        'Muestra en el panel de inicio la facturación, su variación y el ticket promedio.',
+        'reportes',
+    ),
+    (
+        'dashboard_cotizaciones_por_aprobar',
+        'Ver cotizaciones por aprobar',
+        'Muestra en el panel de inicio las cotizaciones enviadas que esperan respuesta y su monto.',
+        'cotizaciones',
+    ),
+)
+
+_ACCIONES_DASHBOARD = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO)
+
+# Semilla: quién recibe cada acción. Coincide con quién veía estos bloques
+# cuando el panel exigía `reportes`; el MECANICO no los recibe.
+MATRIZ_ACCIONES = {
+    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD,
+    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD,
+    'ADMIN_TALLER': _ACCIONES_DASHBOARD,
+    'ASESOR': _ACCIONES_DASHBOARD,
+    'CAJERO': _ACCIONES_DASHBOARD,
+}
+
+
 def _nombre_recursos_por_codigo():
     return {r.codigo: r.nombre for r in Recurso.objects.all()}
 
@@ -233,6 +272,18 @@ def sembrar_permisos_si_vacio(forzar=False):
             )
         )
     Permiso.objects.bulk_create(permisos)
+
+    acciones = [
+        AccionEspecial(codigo=codigo, nombre=nombre, descripcion=descripcion, recurso=recursos_por_codigo[recurso])
+        for codigo, nombre, descripcion, recurso in ACCIONES_CATALOGO
+    ]
+    AccionEspecial.objects.bulk_create(acciones)
+    acciones_por_codigo = {a.codigo: a for a in acciones}
+    PermisoEspecial.objects.bulk_create(
+        PermisoEspecial(rol=roles_por_codigo[codigo_rol], accion=acciones_por_codigo[codigo])
+        for codigo_rol, codigos in MATRIZ_ACCIONES.items()
+        for codigo in codigos
+    )
 
 
 def _baseline_permisos():
@@ -345,6 +396,19 @@ def permisos_de_rol(codigo, empresa_id=None):
     if empresa_id and rol.es_sistema:
         resultado.update(_permisos_empresa_overlay(rol, empresa_id))
     return resultado
+
+
+def acciones_en_request(request, codigo, empresa_id=None):
+    """Acciones especiales del rol vigente cacheadas en el request."""
+    cacheado = getattr(request, '_acciones_rol_gonmotor', None)
+    if isinstance(cacheado, dict) and cacheado.get('rol') == codigo and cacheado.get('empresa') == empresa_id:
+        return cacheado['acciones']
+    acciones = set(acciones_especiales_de_rol(codigo, empresa_id))
+    try:
+        request._acciones_rol_gonmotor = {'rol': codigo, 'empresa': empresa_id, 'acciones': acciones}
+    except AttributeError:
+        pass
+    return acciones
 
 
 def acciones_especiales_de_rol(codigo, empresa_id=None):

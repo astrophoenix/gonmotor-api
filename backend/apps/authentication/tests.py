@@ -14,6 +14,8 @@ from apps.authentication.models import PermisoEmpresa, PermisoEspecialEmpresa, R
 from apps.authentication.permissions import EsAdminDeEmpresa, TienePermiso
 from apps.authentication.permisos_repo import (
     ACCIONES,
+    MATRIZ_ACCIONES,
+    guardar_permisos,
     MATRIZ_ROLES,
     RECURSOS,
     ROLES_TODOS_TALLERES,
@@ -834,7 +836,7 @@ class PermisosEndpointTests(EscenarioMixin, APITestCase):
 	def test_mecanico_no_accede_a_usuarios_ni_reportes(self):
 		self._assert_nunca_aprueba('/api/auth/usuarios/', 'MECANICO')
 		self._assert_nunca_aprueba('/api/auth/roles/', 'MECANICO')
-		self._assert_nunca_aprueba('/api/core/dashboard-v2/', 'MECANICO')
+		self._assert_nunca_aprueba('/api/reportes/rentabilidad-empresa/', 'MECANICO')
 
 	def test_cajero_lee_inventario_no_lo_edita(self):
 		cliente = self._cliente(self._con_rol('CAJERO'))
@@ -905,7 +907,7 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		# El catálogo de acciones especiales no se siembra: los tests que lo usan
 		# crean su propia acción sobre un recurso existente.
 		from apps.authentication.models import AccionEspecial, Recurso
-		AccionEspecial.objects.get_or_create(
+		accion, _ = AccionEspecial.objects.get_or_create(
 			codigo='aprobar_descuentos',
 			defaults={
 				'nombre': 'Aprobar descuentos',
@@ -913,6 +915,10 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 				'recurso': Recurso.objects.get(codigo='cotizaciones'),
 			},
 		)
+		# Como toda acción del catálogo, la tienen los administradores: solo
+		# se concede lo que uno mismo tiene (EscalacionPermisosRolTests).
+		from apps.authentication.models import PermisoEspecial
+		PermisoEspecial.objects.get_or_create(rol=Rol.objects.get(codigo='ADMIN_EMPRESA'), accion=accion)
 
 	def _cliente(self, usuario):
 		cliente = APIClient()
@@ -928,7 +934,10 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 		codigos = [r['codigo'] for r in resp.json()]
 		esperados = sorted(c for c, _ in UsuarioEmpresa.ROLES if c != 'ADMIN_SISTEMA')
 		self.assertEqual(sorted(codigos), esperados)
-		self.assertTrue(all(r['editable'] for r in resp.json()))
+		# Todos editables salvo el propio rol del dueño (no se edita a sí mismo).
+		no_editables = {r['codigo']: r['motivo_no_editable'] for r in resp.json() if not r['editable']}
+		self.assertEqual(list(no_editables), ['ADMIN_EMPRESA'])
+		self.assertIn('propio rol', no_editables['ADMIN_EMPRESA'])
 		self.assertTrue(all(r['personalizado'] is False for r in resp.json()))
 
 	def test_crea_rol_personalizado_de_la_empresa(self):
@@ -1134,7 +1143,11 @@ class RolesPersonalizadosTests(EscenarioMixin, APITestCase):
 			acciones_especiales_de_rol('ASESOR', self.empresa_a.pk),
 			['aprobar_descuentos'],
 		)
-		self.assertEqual(acciones_especiales_de_rol('ASESOR'), [])
+		# El global conserva la semilla del ASESOR (acciones del panel de inicio).
+		self.assertEqual(
+			acciones_especiales_de_rol('ASESOR'),
+			sorted(MATRIZ_ACCIONES['ASESOR']),
+		)
 		self.assertTrue(
 			PermisoEspecialEmpresa.objects.filter(
 				rol=asesor, empresa_id=self.empresa_a.pk, permitido=True
@@ -1716,4 +1729,76 @@ class BloqueFlujoPermisosTests(EscenarioMixin, APITestCase):
 		self.assertEqual(resp.status_code, 200, resp.content)
 		efectivo = permisos_de_rol('ASESOR', self.empresa_a.pk)
 		self.assertTrue(all(r not in efectivo or not efectivo[r] for r in self.FLUJO))
+
+
+class EscalacionPermisosRolTests(EscenarioMixin, APITestCase):
+	"""Quien edita roles no puede darse más poder del que tiene.
+
+	Un usuario con un rol personalizado que incluye «modificar usuarios» no
+	edita su propio rol ni concede permisos o acciones que él no tiene.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.supervisor_rol = Rol.objects.create(
+			codigo='supervisor-a', nombre='Supervisor', empresa=self.empresa_a, es_sistema=False, nivel=1,
+		)
+		guardar_permisos(self.supervisor_rol, [
+			{'recurso': 'usuarios', 'ver': True, 'modificar': True},
+			{'recurso': 'clientes', 'ver': True, 'modificar': True},
+		])
+		self.otro_rol = Rol.objects.create(
+			codigo='auxiliar-a', nombre='Auxiliar', empresa=self.empresa_a, es_sistema=False, nivel=1,
+		)
+		self.supervisor = User.objects.create_user(username='supervisor', password='x')
+		_asignar(self.supervisor, self.empresa_a, 'supervisor-a', [self.a1])
+		self.cliente = APIClient()
+		self.cliente.force_authenticate(self.supervisor)
+		fijar_empresa(self.cliente, str(self.empresa_a.uuid))
+
+	def _put_permisos(self, rol, permisos):
+		return self.cliente.put(f'/api/auth/roles/{rol.uuid}/permisos/', {'permisos': permisos}, format='json')
+
+	def test_no_edita_los_permisos_de_su_propio_rol(self):
+		resp = self._put_permisos(self.supervisor_rol, [
+			{'recurso': 'usuarios', 'ver': True, 'modificar': True},
+			{'recurso': 'empresa', 'ver': True, 'modificar': True},
+		])
+		self.assertEqual(resp.status_code, 403, resp.content)
+		self.assertNotIn('empresa', permisos_de_rol('supervisor-a'))
+
+	def test_no_concede_permisos_que_no_tiene(self):
+		resp = self._put_permisos(self.otro_rol, [{'recurso': 'gastos', 'ver': True, 'modificar': True}])
+		self.assertEqual(resp.status_code, 403, resp.content)
+		self.assertEqual(permisos_de_rol('auxiliar-a'), {})
+
+	def test_no_concede_modificar_si_solo_tiene_ver(self):
+		guardar_permisos(self.supervisor_rol, [
+			{'recurso': 'usuarios', 'ver': True, 'modificar': True},
+			{'recurso': 'clientes', 'ver': True, 'modificar': False},
+		])
+		resp = self._put_permisos(self.otro_rol, [{'recurso': 'clientes', 'ver': True, 'modificar': True}])
+		self.assertEqual(resp.status_code, 403, resp.content)
+
+	def test_concede_lo_que_si_tiene(self):
+		resp = self._put_permisos(self.otro_rol, [{'recurso': 'clientes', 'ver': True, 'modificar': False}])
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.assertEqual(permisos_de_rol('auxiliar-a'), {'clientes': ['ver']})
+
+	def test_no_concede_acciones_especiales_que_no_tiene(self):
+		resp = self.cliente.put(
+			f'/api/auth/roles/{self.otro_rol.uuid}/acciones/',
+			{'acciones': ['dashboard_facturacion']},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 403, resp.content)
+		self.assertEqual(acciones_especiales_de_rol('auxiliar-a'), [])
+
+	def test_no_edita_las_acciones_de_su_propio_rol(self):
+		resp = self.cliente.put(
+			f'/api/auth/roles/{self.supervisor_rol.uuid}/acciones/',
+			{'acciones': []},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, 403, resp.content)
 

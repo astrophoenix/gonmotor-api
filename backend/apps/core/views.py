@@ -11,7 +11,12 @@ from rest_framework import status, permissions
 from rest_framework.renderers import JSONRenderer
 
 from apps.core.ids_publicos import id_publico, por_id_publico
-from apps.authentication.utils import get_empresa_id_desde_request, talleres_filtro_de_request
+from apps.authentication.permisos_repo import acciones_en_request, permisos_en_request
+from apps.authentication.utils import (
+    get_contexto_desde_request,
+    get_empresa_id_desde_request,
+    talleres_filtro_de_request,
+)
 from apps.authentication.permissions import TieneRecurso
 from apps.citas.models import Cita
 from apps.core.services.text_improver import TextImproverError, mejorar_texto
@@ -540,6 +545,74 @@ def _truncador(expresion, granularidad):
     return TruncDay(expresion) if granularidad == 'dia' else TruncMonth(expresion)
 
 
+# ── Panel de inicio: qué ve cada rol ─────────────────────────────────────
+# El panel no es un recurso: muestra datos de otros módulos. Cada bloque exige
+# el permiso `ver` de su dato, salvo los tres que el administrador concede como
+# acciones especiales (dinero y cotizaciones por aprobar).
+KPIS_POR_SECCION = {
+    'facturacion': ('facturacion_mes', 'facturacion_mes_anterior', 'variacion_facturacion_pct',
+                    'ticket_promedio', 'facturacion_periodo'),
+    'cotizaciones_por_aprobar': ('cotizaciones_pendientes', 'monto_cotizaciones_pendientes',
+                                 'cotizaciones_periodo', 'cotizaciones_aceptadas_periodo',
+                                 'tasa_aprobacion_pct'),
+    'vehiculos_en_taller': ('vehiculos_en_taller', 'vehiculos_demorados', 'dias_alerta_en_taller'),
+    'citas': ('citas_hoy', 'citas_pendientes_hoy', 'citas_periodo', 'citas_convertidas_periodo',
+              'tasa_conversion_cita_pct'),
+    'ordenes': ('ordenes_mes', 'ordenes_periodo'),
+    'inventario': ('alertas_stock_bajo', 'repuestos_agotados'),
+}
+
+
+def secciones_dashboard(request):
+    """`{seccion: bool}` según los permisos y acciones especiales del rol."""
+    contexto = get_contexto_desde_request(request)
+    permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+    acciones = acciones_en_request(request, contexto.rol, contexto.empresa_id)
+
+    def ve(recurso):
+        return 'ver' in permisos.get(recurso, ())
+
+    return {
+        'tendencia': 'dashboard_tendencia_financiera' in acciones,
+        'facturacion': 'dashboard_facturacion' in acciones,
+        'cotizaciones_por_aprobar': 'dashboard_cotizaciones_por_aprobar' in acciones,
+        'vehiculos_en_taller': ve('recepciones'),
+        'citas': ve('citas'),
+        'ordenes': ve('ordenes'),
+        'categoria_servicio': ve('inspecciones'),
+        'inventario': ve('inventario'),
+    }
+
+
+def recortar_dashboard(datos, secciones):
+    """Quita de la respuesta lo que el rol no puede ver (no se oculta en la UI: no viaja)."""
+    for seccion, claves in KPIS_POR_SECCION.items():
+        if not secciones[seccion]:
+            for clave in claves:
+                datos['kpis'].pop(clave, None)
+    if not secciones['tendencia']:
+        datos['tendencia'] = []
+    distribucion = datos['distribucion']
+    if not secciones['ordenes']:
+        distribucion['tipo_trabajo'] = []
+        distribucion['estado_orden'] = []
+        datos['ordenes_activas'] = []
+    elif not secciones['facturacion']:
+        # La dona por tipo de trabajo trae el monto facturado de cada tipo.
+        for fila in distribucion['tipo_trabajo']:
+            fila.pop('facturado', None)
+    if not secciones['categoria_servicio']:
+        distribucion['categoria_servicio'] = []
+    if not secciones['vehiculos_en_taller']:
+        datos['recepciones'] = []
+    if not secciones['citas']:
+        datos['citas'] = []
+    if not secciones['inventario']:
+        datos['stock_bajo'] = []
+    datos['secciones'] = secciones
+    return datos
+
+
 class DashboardV2View(APIView):
     """Agregados del Dashboard V2 con filtros de periodo y sucursal.
 
@@ -567,6 +640,8 @@ class DashboardV2View(APIView):
     - `recepciones` / `citas`: flujo operativo del periodo.
     - `ordenes_activas`: órdenes abiertas, más críticas primero.
     - `stock_bajo`: repuestos por debajo del mínimo.
+    - `secciones`: qué bloques puede ver el rol (`secciones_dashboard`); lo
+      que no puede ver no viaja en la respuesta (`recortar_dashboard`).
 
     Criterios de negocio:
     - "Vehículos en taller" = recepciones sin fecha de salida no rechazadas.
@@ -581,7 +656,8 @@ class DashboardV2View(APIView):
     Todo se filtra por el `empresa_id` activo de la sesión (tenant).
     """
 
-    permission_classes = [permissions.IsAuthenticated, TieneRecurso('reportes')]
+    # Todo usuario de la empresa tiene inicio; cada bloque se recorta por rol.
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         empresa_id = get_empresa_id_desde_request(request)
@@ -902,7 +978,7 @@ class DashboardV2View(APIView):
             taller_efectivo = Taller.objects.filter(pk=talleres[0], empresa_id=empresa_id).first()
 
         ahora = timezone.now()
-        return Response({
+        return Response(recortar_dashboard({
             'generado_en': ahora.isoformat(),
             'hoy': hoy.isoformat(),
             'periodo': {
@@ -934,7 +1010,7 @@ class DashboardV2View(APIView):
                 _serializar_orden_v2(orden, ahora) for orden in ordenes_activas
             ],
             'stock_bajo': stock_bajo,
-        })
+        }, secciones_dashboard(request)))
 
     # ── lectura de parámetros ──────────────────────────────────────────────
     @staticmethod
