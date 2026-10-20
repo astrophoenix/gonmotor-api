@@ -57,8 +57,10 @@ class ImportacionClientesTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data['total'], 5)
-        self.assertEqual(data['nuevos'], 1)
+        # María se guarda aunque su vehículo falle: cuenta como nueva.
+        self.assertEqual(data['nuevos'], 2)
         self.assertEqual(data['actualizados'], 1)
+        self.assertEqual(data['exitosos'], 3)
         self.assertEqual(data['vehiculos'], 3)
         self.assertEqual(len(data['errores']), 2)
         estados = {f['fila']: f['estado'] for f in data['filas']}
@@ -93,3 +95,16 @@ class ImportacionClientesTests(APITestCase):
         resp = self.client.post(URL + '?validar=1', {'archivo': _xlsx(self.filas, columnas)}, format='multipart')
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['columnas_faltantes'], ['Chasis/VIN', 'País de Origen'])
+
+    def test_descarga_plantilla_y_errores(self):
+        plantilla = self.client.get(URL + 'plantilla/')
+        self.assertEqual(plantilla.status_code, 200)
+        self.assertIn('spreadsheetml', plantilla['Content-Type'])
+
+        errores = self.client.post(
+            URL + 'errores/',
+            {'errores': [{'fila': 5, 'identificacion': '', 'datos': {'nombre': 'X'}, 'motivo': 'Falta la identificación.'}]},
+            format='json',
+        )
+        self.assertEqual(errores.status_code, 200)
+        self.assertIn('spreadsheetml', errores['Content-Type'])

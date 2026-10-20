@@ -365,13 +365,10 @@ def _procesar_filas(file, empresa_id, validar):
             continue
 
         estado_cliente = 'nuevo' if creado else 'actualiza'
-        grupo_ok = True
-        hubo_filas_validas = False
         for numero_fila, record in filas_grupo:
             try:
                 datos_vehiculo = _validar_vehiculo(record)
                 if not datos_vehiculo:
-                    hubo_filas_validas = True
                     filas_estado[numero_fila] = (estado_cliente, '')
                     continue
 
@@ -400,16 +397,15 @@ def _procesar_filas(file, empresa_id, validar):
                         cliente=cliente,
                         defaults={'es_actual': True, 'fecha_fin': None},
                     )
-                hubo_filas_validas = True
                 resultado['vehiculos'] += 1
                 filas_estado[numero_fila] = (estado_cliente, '')
             except Exception as e:
-                grupo_ok = False
                 registrar_error(numero_fila, identificacion, record, str(e))
 
-        if grupo_ok and hubo_filas_validas:
-            resultado['exitosos'] += 1
-            resultado['nuevos' if creado else 'actualizados'] += 1
+        # El cliente quedó guardado aunque alguna de sus filas de vehículo
+        # falle (esas filas van a `errores`): cuenta como importado.
+        resultado['exitosos'] += 1
+        resultado['nuevos' if creado else 'actualizados'] += 1
 
     if validar:
         resultado['filas'] = [

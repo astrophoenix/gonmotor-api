@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.db.models import Prefetch
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from apps.core.ids_publicos import id_publico
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
 from apps.core.utils.pdf_export import (
