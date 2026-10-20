@@ -2,6 +2,7 @@ import datetime
 import logging
 from io import BytesIO
 
+from django.db import transaction
 from django.db.models import Prefetch, prefetch_related_objects
 from django.http import FileResponse
 from django.utils import timezone
@@ -233,8 +234,9 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
                 'cotizacion_origen',
             )
             .prefetch_related(
-                'servicios',
-                'repuestos',
+                Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
+                Prefetch('repuestos', queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
+                'cotizaciones_aplicadas',
                 'fotos',
                 Prefetch('inspeccion', queryset=_inspecciones_con_relaciones()),
                 Prefetch('recepciones', queryset=_recepciones_con_relaciones()),
@@ -268,10 +270,43 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'orden')
 
+    def _bloquear_cotizacion_inicial(self, serializer):
+        from apps.cotizaciones.models import Cotizacion
+        cotizacion = serializer.validated_data.get('cotizacion_origen')
+        if cotizacion is not None:
+            cotizacion = Cotizacion.objects.select_for_update().get(pk=cotizacion.pk)
+            serializer.validated_data['cotizacion_origen'] = cotizacion
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        self._bloquear_cotizacion_inicial(serializer)
+        serializer.validate(dict(serializer.validated_data))
+        serializer.save()
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        self._bloquear_cotizacion_inicial(serializer)
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=serializer.instance.pk)
+        serializer.instance = orden
+        serializer.validate(dict(serializer.validated_data))
+        serializer.save()
+
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         # Solo se elimina una orden que aún no empezó: con trabajo iniciado
         # (o entregada/anulada) el registro se conserva como historial.
-        orden = self.get_object()
+        from apps.cotizaciones.models import Cotizacion
+
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=self.get_object().pk)
+        # El borrado lógico no dispara el PROTECT: dejaría cotizaciones aplicadas bloqueadas.
+        aplicadas = list(
+            Cotizacion.all_objects.filter(orden_trabajo_aplicada=orden).values_list('numero_cotizacion', flat=True)
+        )
+        if aplicadas:
+            raise serializers.ValidationError(
+                f'No se puede eliminar la orden: tiene cotizaciones aplicadas ({", ".join(aplicadas)}). '
+                'Cancélala si ya no se ejecutará.'
+            )
         if orden.estado != OrdenTrabajo.EstadoOrden.PENDIENTE:
             raise serializers.ValidationError(
                 'Solo se puede eliminar una orden de trabajo pendiente. '
@@ -887,8 +922,10 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
     documento_padre = 'orden_trabajo'
     documento_query_param = 'orden'
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        orden = serializer.validated_data.get('orden_trabajo')
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=serializer.validated_data['orden_trabajo'].pk)
+        serializer.validated_data['orden_trabajo'] = orden
         try:
             _check_orden_editable(orden)
             serializer.save()
@@ -906,13 +943,22 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
                 {'orden_trabajo': 'La orden de trabajo seleccionada no existe o no pertenece a tu empresa.'}
             )
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        _check_orden_editable(self.get_object().orden_trabajo)
+        origen = serializer.instance.orden_trabajo_id
+        destino = serializer.validated_data.get('orden_trabajo', serializer.instance.orden_trabajo).pk
+        ordenes = list(OrdenTrabajo.objects.select_for_update().filter(pk__in=[origen, destino]).order_by('pk'))
+        for orden in ordenes:
+            _check_orden_editable(orden)
         serializer.save()
-        serializer.instance.orden_trabajo.calcular_totales()
+        for orden in ordenes:
+            orden.calcular_totales()
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        orden = instance.orden_trabajo
+        if instance.detalle_cotizacion_origen_id:
+            raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
         instance.delete()
         orden.calcular_totales()
@@ -928,8 +974,10 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
     documento_padre = 'orden_trabajo'
     documento_query_param = 'orden'
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        orden = serializer.validated_data.get('orden_trabajo')
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=serializer.validated_data['orden_trabajo'].pk)
+        serializer.validated_data['orden_trabajo'] = orden
         try:
             _check_orden_editable(orden)
             serializer.save()
@@ -947,13 +995,22 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
                 {'orden_trabajo': 'La orden de trabajo seleccionada no existe o no pertenece a tu empresa.'}
             )
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        _check_orden_editable(self.get_object().orden_trabajo)
+        origen = serializer.instance.orden_trabajo_id
+        destino = serializer.validated_data.get('orden_trabajo', serializer.instance.orden_trabajo).pk
+        ordenes = list(OrdenTrabajo.objects.select_for_update().filter(pk__in=[origen, destino]).order_by('pk'))
+        for orden in ordenes:
+            _check_orden_editable(orden)
         serializer.save()
-        serializer.instance.orden_trabajo.calcular_totales()
+        for orden in ordenes:
+            orden.calcular_totales()
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        orden = instance.orden_trabajo
+        if instance.detalle_cotizacion_origen_id:
+            raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
         instance.delete()
         orden.calcular_totales()

@@ -111,6 +111,8 @@ def _item_orden(orden):
 
 def _orden_de_cotizacion(cotizacion):
     """Orden ligada a la cotización, en cualquiera de los dos sentidos."""
+    if cotizacion.orden_trabajo_aplicada_id:
+        return cotizacion.orden_trabajo_aplicada
     if cotizacion.orden_trabajo_origen_id:
         return cotizacion.orden_trabajo_origen
     return OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).first()
@@ -153,7 +155,7 @@ def _cotizaciones_de_inspeccion(inspeccion):
     cotizaciones = (
         apps.get_model('cotizaciones', 'Cotizacion')
         .objects.filter(inspeccion_origen=inspeccion)
-        .select_related('orden_trabajo_origen')
+        .select_related('orden_trabajo_origen', 'orden_trabajo_aplicada')
         .order_by('created_at', 'id')
     )
     return [_item_cotizacion(cotizacion) for cotizacion in cotizaciones]
@@ -168,7 +170,7 @@ def _relaciones_de_recepcion(recepcion):
         modelo_cotizacion.objects.filter(
             Q(recepcion_origen=recepcion) | Q(inspeccion_origen__recepcion=recepcion)
         )
-        .select_related('orden_trabajo_origen')
+        .select_related('orden_trabajo_origen', 'orden_trabajo_aplicada')
         .distinct()
         .order_by('created_at', 'id')
     )
@@ -260,9 +262,9 @@ def _relaciones_de_orden(orden):
     inspeccion = _inspeccion_de_orden(orden)
     cotizaciones = list(
         modelo_cotizacion.objects.filter(
-            Q(orden_trabajo_origen=orden) | Q(pk=orden.cotizacion_origen_id)
+            Q(orden_trabajo_origen=orden) | Q(orden_trabajo_aplicada=orden) | Q(pk=orden.cotizacion_origen_id)
         )
-        .select_related('orden_trabajo_origen')
+        .select_related('orden_trabajo_origen', 'orden_trabajo_aplicada')
         .distinct()
         .order_by('created_at', 'id')
     )
@@ -664,6 +666,24 @@ def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion, request
     relacionada = _buscar_relacionada(tipo, entidad_id, request)
     if relacionada is None:
         raise _error('No se encontró la entidad en la empresa actual.')
+    # Las relaciones manuales nunca incorporan ítems ni alteran una cotización aplicada.
+    Cotizacion = apps.get_model('cotizaciones', 'Cotizacion')
+    if tipo_entidad == 'cotizacion' or tipo == 'cotizacion':
+        cotizacion = entidad if tipo_entidad == 'cotizacion' else relacionada
+        cotizacion = Cotizacion.objects.select_for_update().get(pk=cotizacion.pk)
+        if cotizacion.orden_trabajo_aplicada_id:
+            raise _error('Una cotización aplicada no permite modificar sus relaciones.')
+        if tipo_entidad == 'cotizacion':
+            entidad = cotizacion
+        else:
+            relacionada = cotizacion
+    if isinstance(entidad, OrdenTrabajo):
+        entidad = OrdenTrabajo.objects.select_for_update().get(pk=entidad.pk)
+    if isinstance(relacionada, OrdenTrabajo):
+        relacionada = OrdenTrabajo.objects.select_for_update().get(pk=relacionada.pk)
+    for documento in (entidad, relacionada):
+        if (tipo_entidad == 'cotizacion' or tipo == 'cotizacion') and isinstance(documento, OrdenTrabajo) and documento.cotizaciones_aplicadas.exists():
+            raise _error('Una OT con cotizaciones aplicadas no permite modificar relaciones manualmente.')
     if accion == 'vincular':
         _validar_misma_visita(entidad, relacionada)
     vincular, desvincular = OPERACIONES[tipo_entidad]

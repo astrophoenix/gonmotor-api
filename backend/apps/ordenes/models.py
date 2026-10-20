@@ -208,6 +208,10 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 class DetalleServicioOrdenTrabajo(UuidPublicoModel, models.Model):
     """Líneas de mano de obra aplicadas en la orden."""
 
+    detalle_cotizacion_origen = models.OneToOneField(
+        'cotizaciones.DetalleServicioCotizacion', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='detalle_orden_trabajo',
+    )
     orden_trabajo = models.ForeignKey(OrdenTrabajo, on_delete=models.CASCADE, related_name='servicios')
     descripcion = models.CharField(max_length=255, verbose_name='Descripción del Servicio')
     mecanico_asignado = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Técnico que ejecutó el servicio')
@@ -251,6 +255,10 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, models.Model):
     """Líneas de repuestos consumidos en la orden."""
 
     contifico_producto_id = models.CharField(max_length=100, blank=True, null=True)
+    detalle_cotizacion_origen = models.OneToOneField(
+        'cotizaciones.DetalleRepuestoCotizacion', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='detalle_orden_trabajo',
+    )
     orden_trabajo = models.ForeignKey(OrdenTrabajo, on_delete=models.CASCADE, related_name='repuestos')
     codigo_repuesto = models.CharField(max_length=50, blank=True, null=True)
     descripcion = models.CharField(max_length=255, verbose_name='Descripción del Repuesto')

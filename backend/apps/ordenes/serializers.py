@@ -50,6 +50,15 @@ def url_imagen_absoluta(request, url):
     return url
 
 
+def _validar_detalle_aplicado(instance, attrs):
+    if instance is None or not instance.detalle_cotizacion_origen_id:
+        return
+    permitidos = {'mecanico_asignado', 'completado', 'costo_unitario'}
+    if any(campo not in permitidos and valor != getattr(instance, campo)
+           for campo, valor in attrs.items()):
+        raise serializers.ValidationError('No se pueden modificar datos comerciales ni reasignar un detalle cotizado.')
+
+
 class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
     campos_usuario = ('mecanico_asignado',)
@@ -59,6 +68,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
         fields = [
             'id',
             'orden_trabajo',
+            'detalle_cotizacion_origen',
             'servicio',
             'servicio_codigo',
             'descripcion',
@@ -74,13 +84,14 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
             'subtotal',
             'completado',
         ]
-        read_only_fields = ['id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+        read_only_fields = ['detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
 
     def _get_empresa_id(self, attrs):
         ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
         return ot.empresa_id if ot else None
 
     def validate(self, attrs):
+        _validar_detalle_aplicado(self.instance, attrs)
         empresa_id = self._get_empresa_id(attrs)
         servicio = attrs.get('servicio')
         if servicio is not None and servicio.empresa_id != empresa_id:
@@ -118,6 +129,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
         fields = [
             'id',
             'orden_trabajo',
+            'detalle_cotizacion_origen',
             'contifico_producto_id',
             'codigo_repuesto',
             'descripcion',
@@ -131,7 +143,11 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
             'monto_iva',
             'subtotal',
         ]
-        read_only_fields = ['id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+        read_only_fields = ['detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+
+    def validate(self, attrs):
+        _validar_detalle_aplicado(self.instance, attrs)
+        return attrs
 
     def _get_empresa_id(self, attrs):
         ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
@@ -906,6 +922,10 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
     recepciones = RecepcionVehiculoSerializer(many=True, read_only=True)
     inspeccion = InspeccionVehiculoSerializer(read_only=True)
     fotos = FotoOrdenTrabajoSerializer(many=True, read_only=True)
+    cotizaciones_aplicadas = serializers.SerializerMethodField()
+
+    def get_cotizaciones_aplicadas(self, obj):
+        return [id_publico(c) for c in obj.cotizaciones_aplicadas.all()]
 
     class Meta:
         model = OrdenTrabajo
@@ -918,6 +938,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'asesor',
             'mecanico_principal',
             'cotizacion_origen',
+            'cotizaciones_aplicadas',
             'numero_orden',
             'estado',
             'motivo_espera',
@@ -975,6 +996,16 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         }
 
     def validate(self, attrs):
+        if self.instance and self.instance.cotizaciones_aplicadas.exists():
+            for campo in ('cotizacion_origen', 'cliente', 'vehiculo', 'sucursal'):
+                if campo in attrs and attrs[campo] != getattr(self.instance, campo):
+                    raise serializers.ValidationError({campo: 'Una OT con cotizaciones aplicadas no puede reasignarse.'})
+        if attrs.get('cotizacion_origen') is not None:
+            cotizacion = attrs['cotizacion_origen']
+            if cotizacion.orden_trabajo_aplicada_id and (
+                self.instance is None or cotizacion.orden_trabajo_aplicada_id != self.instance.pk
+            ):
+                raise serializers.ValidationError({'cotizacion_origen': 'La cotización ya está aplicada a otra OT.'})
         estado = attrs.get('estado')
         if estado == 'EN_ESPERA':
             motivo = attrs.get('motivo_espera')

@@ -1,3 +1,5 @@
+from django.db import transaction
+
 from django.http import FileResponse
 
 import datetime
@@ -26,6 +28,7 @@ from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from apps.core.filters import BusquedaIndexadaFilter
 
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
+from .services import aplicar_cotizaciones
 from .pdf import exportar_cotizacion_pdf
 from .serializers import (
     CotizacionSerializer,
@@ -154,7 +157,7 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
             return Cotizacion.objects.none()
         queryset = (
             Cotizacion.objects.filter(empresa_id=empresa_id)
-            .select_related('cliente', 'vehiculo', 'sucursal', 'empresa', 'asesor__profile', 'aceptada_por', 'recepcion_origen', 'inspeccion_origen', 'orden_trabajo_origen', 'orden_trabajo')
+            .select_related('cliente', 'vehiculo', 'sucursal', 'empresa', 'asesor__profile', 'aceptada_por', 'recepcion_origen', 'inspeccion_origen__recepcion', 'orden_trabajo_origen', 'orden_trabajo_aplicada', 'orden_trabajo')
             .prefetch_related('servicios', 'repuestos')
         )
         return self.filtrar_por_taller(self._filtrar_cotizaciones(queryset))
@@ -193,11 +196,20 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
-        super().perform_update(serializer)
+        with transaction.atomic():
+            cotizacion = Cotizacion.objects.select_for_update().get(pk=serializer.instance.pk)
+            if cotizacion.orden_trabajo_aplicada_id:
+                raise serializers.ValidationError('Una cotización aplicada no puede modificarse ni reabrirse.')
+            serializer.instance = cotizacion
+            serializer.validate(dict(serializer.validated_data))
+            super().perform_update(serializer)
 
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         # Una vez enviada ya hay un cliente de por medio: se conserva el registro.
-        cotizacion = self.get_object()
+        cotizacion = Cotizacion.objects.select_for_update().get(pk=self.get_object().pk)
+        if cotizacion.orden_trabajo_aplicada_id:
+            raise serializers.ValidationError("Una cotización aplicada no puede eliminarse.")
         if cotizacion.estado != Cotizacion.EstadoCotizacion.PENDIENTE:
             raise serializers.ValidationError(
                 'Solo se puede eliminar una cotización pendiente. '
@@ -211,8 +223,9 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
         return responder_relaciones(request, self.get_object(), 'cotizacion')
 
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def sincronizar_inspeccion(self, request, pk=None):
-        cotizacion = self.get_object()
+        cotizacion = Cotizacion.objects.select_for_update().get(pk=self.get_object().pk)
         _check_cotizacion_editable(cotizacion)
         try:
             cotizacion.sincronizar_desde_inspeccion()
@@ -238,17 +251,43 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
         ],
     )
     def generar_orden(self, request, pk=None):
-        cotizacion = self.get_object()
-        metodo = request.data.get('metodo_aceptacion')
+        return self._aplicar_cotizaciones(request, inicial=self.get_object())
+
+    @action(
+        detail=False, methods=['post'], url_path='generar_orden_consolidada',
+        permission_classes=[permissions.IsAuthenticated, TieneRecurso('cotizaciones'),
+                            TienePermiso('ordenes', 'modificar')],
+    )
+    def generar_orden_consolidada(self, request):
+        return self._aplicar_cotizaciones(request)
+
+    def _aplicar_cotizaciones(self, request, inicial=None):
+        from apps.ordenes.models import OrdenTrabajo
+        from apps.core.ids_publicos import por_id_publico
+
+        # También el contrato individual admite cotizaciones adicionales y OT destino.
+        ids = request.data.get('cotizaciones', [])
+        if not isinstance(ids, list):
+            raise serializers.ValidationError({'cotizaciones': 'Se espera una lista de UUID.'})
+        seleccionadas = [inicial] if inicial is not None else []
+        for valor in ids:
+            cotizacion = por_id_publico(Cotizacion.objects.para_request(request), valor).first()
+            if cotizacion is None:
+                raise serializers.ValidationError({'cotizaciones': 'No se encontró una cotización en tu empresa y talleres permitidos.'})
+            seleccionadas.append(cotizacion)
+        orden = None
+        if request.data.get('orden_trabajo') is not None:
+            orden = por_id_publico(OrdenTrabajo.objects.para_request(request), request.data['orden_trabajo']).first()
+            if orden is None:
+                raise serializers.ValidationError({'orden_trabajo': 'No se encontró la OT en tu empresa y talleres permitidos.'})
         try:
-            ot = cotizacion.generar_orden(usuario=request.user, metodo_aceptacion=metodo)
+            ot = aplicar_cotizaciones(
+                seleccionadas, orden=orden, usuario=request.user, request=request,
+                metodo_aceptacion=request.data.get('metodo_aceptacion'),
+            )
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
-        return Response({
-            'id': id_publico(ot),
-            'numero_orden': ot.numero_orden,
-            'estado': cotizacion.estado,
-        })
+        return Response({'id': id_publico(ot), 'numero_orden': ot.numero_orden, 'estado': Cotizacion.EstadoCotizacion.ACEPTADA})
 
     @action(detail=True, methods=['get'], url_path='exportar-pdf')
     def exportar_pdf(self, request, pk=None):
@@ -286,6 +325,8 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
 
 
 def _check_cotizacion_editable(cotizacion):
+    if cotizacion is not None and cotizacion.orden_trabajo_aplicada_id:
+        raise serializers.ValidationError('Una cotización aplicada no permite modificar sus ítems.')
     if cotizacion is not None and cotizacion.estado not in ESTADOS_EDITABLES:
         raise serializers.ValidationError(
             f'La cotización está "{cotizacion.get_estado_display()}" y sus ítems no pueden modificarse.'
@@ -302,16 +343,23 @@ class DetalleServicioCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
     documento_padre = 'cotizacion'
     documento_query_param = 'cotizacion'
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        _check_cotizacion_editable(serializer.validated_data.get('cotizacion'))
+        cotizacion = serializer.validated_data['cotizacion']
+        _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=cotizacion.pk))
         super().perform_create(serializer)
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        _check_cotizacion_editable(self.get_object().cotizacion)
+        actual = serializer.instance.cotizacion_id
+        destino = serializer.validated_data.get('cotizacion', serializer.instance.cotizacion).pk
+        for cotizacion in Cotizacion.objects.select_for_update().filter(pk__in=[actual, destino]).order_by('pk'):
+            _check_cotizacion_editable(cotizacion)
         super().perform_update(serializer)
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        _check_cotizacion_editable(instance.cotizacion)
+        _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=instance.cotizacion_id))
         super().perform_destroy(instance)
 
 
@@ -325,14 +373,21 @@ class DetalleRepuestoCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
     documento_padre = 'cotizacion'
     documento_query_param = 'cotizacion'
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        _check_cotizacion_editable(serializer.validated_data.get('cotizacion'))
+        cotizacion = serializer.validated_data['cotizacion']
+        _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=cotizacion.pk))
         super().perform_create(serializer)
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        _check_cotizacion_editable(self.get_object().cotizacion)
+        actual = serializer.instance.cotizacion_id
+        destino = serializer.validated_data.get('cotizacion', serializer.instance.cotizacion).pk
+        for cotizacion in Cotizacion.objects.select_for_update().filter(pk__in=[actual, destino]).order_by('pk'):
+            _check_cotizacion_editable(cotizacion)
         super().perform_update(serializer)
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        _check_cotizacion_editable(instance.cotizacion)
+        _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=instance.cotizacion_id))
         super().perform_destroy(instance)

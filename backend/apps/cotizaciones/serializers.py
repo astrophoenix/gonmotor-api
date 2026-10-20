@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from rest_framework import serializers
 
-from apps.core.ids_publicos import id_publico
+from apps.core.ids_publicos import id_publico, uuid_por_pk
 from apps.authentication.utils import (
     get_empresa_id_desde_request,
     get_taller_desde_request,
@@ -12,7 +12,10 @@ from apps.authentication.utils import (
 from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarUsuariosEmpresaMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 
+from apps.ordenes.models import OrdenTrabajo
+
 from .models import Cotizacion, DetalleRepuestoCotizacion, DetalleServicioCotizacion
+from .services import orden_destino_id
 from apps.core.serializers import ModelSerializerPublico
 
 
@@ -133,6 +136,7 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
             'recepcion_origen',
             'inspeccion_origen',
             'orden_trabajo_origen',
+            'orden_trabajo_aplicada',
             'fecha_envio',
             'fecha_aceptacion',
             'aceptada_por',
@@ -144,6 +148,7 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
             'updated_at',
         ]
         read_only_fields = [
+            'orden_trabajo_aplicada',
             'id',
             'empresa',
             'numero_cotizacion',
@@ -184,6 +189,8 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
         request = self.context.get('request')
         empresa_id = get_empresa_id_desde_request(request) if request else None
         instance = self.instance
+        if instance is not None and instance.orden_trabajo_aplicada_id:
+            raise serializers.ValidationError('Una cotización aplicada no puede modificarse ni reabrirse.')
 
         # Cliente y vehículo se validan también al editar: una cotización no se
         # puede reasignar a datos de otra empresa.
@@ -347,14 +354,20 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
         rep['orden_trabajo_numero'] = (
             instance.orden_trabajo_origen.numero_orden if instance.orden_trabajo_origen_id else None
         )
-        orden_generada = getattr(instance, 'orden_trabajo', None)
+        orden_generada = instance.orden_trabajo_aplicada or getattr(instance, 'orden_trabajo', None)
         orden = orden_generada or instance.orden_trabajo_origen
         rep['orden_trabajo_estado'] = orden.estado if orden else None
         rep['orden_trabajo_estado_display'] = orden.get_estado_display() if orden else None
         rep['orden_generada_numero'] = orden_generada.numero_orden if orden_generada else None
         rep['orden_generada_id'] = id_publico(orden_generada)
-        rep['es_convertible'] = (
+        # es_convertible: genera una OT nueva (flujo individual de siempre).
+        # es_incorporable: pertenece a una OT existente y se aplica indicándola como destino.
+        pendiente = (
             instance.estado == Cotizacion.EstadoCotizacion.ACEPTADA
-            and instance.orden_trabajo_origen_id is None
+            and instance.orden_trabajo_aplicada_id is None
         )
+        destino = orden_destino_id(instance) if pendiente else None
+        rep['es_convertible'] = pendiente and destino is None
+        rep['es_incorporable'] = destino is not None
+        rep['orden_trabajo_destino_id'] = uuid_por_pk(OrdenTrabajo, destino, self.context.get('request'))
         return rep

@@ -1,7 +1,6 @@
 from decimal import Decimal
 from django.db import models
 from django.conf import settings
-from django.utils import timezone
 
 from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseModel, BaseTallerModel
@@ -84,6 +83,11 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
         blank=True,
         related_name='cotizaciones_generadas',
         help_text="Orden de trabajo de la cual surgió este presupuesto tras un diagnóstico"
+    )
+
+    orden_trabajo_aplicada = models.ForeignKey(
+        'ordenes.OrdenTrabajo', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='cotizaciones_aplicadas',
     )
 
     fecha_envio = models.DateTimeField(null=True, blank=True, verbose_name='Fecha de envío')
@@ -239,15 +243,13 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
 
     def _crear_orden_trabajo(self, usuario=None):
         from apps.ordenes.models import (
-            DetalleRepuestoOrdenTrabajo,
-            DetalleServicioOrdenTrabajo,
             OrdenTrabajo,
             TipoTrabajo,
         )
 
         inspeccion = self.inspeccion_origen
         if inspeccion is None and self.recepcion_origen:
-            inspeccion = self.recepcion_origen.inspecciones.first()
+            inspeccion = self.recepcion_origen.inspecciones.order_by('pk').first()
         recepcion = self.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
 
         tipo_trabajo = (
@@ -288,72 +290,13 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
             inspeccion.estado = 'FINALIZADA'
             inspeccion.save(update_fields=['orden_trabajo', 'estado', 'updated_at'])
 
-        for det in self.servicios.all():
-            DetalleServicioOrdenTrabajo.objects.create(
-                orden_trabajo=ot,
-                descripcion=det.descripcion,
-                horas_aplicadas=det.horas_estimadas,
-                precio_unitario=det.precio_unitario,
-                descuento=det.descuento,
-                iva_porcentaje=det.iva_porcentaje
-            )
-
-        for det in self.repuestos.all():
-            DetalleRepuestoOrdenTrabajo.objects.create(
-                orden_trabajo=ot,
-                codigo_repuesto=det.codigo_repuesto,
-                descripcion=det.descripcion,
-                cantidad=Decimal(det.cantidad or 1),
-                precio_unitario=det.precio_unitario_referencial,
-                descuento=det.descuento,
-                iva_porcentaje=det.iva_porcentaje
-            )
-
-        ot.calcular_totales()
         return ot
 
     def generar_orden(self, usuario=None, metodo_aceptacion=None):
-        if self.estado != self.EstadoCotizacion.ACEPTADA:
-            raise ValueError("La cotización debe estar aceptada para generar una orden.")
+        from .services import aplicar_cotizaciones
 
-        if self.orden_trabajo_origen_id:
-            raise ValueError("Esta cotización ya generó una orden de trabajo.")
-
-        if self.inspeccion_origen_id and self.inspeccion_origen.orden_trabajo_id:
-            raise ValueError(
-                f"La inspección {self.inspeccion_origen.numero_inspeccion} ya se convirtió "
-                f"en la orden {self.inspeccion_origen.orden_trabajo.numero_orden}."
-            )
-
-        recepcion = self.recepcion_origen
-        if recepcion is None and self.inspeccion_origen_id and self.inspeccion_origen.recepcion_id:
-            recepcion = self.inspeccion_origen.recepcion
-        if recepcion is not None and recepcion.orden_trabajo_id:
-            raise ValueError(
-                f"La recepción {recepcion.numero_recepcion} ya tiene la orden "
-                f"{recepcion.orden_trabajo.numero_orden}. Cotiza el trabajo adicional "
-                f"desde esa orden de trabajo."
-            )
-
-        if not self.servicios.exists() and not self.repuestos.exists():
-            raise ValueError(
-                "La cotización no tiene servicios ni repuestos: agrega al menos un "
-                "detalle antes de generar la orden de trabajo."
-            )
-
-        if self.total <= Decimal('0.00'):
-            raise ValueError(
-                "La cotización tiene total 0. Revisa precios y cantidades antes de "
-                "generar la orden de trabajo."
-            )
-
-        ot = self._crear_orden_trabajo(usuario=usuario)
-
-        self.fecha_aceptacion = self.fecha_aceptacion or timezone.now()
-        self.aceptada_por = self.aceptada_por or usuario
-        self.metodo_aceptacion = metodo_aceptacion or self.metodo_aceptacion or 'PRESENCIAL'
-        # Se mantiene en ACEPTADA; la existencia de orden_trabajo_origen indica conversión
-        self.save()
+        ot = aplicar_cotizaciones([self], usuario=usuario, metodo_aceptacion=metodo_aceptacion)
+        self.refresh_from_db()
         return ot
 
 
