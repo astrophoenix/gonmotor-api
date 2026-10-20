@@ -187,7 +187,15 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 ### Integraciones externas
 - **WhatsApp**: `WHATSAPP_MODE=mock` en local (sin llamadas externas, escribe en `logs/whatsapp_mock.log`). Proveedores Twilio/Meta documentados en `apps/notificaciones/services/whatsapp.py`. Comando programable: `python manage.py enviar_recordatorios_mantenimiento`.
 - **IA de texto**: `POST /api/core/mejorar-texto/` `{texto, contexto?}` → `{mejorado}`. Máx. 500 caracteres. Variables `AI_TEXT_API_KEY`, `AI_TEXT_BASE_URL`, `AI_TEXT_MODEL` (opcional). No enviar datos personales.
-- **Correo**: reset de contraseña con token de 1 hora; enlaces hacia `FRONTEND_URL`.
+- **Correo**: reset de contraseña con token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL` (obligatoria en producción: su valor por defecto es de desarrollo).
+
+### Sesiones y límites de autenticación
+- JWT: access de 15 min (el cliente lo renueva solo) y refresh de 30 días con rotación + lista negra.
+- **Restablecer o cambiar la contraseña revoca todas las sesiones** (`apps/authentication/sesiones.py`); el cambio de contraseña devuelve un par nuevo para el dispositivo actual con la misma empresa.
+- Límites propios (`apps/authentication/throttles.py`, tasas en `LIMITES_AUTENTICACION`, ajustables por `.env` con `LIMITE_LOGIN_IP`, `LIMITE_LOGIN_CUENTA`, `LIMITE_RECUPERACION_IP`, `LIMITE_RECUPERACION_CORREO`): login 10/min por IP y 20/h por cuenta; recuperación 5/h por IP y 3/h por correo. En `manage.py test` se desactivan salvo en sus tests. La caché por defecto es local a cada worker: con Redis el límite sería exacto.
+- Contraseñas nuevas: mínimo 12 caracteres (`PASSWORD_MIN_LENGTH` en el frontend debe coincidir).
+- El enlace público del `.ics` caduca `DIAS_VIGENCIA_ENLACE_CITA` (7) días después de la cita.
+- Regresión: `apps/authentication/tests_seguridad_sesiones.py`.
 
 ## Comandos habituales
 

@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from django.core import signing
 from django.db import IntegrityError
 from django.http import Http404, HttpResponse
+from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 from rest_framework import filters, permissions, serializers, viewsets
@@ -50,6 +53,11 @@ class CompartirCitaIcs(APIView):
         )
         if cita is None:
             raise Http404('La cita ya no existe.')
+        # El enlace se comparte con el cliente: deja de funcionar unos días
+        # después de la cita para que un reenvío no exponga sus datos para siempre.
+        limite = cita.fecha_cita + timedelta(days=settings.DIAS_VIGENCIA_ENLACE_CITA)
+        if timezone.localdate() > limite:
+            raise Http404('El enlace de esta cita ya caducó.')
 
         return respuesta_ics(cita)
 

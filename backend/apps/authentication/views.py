@@ -63,16 +63,27 @@ from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from apps.core.filters import BusquedaIndexadaFilter
 
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from .sesiones import nueva_sesion, revocar_sesiones
+from .throttles import (
+    LoginPorCuentaThrottle,
+    LoginPorIPThrottle,
+    MensajeLimiteMixin,
+    RecuperacionPorCorreoThrottle,
+    RecuperacionPorIPThrottle,
+)
 from django.contrib.auth import get_user_model
 from rest_framework.permissions import AllowAny
 
 User = get_user_model()
-class CustomTokenObtainPairView(TokenObtainPairView):
+class CustomTokenObtainPairView(MensajeLimiteMixin, TokenObtainPairView):
     """
     Endpoint de Login.
     Recibe username/email y password, retorna access y refresh tokens.
+    Limitado por IP y por cuenta contra la fuerza bruta.
     """
     serializer_class = CustomTokenObtainPairSerializer
+    throttle_classes = [LoginPorIPThrottle, LoginPorCuentaThrottle]
 
 
 class SelectCompanyView(APIView):
@@ -320,19 +331,27 @@ class ChangePasswordView(APIView):
             context={'request': request}
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user = serializer.save()
 
+        # Se cierran todas las sesiones (incluidas las de otros dispositivos) y
+        # se entrega una nueva a quien acaba de cambiarla, con su misma empresa.
+        revocar_sesiones(user)
         return Response(
-            {"detail": "Contraseña actualizada correctamente."},
+            {
+                "detail": "Contraseña actualizada correctamente. Se cerraron las sesiones abiertas en otros dispositivos.",
+                **nueva_sesion(user, request.auth),
+            },
             status=status.HTTP_200_OK
         )
 
 
-class PasswordResetRequestView(APIView):
+class PasswordResetRequestView(MensajeLimiteMixin, APIView):
     """
     Solicita un enlace de recuperación de contraseña enviado por correo.
+    Limitado por IP y por correo para que no sirva para inundar una bandeja.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [RecuperacionPorIPThrottle, RecuperacionPorCorreoThrottle]
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -389,7 +408,9 @@ class PasswordResetConfirmView(APIView):
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user = serializer.save()
+        # Quien restablece puede estar recuperando una cuenta comprometida.
+        revocar_sesiones(user)
 
         return Response(
             {"detail": "La contraseña ha sido restablecida exitosamente."},

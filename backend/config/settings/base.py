@@ -134,7 +134,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
         'OPTIONS': {
-            'min_length': 8,
+            # 12: punto medio entre OWASP (8) y NIST SP 800-63B-4 (15 si es el
+            # único factor). Solo afecta a contraseñas nuevas.
+            'min_length': 12,
         }
     },
     {
@@ -220,7 +222,9 @@ REST_FRAMEWORK = {
 
 # Configuración de JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    # Corto: si se filtra, sirve pocos minutos. El cliente HTTP lo renueva solo
+    # con el refresh token, así que el usuario no lo nota.
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
@@ -268,8 +272,24 @@ CORS_ALLOW_HEADERS = [
 # exponerla, el navegador la oculta en peticiones de otro origen.
 CORS_EXPOSE_HEADERS = ['content-disposition']
 
-# Tiempo de vida del token de recuperación en segundos (3600 = 1 hora)
+# Tiempo de vida del token de recuperación en segundos (3600 = 1 hora). Es de
+# un solo uso: deja de valer al cambiar la contraseña.
 PASSWORD_RESET_TIMEOUT = 3600  # 1 hora
+
+# Límites de intentos de login y recuperación (`apps/authentication/throttles.py`).
+LIMITES_AUTENTICACION = {
+    'login_ip': config('LIMITE_LOGIN_IP', default='10/min'),
+    'login_cuenta': config('LIMITE_LOGIN_CUENTA', default='20/hour'),
+    'recuperacion_ip': config('LIMITE_RECUPERACION_IP', default='5/hour'),
+    'recuperacion_correo': config('LIMITE_RECUPERACION_CORREO', default='3/hour'),
+}
+if sys.argv[1:2] == ['test']:
+    # Los tests autentican muchas veces seguidas desde la misma IP; los tests
+    # de los límites fijan sus propias tasas con override_settings.
+    LIMITES_AUTENTICACION = {clave: '100000/min' for clave in LIMITES_AUTENTICACION}
+
+# Días que sigue funcionando el enlace público del .ics después de la fecha de la cita.
+DIAS_VIGENCIA_ENLACE_CITA = config('DIAS_VIGENCIA_ENLACE_CITA', cast=int, default=7)
 
 
 # URL base del frontend para construir el enlace del email
