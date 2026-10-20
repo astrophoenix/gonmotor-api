@@ -52,6 +52,9 @@ Env: Local AdminUser:
 Desactivar el entorno virtual (cuando termines de trabajar):
 deactivate
 
+prod:
+galexanderomero24@gmail.com
+Pegazo13_
 ================================================
 # 1. Levantar el servidor de desarrollo UI
 cd /Users/astrophoenix/Desktop/gonmotor/gonmotor-ui         
