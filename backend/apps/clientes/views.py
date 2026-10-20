@@ -29,6 +29,7 @@ from apps.core.filters import BusquedaIndexadaFilter
 from .excel_import import (
 
     CLIENT_COLUMNS,
+    ColumnasFaltantesError,
     importar_clientes_desde_xlsx,
     generar_reporte_errores_xlsx,
     generar_plantilla_xlsx,
@@ -356,13 +357,21 @@ class ClienteImportView(APIView):
                 status=400
             )
 
+        # ?validar=1 → vista previa: misma lógica, nada se guarda.
+        validar = str(request.query_params.get('validar', '')).lower() in ('1', 'true', 'si', 'sí')
+
         try:
-            resultado = importar_clientes_desde_xlsx(archivo, empresa_id)
-            if resultado['errores'] and not resultado['exitosos']:
+            resultado = importar_clientes_desde_xlsx(archivo, empresa_id, validar=validar)
+            if resultado['errores'] and not resultado['exitosos'] and not validar:
                 estado = 400
             else:
                 estado = 200
             return Response(resultado, status=estado)
+        except ColumnasFaltantesError as e:
+            return Response(
+                {'detail': str(e), 'columnas_faltantes': e.columnas},
+                status=400
+            )
         except Exception as e:
             return Response(
                 {'detail': f'No se pudo procesar el archivo. Verifica el formato de las columnas. ({str(e)})'},

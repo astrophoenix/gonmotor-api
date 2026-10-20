@@ -184,6 +184,9 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
 
+### Importación masiva (Excel)
+- `POST /api/clientes/importar/` recibe `archivo` (.xlsx de la plantilla `importar/plantilla/`). Con `?validar=1` ejecuta la misma lógica dentro de una transacción revertida: no guarda nada y devuelve `filas` con el estado de cada una (`nuevo` / `actualiza` / `error` + `motivo`) para la vista previa de la web. Ambas respuestas traen `total`, `exitosos`, `nuevos`, `actualizados`, `vehiculos` y `errores`; si faltan columnas responde 400 con `columnas_faltantes`. Cada escritura va en su savepoint para que un fallo no rompa la transacción. Un importador nuevo para otro módulo debe seguir este contrato (lo consume `ImportWizardModal` del frontend). Regresión: `apps/clientes/tests_importacion.py`.
+
 ### Integraciones externas
 - **WhatsApp**: `WHATSAPP_MODE=mock` en local (sin llamadas externas, escribe en `logs/whatsapp_mock.log`). Proveedores Twilio/Meta documentados en `apps/notificaciones/services/whatsapp.py`. Comando programable: `python manage.py enviar_recordatorios_mantenimiento`.
 - **IA de texto**: `POST /api/core/mejorar-texto/` `{texto, contexto?}` → `{mejorado}`. Máx. 500 caracteres. Variables `AI_TEXT_API_KEY`, `AI_TEXT_BASE_URL`, `AI_TEXT_MODEL` (opcional). No enviar datos personales.
