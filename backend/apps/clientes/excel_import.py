@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from io import BytesIO
 
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
@@ -107,6 +108,14 @@ def _coerce_choice(value, choices, field_label):
     raise ValueError(f'"{value}" no es una opción válida para {field_label}.')
 
 
+class ColumnasFaltantesError(ValueError):
+    """El archivo no trae todas las columnas de la plantilla."""
+
+    def __init__(self, columnas):
+        self.columnas = columnas
+        super().__init__(f'Faltan columnas en el archivo: {", ".join(columnas)}')
+
+
 def load_rows_from_xlsx(file):
     """Lee el archivo .xlsx y devuelve las filas como dicts (sin encabezados)."""
     wb = load_workbook(file, read_only=True, data_only=True)
@@ -128,7 +137,7 @@ def load_rows_from_xlsx(file):
 
     missing = [canonical for key, canonical in COLUMN_MAP.items() if key not in index_map]
     if missing:
-        raise ValueError(f'Faltan columnas en el archivo: {", ".join(missing)}')
+        raise ColumnasFaltantesError(missing)
 
     data = []
     for row in rows[1:]:
@@ -268,21 +277,45 @@ def _agrupar_por_cliente(rows):
     return grupos
 
 
-def importar_clientes_desde_xlsx(file, empresa_id):
+def _resumen_vehiculo(record):
+    placa = _clean(record.get('placa')).upper()
+    if not placa:
+        return ''
+    detalle = ' '.join(x for x in [_clean(record.get('marca')), _clean(record.get('modelo'))] if x)
+    return f'{placa} · {detalle}' if detalle else placa
+
+
+def importar_clientes_desde_xlsx(file, empresa_id, validar=False):
     """
     Procesa un archivo .xlsx de clientes + vehículos de forma tolerante a fallos.
 
     - Agrupa las filas por identificación del cliente (mismo cliente con varios vehículos).
     - Cada fila o grupo fallido se registra sin detener el procesamiento.
-    - Devuelve un resumen con totales y errores por fila.
+    - Con ``validar=True`` ejecuta exactamente la misma lógica dentro de una
+      transacción que se revierte al final: nada se guarda y la respuesta
+      incluye el estado de cada fila (vista previa antes de importar).
 
-    Devuelve un dict con: total, exitosos, errores.
+    Devuelve un dict con: total, exitosos, nuevos, actualizados, vehiculos,
+    errores y, al validar, filas.
     """
+    if not validar:
+        return _procesar_filas(file, empresa_id, validar=False)
+    with transaction.atomic():
+        resultado = _procesar_filas(file, empresa_id, validar=True)
+        transaction.set_rollback(True)
+    return resultado
+
+
+def _procesar_filas(file, empresa_id, validar):
     resultado = {
         'total': 0,
         'exitosos': 0,
+        'nuevos': 0,
+        'actualizados': 0,
+        'vehiculos': 0,
         'errores': [],
     }
+    filas_estado = {}
 
     rows, _headers = load_rows_from_xlsx(file)
     resultado['total'] = len(rows)
@@ -291,89 +324,101 @@ def importar_clientes_desde_xlsx(file, empresa_id):
     filas = [(idx + 2, record) for idx, record in enumerate(rows)]
     grupos = _agrupar_por_cliente(filas)
 
-    for identificacion, filas_grupo in grupos.items():
-        numeros_fila = [fila[0] for fila in filas_grupo]
-        primer_numero = numeros_fila[0]
+    def registrar_error(numero_fila, identificacion, record, motivo):
+        resultado['errores'].append({
+            'fila': numero_fila,
+            'identificacion': identificacion,
+            'datos': record,
+            'motivo': motivo,
+        })
+        filas_estado[numero_fila] = ('error', motivo)
 
+    for identificacion, filas_grupo in grupos.items():
         try:
             datos_cliente = _validar_cliente(filas_grupo[0][1])
         except Exception as e:
-            resultado['errores'].append({
-                'fila': primer_numero,
-                'identificacion': identificacion,
-                'datos': filas_grupo[0][1],
-                'motivo': str(e),
-            })
+            # Todas las filas del grupo quedan fuera: se reportan todas para
+            # que el Excel de errores no pierda ninguna.
+            for numero_fila, record in filas_grupo:
+                registrar_error(numero_fila, identificacion, record, str(e))
             continue
 
         try:
-            cliente, _creado = Cliente.objects.update_or_create(
-                empresa_id=empresa_id,
-                identificacion=datos_cliente['identificacion'],
-                defaults={
-                    'tipo_identificacion': datos_cliente['tipo_identificacion'],
-                    'nombre': datos_cliente['nombre'],
-                    'email': datos_cliente['email'],
-                    'telefono': datos_cliente['telefono'],
-                    'direccion': datos_cliente['direccion'],
-                    'contifico_id': datos_cliente['contifico_id'],
-                    'is_active': True,
-                },
-            )
+            with transaction.atomic():
+                cliente, creado = Cliente.objects.update_or_create(
+                    empresa_id=empresa_id,
+                    identificacion=datos_cliente['identificacion'],
+                    defaults={
+                        'tipo_identificacion': datos_cliente['tipo_identificacion'],
+                        'nombre': datos_cliente['nombre'],
+                        'email': datos_cliente['email'],
+                        'telefono': datos_cliente['telefono'],
+                        'direccion': datos_cliente['direccion'],
+                        'contifico_id': datos_cliente['contifico_id'],
+                        'is_active': True,
+                    },
+                )
         except Exception as e:
-            resultado['errores'].append({
-                'fila': primer_numero,
-                'identificacion': identificacion,
-                'datos': filas_grupo[0][1],
-                'motivo': f'No se pudo crear/actualizar el cliente: {e}',
-            })
+            motivo = f'No se pudo crear/actualizar el cliente: {e}'
+            for numero_fila, record in filas_grupo:
+                registrar_error(numero_fila, identificacion, record, motivo)
             continue
 
-        grupo_ok = True
-        hubo_filas_validas = False
+        estado_cliente = 'nuevo' if creado else 'actualiza'
         for numero_fila, record in filas_grupo:
             try:
                 datos_vehiculo = _validar_vehiculo(record)
                 if not datos_vehiculo:
-                    hubo_filas_validas = True
+                    filas_estado[numero_fila] = (estado_cliente, '')
                     continue
 
-                vehiculo, _vcreado = Vehiculo.objects.update_or_create(
-                    placa=datos_vehiculo['placa'],
-                    defaults={
-                        'vin': datos_vehiculo['vin'],
-                        'numero_motor': datos_vehiculo['numero_motor'],
-                        'marca': datos_vehiculo['marca'],
-                        'modelo': datos_vehiculo['modelo'],
-                        'anio': datos_vehiculo['anio'],
-                        'color': datos_vehiculo['color'],
-                        'transmision': datos_vehiculo['transmision'],
-                        'combustible': datos_vehiculo['combustible'],
-                        'tipo': datos_vehiculo['tipo'],
-                        'pais_origen': datos_vehiculo['pais_origen'],
-                        'kilometraje_actual': datos_vehiculo['kilometraje_actual'],
-                        'is_active': True,
-                    },
-                )
-                vincular_empresa(vehiculo, empresa_id)
+                with transaction.atomic():
+                    vehiculo, _vcreado = Vehiculo.objects.update_or_create(
+                        placa=datos_vehiculo['placa'],
+                        defaults={
+                            'vin': datos_vehiculo['vin'],
+                            'numero_motor': datos_vehiculo['numero_motor'],
+                            'marca': datos_vehiculo['marca'],
+                            'modelo': datos_vehiculo['modelo'],
+                            'anio': datos_vehiculo['anio'],
+                            'color': datos_vehiculo['color'],
+                            'transmision': datos_vehiculo['transmision'],
+                            'combustible': datos_vehiculo['combustible'],
+                            'tipo': datos_vehiculo['tipo'],
+                            'pais_origen': datos_vehiculo['pais_origen'],
+                            'kilometraje_actual': datos_vehiculo['kilometraje_actual'],
+                            'is_active': True,
+                        },
+                    )
+                    vincular_empresa(vehiculo, empresa_id)
 
-                VehiculoPropietario.objects.update_or_create(
-                    vehiculo=vehiculo,
-                    cliente=cliente,
-                    defaults={'es_actual': True, 'fecha_fin': None},
-                )
-                hubo_filas_validas = True
+                    VehiculoPropietario.objects.update_or_create(
+                        vehiculo=vehiculo,
+                        cliente=cliente,
+                        defaults={'es_actual': True, 'fecha_fin': None},
+                    )
+                resultado['vehiculos'] += 1
+                filas_estado[numero_fila] = (estado_cliente, '')
             except Exception as e:
-                grupo_ok = False
-                resultado['errores'].append({
-                    'fila': numero_fila,
-                    'identificacion': identificacion,
-                    'datos': record,
-                    'motivo': str(e),
-                })
+                registrar_error(numero_fila, identificacion, record, str(e))
 
-        if grupo_ok and hubo_filas_validas:
-            resultado['exitosos'] += 1
+        # El cliente quedó guardado aunque alguna de sus filas de vehículo
+        # falle (esas filas van a `errores`): cuenta como importado.
+        resultado['exitosos'] += 1
+        resultado['nuevos' if creado else 'actualizados'] += 1
+
+    if validar:
+        resultado['filas'] = [
+            {
+                'fila': numero_fila,
+                'identificacion': _clean(record.get('identificacion')),
+                'nombre': _clean(record.get('nombre')),
+                'vehiculo': _resumen_vehiculo(record),
+                'estado': filas_estado.get(numero_fila, ('error', ''))[0],
+                'motivo': filas_estado.get(numero_fila, ('error', ''))[1],
+            }
+            for numero_fila, record in filas
+        ]
 
     return resultado
 
