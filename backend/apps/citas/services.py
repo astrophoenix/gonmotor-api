@@ -179,7 +179,7 @@ def ocupacion_del_dia(taller, fecha, cita_excluida=None):
             'inicio': inicio,
             'fin': fin,
             'origen': 'cita',
-            'referencia': cita.id,
+            'referencia': id_publico(cita),
             'detalle': cita.vehiculo.placa if cita.vehiculo_id else '',
         })
 
@@ -192,7 +192,7 @@ def ocupacion_del_dia(taller, fecha, cita_excluida=None):
             'inicio': inicio,
             'fin': fin,
             'origen': 'recepcion',
-            'referencia': recepcion.id,
+            'referencia': id_publico(recepcion),
             'detalle': recepcion.vehiculo.placa if recepcion.vehiculo_id else '',
         })
 

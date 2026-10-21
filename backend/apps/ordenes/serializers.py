@@ -1003,6 +1003,16 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                     'invalid': 'Ingresa una fecha y hora de ingreso válidas.',
                 },
             },
+            # Responsable obligatorio con la misma regla: la OT generada desde
+            # una cotización nace sin él y se asigna al editarla.
+            'mecanico_principal': {
+                'required': True,
+                'allow_null': False,
+                'error_messages': {
+                    'required': 'El responsable de la orden es obligatorio.',
+                    'null': 'El responsable de la orden es obligatorio.',
+                },
+            },
         }
 
     def validate(self, attrs):

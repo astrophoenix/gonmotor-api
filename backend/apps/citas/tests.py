@@ -294,8 +294,10 @@ class DisponibilidadEndpointTest(AgendaCitasBase):
         self.taller.capacidad_citas_dia = 3
         self.taller.capacidad_simultanea = 2
         self.taller.save()
-        self.assertEqual(self.crear(hora_cita='09:00').status_code, 201)
-        self.assertEqual(self.crear(hora_cita='09:30').status_code, 201)
+        primera = self.crear(hora_cita='09:00')
+        segunda = self.crear(hora_cita='09:30')
+        self.assertEqual(primera.status_code, 201)
+        self.assertEqual(segunda.status_code, 201)
 
         data = self.client.get(f'{DISPONIBILIDAD}?fecha={self.manana.isoformat()}').json()
 
@@ -308,6 +310,11 @@ class DisponibilidadEndpointTest(AgendaCitasBase):
         self.assertEqual(data['capacidad_simultanea'], 2)
         self.assertEqual(data['concurrentes_max'], 2)
         self.assertEqual(len(data['intervalos']), 2)
+        # Cada franja se identifica por el ID público (UUID), nunca por el entero interno.
+        self.assertEqual(
+            [i['referencia'] for i in data['intervalos']],
+            [primera.json()['id'], segunda.json()['id']],
+        )
 
     def test_evalua_una_concrecion_puntual(self):
         self.taller.capacidad_simultanea = 1

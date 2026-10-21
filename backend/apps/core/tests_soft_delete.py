@@ -303,7 +303,7 @@ class ApiSoftDeleteTest(TestCase):
         vehiculo_otra.empresas.add(self.otra)
         base = {'cliente': str(cliente.uuid), 'vehiculo': str(vehiculo.uuid), 'estado': 'PENDIENTE',
                 'prioridad': 'MEDIA', 'tipo_trabajo': 'MANTENIMIENTO', 'kilometraje': 0,
-                'fecha_ingreso': '2026-10-01T08:30:00Z'}
+                'fecha_ingreso': '2026-10-01T08:30:00Z', 'mecanico_principal': str(self.user.profile.uuid)}
 
         casos = {
             'cliente': {**base, 'cliente': str(cliente_otra.uuid)},

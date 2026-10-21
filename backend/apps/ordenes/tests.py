@@ -585,6 +585,7 @@ class OrdenTrabajoEstadosTests(TestCase):
                 'prioridad': 'MEDIA',
                 'tipo_trabajo': 'MANTENIMIENTO',
                 'kilometraje': self.vehiculo.kilometraje_actual,
+                'mecanico_principal': str(usuario.profile.uuid),
             },
             format='json',
         )
@@ -1740,6 +1741,7 @@ class OrdenSucursalConservadaTests(TestCase):
         usuario = get_user_model().objects.create_superuser(
             username='ot-sucursal', email='ot-sucursal@test.local', password='x'
         )
+        self.responsable = str(usuario.profile.uuid)
         self.client = APIClient()
         self.client.force_authenticate(usuario)
         fijar_empresa(self.client, str(self.empresa.uuid))
@@ -1755,6 +1757,7 @@ class OrdenSucursalConservadaTests(TestCase):
             'tipo_trabajo': 'MANTENIMIENTO',
             'kilometraje': self.vehiculo.kilometraje_actual,
             'fecha_ingreso': '2026-10-01T08:30:00Z',
+            'mecanico_principal': self.responsable,
             **extra,
         }
 
@@ -1811,6 +1814,32 @@ class OrdenSucursalConservadaTests(TestCase):
             self.assertIn('fecha_ingreso', resp.data)
 
         # Un PATCH que no envía el campo (p. ej. cambio de estado) conserva la fecha.
+        resp = self.client.patch(
+            f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
+            {'prioridad': 'ALTA'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_responsable_obligatorio(self):
+        """Sin responsable no se crea la orden, y al editar no puede quedar vacío."""
+        payload = self._payload()
+        payload.pop('mecanico_principal')
+        resp = self.client.post('/api/ordenes/ordenes-trabajo/', payload, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(str(resp.data['mecanico_principal'][0]), 'El responsable de la orden es obligatorio.')
+
+        creada = self.client.post('/api/ordenes/ordenes-trabajo/', self._payload(), format='json').data
+        for vacio in (None, ''):
+            resp = self.client.patch(
+                f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
+                {'mecanico_principal': vacio},
+                format='json',
+            )
+            self.assertEqual(resp.status_code, 400, vacio)
+            self.assertIn('mecanico_principal', resp.data)
+
+        # Un PATCH que no envía el campo (p. ej. cambio de estado) conserva el responsable.
         resp = self.client.patch(
             f"/api/ordenes/ordenes-trabajo/{creada['id']}/",
             {'prioridad': 'ALTA'},

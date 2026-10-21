@@ -205,6 +205,7 @@ class KilometrajeOrdenTests(HistorialBase):
             'prioridad': 'MEDIA',
             'tipo_trabajo': 'MANTENIMIENTO',
             'fecha_ingreso': '2026-10-01T08:30:00Z',
+            'mecanico_principal': str(self.admin.profile.uuid),
             **extra,
         }
 
