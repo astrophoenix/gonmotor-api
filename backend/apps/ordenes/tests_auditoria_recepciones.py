@@ -138,15 +138,15 @@ class AuditoriaRecepcionesTests(TestCase):
         self.cot_a1.refresh_from_db()
         self.assertIsNone(self.cot_a1.recepcion_origen_id)
 
-    def test_relaciones_vincula_con_permisos_y_mismo_taller(self):
+    def test_relaciones_no_edita_cotizacion_desde_recepcion(self):
         respuesta = self._cliente(self.asesor_a1).post(
             self._url('relaciones/'),
             {'tipo': 'cotizacion', 'id': str(self.cot_a1.uuid), 'accion': 'vincular'},
             format='json',
         )
-        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.status_code, 400, respuesta.content)
         self.cot_a1.refresh_from_db()
-        self.assertEqual(self.cot_a1.recepcion_origen_id, self.recepcion.pk)
+        self.assertIsNone(self.cot_a1.recepcion_origen_id)
 
     def test_solo_consulta_no_cambia_vinculos(self):
         respuesta = self._cliente(self.mecanico_a1).post(

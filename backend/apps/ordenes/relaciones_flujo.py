@@ -119,12 +119,8 @@ def _orden_de_cotizacion(cotizacion):
 
 
 def _item_cotizacion(cotizacion):
-    orden = _orden_de_cotizacion(cotizacion)
-    convertida = orden is not None
-    if convertida:
-        motivo = 'La cotización ya generó una orden de trabajo.'
-    else:
-        motivo = ''
+    convertida = bool(cotizacion.orden_trabajo_aplicada_id) or OrdenTrabajo.objects.filter(cotizacion_origen=cotizacion).exists()
+    motivo = 'La cotización ya está incorporada a una orden de trabajo.' if convertida else ''
     return {
         'id': id_publico(cotizacion),
         'label': cotizacion.numero_cotizacion or referencia_corta(cotizacion),
@@ -216,7 +212,7 @@ def _relaciones_de_cotizacion(cotizacion):
     return {
         'cita': ([_item_cita(cita) for cita in citas], recepcion is not None and not recepcion_indirecta),
         'recepcion': ([item_recepcion] if item_recepcion else [], recepcion is None and not recepcion_indirecta),
-        'inspeccion': ([_item_inspeccion(inspeccion)] if inspeccion else [], inspeccion is None),
+        'inspeccion': ([dict(_item_inspeccion(inspeccion), canDelete=True, deleteReason='')] if inspeccion else [], inspeccion is None),
         'orden': ([_item_orden(orden)] if orden else [], orden is None),
     }
 
@@ -290,13 +286,70 @@ LECTORES = {
 }
 
 
-def serializar_relaciones(entidad, tipo_entidad):
+# Solo se editan las FKs propias de estos documentos. La incorporación a una
+# OT pertenece exclusivamente al servicio de consolidación.
+VINCULOS_EDITABLES = {
+    'recepcion': {'cita'},
+    'inspeccion': {'recepcion'},
+    'cotizacion': {'recepcion', 'inspeccion', 'orden'},
+    'orden': set(),
+}
+
+
+def _motivo_bloqueo(entidad, tipo):
+    Cotizacion = apps.get_model('cotizaciones', 'Cotizacion')
+    if tipo == 'orden':
+        return 'Gestiona las cotizaciones desde la ficha de la orden de trabajo.'
+    if tipo == 'cotizacion':
+        if entidad.orden_trabajo_aplicada_id or OrdenTrabajo.objects.filter(cotizacion_origen=entidad).exists():
+            return 'Una cotización incorporada no permite modificar sus relaciones.'
+        if entidad.estado not in ('PENDIENTE', 'ENVIADA'):
+            return 'Las relaciones solo se pueden corregir mientras la cotización sea editable.'
+    if tipo == 'inspeccion':
+        if entidad.estado == 'FINALIZADA' or entidad.orden_trabajo_id:
+            return 'La inspección finalizada o asociada a una OT conserva sus relaciones.'
+        if entidad.recepcion_id and entidad.recepcion.orden_trabajo_id:
+            return 'La recepción ya está asociada a una orden de trabajo.'
+        if Cotizacion.objects.filter(inspeccion_origen=entidad).filter(
+            ~Q(estado__in=('PENDIENTE', 'ENVIADA')) | Q(orden_trabajo_aplicada__isnull=False)
+        ).exists():
+            return 'La inspección tiene cotizaciones comprometidas y conserva su recepción.'
+    if tipo == 'recepcion':
+        if entidad.orden_trabajo_id or entidad.estado == 'NO_ACEPTADA' or (
+            entidad.aceptacion_condiciones and entidad.fecha_firma_cliente
+        ):
+            return 'La recepción confirmada o asociada a una OT conserva sus relaciones.'
+    return ''
+
+
+def serializar_relaciones(entidad, tipo_entidad, request):
     grupos = LECTORES[tipo_entidad](entidad)
-    tipos = [tipo for tipo in TIPOS_FLUJO if tipo != tipo_entidad]
-    return {
-        'relaciones': {tipo: grupos[tipo][0] for tipo in tipos},
-        'puede_agregar': {tipo: grupos[tipo][1] for tipo in tipos},
-    }
+    contexto = get_contexto_desde_request(request)
+    permisos = permisos_en_request(request, contexto.rol, contexto.empresa_id)
+    motivo = _motivo_bloqueo(entidad, tipo_entidad)
+    relaciones, agregar, editar = {}, {}, {}
+    for tipo in TIPOS_FLUJO:
+        if tipo == tipo_entidad:
+            continue
+        acciones = permisos.get(RECURSO_POR_TIPO[tipo], ())
+        modelo = apps.get_model(*MODELO_POR_TIPO[tipo])
+        visibles = {str(id_publico(obj)) for obj in modelo.objects.para_request(request).filter(
+            uuid__in=[item['id'] for item in grupos[tipo][0]]
+        )} if 'ver' in acciones else set()
+        editar[tipo] = bool(not motivo and 'modificar' in permisos.get(RECURSO_POR_TIPO[tipo_entidad], ())
+                            and tipo in VINCULOS_EDITABLES[tipo_entidad]
+                            and 'modificar' in acciones)
+        relaciones[tipo] = [dict(item, canDelete=item['canDelete'] and editar[tipo])
+                            for item in grupos[tipo][0] if str(item['id']) in visibles]
+        agregar[tipo] = editar[tipo] and grupos[tipo][1]
+    recepcion = getattr(entidad, 'recepcion_origen', None) or getattr(entidad, 'recepcion', None)
+    inspeccion = getattr(entidad, 'inspeccion_origen', None)
+    if recepcion is None and inspeccion is not None:
+        recepcion = inspeccion.recepcion
+    return {'relaciones': relaciones, 'puede_agregar': agregar, 'puede_editar': editar,
+            'motivo_bloqueo': motivo,
+            'contexto': {campo: id_publico(getattr(entidad, campo, None))
+                         for campo in ('empresa', 'sucursal', 'cliente', 'vehiculo')} | {'recepcion': id_publico(recepcion)}}
 
 
 # ---------------------------------------------------------------------------
@@ -307,9 +360,13 @@ def serializar_relaciones(entidad, tipo_entidad):
 def _validar_misma_visita(entidad, relacionada):
     if getattr(relacionada, 'empresa_id', None) != entidad.empresa_id:
         raise _error('La entidad no pertenece a la empresa actual.')
-    if getattr(relacionada, 'cliente_id', None) not in (None, entidad.cliente_id):
+    taller = getattr(entidad, 'sucursal_id', None)
+    taller_relacionado = getattr(relacionada, 'sucursal_id', getattr(relacionada, 'taller_id', None))
+    if taller != taller_relacionado:
+        raise _error('La entidad pertenece a otro taller.')
+    if entidad.cliente_id and getattr(relacionada, 'cliente_id', None) not in (None, entidad.cliente_id):
         raise _error('La entidad pertenece a otro cliente.')
-    if getattr(relacionada, 'vehiculo_id', None) not in (None, entidad.vehiculo_id):
+    if entidad.vehiculo_id and getattr(relacionada, 'vehiculo_id', None) not in (None, entidad.vehiculo_id):
         raise _error('La entidad pertenece a otro vehículo.')
 
 
@@ -319,11 +376,6 @@ def _validar_cita(cita, destino_id):
     if cita.recepcion_generada_id not in (None, destino_id):
         raise _error('La cita ya está vinculada a otra recepción.')
     return cita
-
-
-def _validar_cotizacion_libre(cotizacion):
-    if _orden_de_cotizacion(cotizacion) is not None:
-        raise _error('No se puede relacionar una cotización ya convertida en orden.')
 
 
 def _buscar_relacionada(tipo, entidad_id, request):
@@ -345,352 +397,129 @@ def _exigir_modificar(request, tipo):
         raise PermissionDenied('No tienes permiso para modificar el documento relacionado.')
 
 
-# ---------------------------------------------------------------------------
-# Recepción
-# ---------------------------------------------------------------------------
-
-
-def _vincular_desde_recepcion(recepcion, tipo, entidad):
-    if tipo == 'orden':
-        if recepcion.orden_trabajo_id not in (None, entidad.pk):
-            raise _error('La recepción ya tiene otra orden relacionada.')
-        recepcion.orden_trabajo = entidad
-        recepcion.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cita':
-        entidad = _validar_cita(entidad, recepcion.pk)
-        setattr(entidad, 'recepcion_generada', recepcion)
-        entidad.save(update_fields=['recepcion_generada', 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if entidad.recepcion_id not in (None, recepcion.pk):
-            raise _error('La entidad ya está vinculada a otra recepción.')
-        if entidad.orden_trabajo_id:
-            raise _error('La inspección ya está asociada a una orden.')
-        if recepcion.inspecciones.exclude(pk=entidad.pk).exists():
-            raise _error('La recepción ya tiene una inspección registrada.')
-        entidad.recepcion = recepcion
-        entidad.save(update_fields=['recepcion', 'updated_at'])
-        return
-
-    if getattr(entidad, 'recepcion_origen_id') not in (None, recepcion.pk):
-        raise _error('La entidad ya está vinculada a otra recepción.')
-    _validar_cotizacion_libre(entidad)
-    if entidad.inspeccion_origen_id and entidad.inspeccion_origen.recepcion_id not in (None, recepcion.pk):
-        raise _error('La inspección de origen pertenece a otra recepción.')
-    entidad.recepcion_origen = recepcion
-    entidad.save(update_fields=['recepcion_origen', 'updated_at'])
-
-
-def _desvincular_desde_recepcion(recepcion, tipo, entidad):
-    if tipo == 'orden':
-        if recepcion.orden_trabajo_id != entidad.pk:
-            raise _error('La orden no está vinculada a esta recepción.')
-        recepcion.orden_trabajo = None
-        recepcion.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cotizacion':
-        if OrdenTrabajo.objects.filter(cotizacion_origen=entidad).exists():
-            raise _error('No se puede desvincular una cotización que ya generó una orden.')
-        campos = []
-        if entidad.recepcion_origen_id == recepcion.pk:
-            entidad.recepcion_origen = None
-            campos.append('recepcion_origen')
-        if entidad.inspeccion_origen_id and entidad.inspeccion_origen.recepcion_id == recepcion.pk:
-            entidad.inspeccion_origen = None
-            campos.append('inspeccion_origen')
-        if not campos:
-            raise _error('La cotización no está relacionada con esta recepción.')
-        entidad.save(update_fields=[*campos, 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if entidad.recepcion_id != recepcion.pk:
-            raise _error('La entidad no está vinculada a esta recepción.')
-        if entidad.orden_trabajo_id:
-            raise _error('No se puede desvincular una inspección asociada a una orden.')
-        entidad.recepcion = None
-        entidad.save(update_fields=['recepcion', 'updated_at'])
-        return
-
-    if entidad.recepcion_generada_id != recepcion.pk:
-        raise _error('La entidad no está vinculada a esta recepción.')
-    entidad.recepcion_generada = None
-    entidad.save(update_fields=['recepcion_generada', 'updated_at'])
-
-
-# ---------------------------------------------------------------------------
-# Inspección
-# ---------------------------------------------------------------------------
-
-
-def _vincular_desde_inspeccion(inspeccion, tipo, entidad):
-    if tipo == 'recepcion':
-        if inspeccion.recepcion_id not in (None, entidad.pk):
-            raise _error('La inspección ya está vinculada a otra recepción.')
-        if entidad.inspecciones.exclude(pk=inspeccion.pk).exists():
-            raise _error('La recepción ya tiene una inspección registrada.')
-        inspeccion.recepcion = entidad
-        inspeccion.save(update_fields=['recepcion', 'updated_at'])
-        return
-
-    if tipo == 'orden':
-        if inspeccion.orden_trabajo_id not in (None, entidad.pk):
-            raise _error('La inspección ya está asociada a otra orden.')
-        if entidad.inspeccion_id and entidad.inspeccion_id != inspeccion.pk:
-            raise _error('La orden ya está asociada a otra inspección.')
-        inspeccion.orden_trabajo = entidad
-        inspeccion.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cotizacion':
-        if entidad.inspeccion_origen_id not in (None, inspeccion.pk):
-            raise _error('La cotización ya está vinculada a otra inspección.')
-        _validar_cotizacion_libre(entidad)
-        if entidad.recepcion_origen_id and entidad.recepcion_origen_id != inspeccion.recepcion_id:
-            raise _error('La recepción de origen de la cotización pertenece a otra recepción.')
-        entidad.inspeccion_origen = inspeccion
-        entidad.save(update_fields=['inspeccion_origen', 'updated_at'])
-        return
-
-    if not inspeccion.recepcion_id:
-        raise _error('La inspección no tiene recepción: vincula primero la recepción.')
-    cita = _validar_cita(entidad, inspeccion.recepcion_id)
-    cita.recepcion_generada = inspeccion.recepcion
-    cita.save(update_fields=['recepcion_generada', 'updated_at'])
-
-
-def _desvincular_desde_inspeccion(inspeccion, tipo, entidad):
-    if tipo == 'recepcion':
-        if inspeccion.recepcion_id != entidad.pk:
-            raise _error('La recepción no está vinculada a esta inspección.')
-        if inspeccion.orden_trabajo_id:
-            raise _error('No se puede desvincular la recepción de una inspección ya asociada a una orden.')
-        inspeccion.recepcion = None
-        inspeccion.save(update_fields=['recepcion', 'updated_at'])
-        return
-
-    if tipo == 'orden':
-        if inspeccion.orden_trabajo_id != entidad.pk:
-            raise _error('La orden no está vinculada a esta inspección.')
-        inspeccion.orden_trabajo = None
-        inspeccion.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cotizacion':
-        if entidad.inspeccion_origen_id != inspeccion.pk:
-            raise _error('La cotización no está vinculada a esta inspección.')
-        _validar_cotizacion_libre(entidad)
-        entidad.inspeccion_origen = None
-        entidad.save(update_fields=['inspeccion_origen', 'updated_at'])
-        return
-
-    if not inspeccion.recepcion_id:
-        raise _error('La inspección no tiene recepción.')
-    if entidad.recepcion_generada_id != inspeccion.recepcion_id:
-        raise _error('La cita no está vinculada a esta recepción.')
-    entidad.recepcion_generada = None
-    entidad.save(update_fields=['recepcion_generada', 'updated_at'])
-
-
-# ---------------------------------------------------------------------------
-# Cotización
-# ---------------------------------------------------------------------------
-
-
-def _vincular_desde_cotizacion(cotizacion, tipo, entidad):
-    if tipo == 'orden':
-        if cotizacion.orden_trabajo_origen_id not in (None, entidad.pk):
-            raise _error('La cotización ya está vinculada a otra orden.')
-        if entidad.cotizacion_origen_id not in (None, cotizacion.pk):
-            raise _error('La orden ya tiene otra cotización de origen.')
-        cotizacion.orden_trabajo_origen = entidad
-        entidad.cotizacion_origen = cotizacion
-        cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        entidad.save(update_fields=['cotizacion_origen', 'updated_at'])
-        return
-
-    if tipo == 'recepcion':
-        if cotizacion.recepcion_origen_id not in (None, entidad.pk):
-            raise _error('La cotización ya está vinculada a otra recepción.')
-        cotizacion.recepcion_origen = entidad
-        cotizacion.save(update_fields=['recepcion_origen', 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if cotizacion.inspeccion_origen_id not in (None, entidad.pk):
-            raise _error('La cotización ya está vinculada a otra inspección.')
-        if entidad.orden_trabajo_id:
-            raise _error('No se puede relacionar una cotización con una inspección ya asociada a una orden.')
-        if entidad.recepcion_id and cotizacion.recepcion_origen_id not in (None, entidad.recepcion_id):
-            raise _error('La recepción de la cotización no coincide con la de la inspección.')
-        cotizacion.inspeccion_origen = entidad
-        cotizacion.save(update_fields=['inspeccion_origen', 'updated_at'])
-        return
-
-    if not cotizacion.recepcion_origen_id:
-        raise _error('La cotización no tiene recepción de origen: vincula primero la recepción.')
-    cita = _validar_cita(entidad, cotizacion.recepcion_origen_id)
-    cita.recepcion_generada = cotizacion.recepcion_origen
-    cita.save(update_fields=['recepcion_generada', 'updated_at'])
-
-
-def _desvincular_desde_cotizacion(cotizacion, tipo, entidad):
-    if tipo == 'recepcion':
-        if cotizacion.recepcion_origen_id != entidad.pk:
-            raise _error('La recepción no está vinculada a esta cotización.')
-        cotizacion.recepcion_origen = None
-        cotizacion.save(update_fields=['recepcion_origen', 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if cotizacion.inspeccion_origen_id != entidad.pk:
-            raise _error('La inspección no está vinculada a esta cotización.')
-        cotizacion.inspeccion_origen = None
-        cotizacion.save(update_fields=['inspeccion_origen', 'updated_at'])
-        return
-
-    if tipo == 'orden':
-        if _orden_de_cotizacion(cotizacion) is not None:
-            raise _error('No se puede quitar el vínculo de una cotización que ya generó una orden.')
-        if cotizacion.orden_trabajo_origen_id != entidad.pk and entidad.cotizacion_origen_id != cotizacion.pk:
-            raise _error('La orden no está vinculada a esta cotización.')
-        if entidad.cotizacion_origen_id == cotizacion.pk:
-            entidad.cotizacion_origen = None
-            entidad.save(update_fields=['cotizacion_origen', 'updated_at'])
-        if cotizacion.orden_trabajo_origen_id == entidad.pk:
-            cotizacion.orden_trabajo_origen = None
-            cotizacion.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        return
-
-    if not cotizacion.recepcion_origen_id:
-        raise _error('La cotización no tiene recepción de origen.')
-    if entidad.recepcion_generada_id != cotizacion.recepcion_origen_id:
-        raise _error('La cita no está vinculada a esta recepción.')
-    entidad.recepcion_generada = None
-    entidad.save(update_fields=['recepcion_generada', 'updated_at'])
-
-
-# ---------------------------------------------------------------------------
-# Orden de trabajo
-# ---------------------------------------------------------------------------
-
-
-def _vincular_desde_orden(orden, tipo, entidad):
-    if tipo == 'recepcion':
-        if entidad.orden_trabajo_id not in (None, orden.pk):
-            raise _error('La recepción ya tiene otra orden relacionada.')
-        entidad.orden_trabajo = orden
-        entidad.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if getattr(entidad, 'orden_trabajo_id') not in (None, orden.pk):
-            raise _error('La inspección ya está asociada a otra orden.')
-        inspeccion_actual = _inspeccion_de_orden(orden)
-        if inspeccion_actual is not None and inspeccion_actual.pk != entidad.pk:
-            raise _error('La orden ya está asociada a otra inspección.')
-        entidad.orden_trabajo = orden
-        entidad.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cotizacion':
-        if orden.cotizacion_origen_id not in (None, entidad.pk):
-            raise _error('La orden ya tiene otra cotización de origen.')
-        if entidad.orden_trabajo_origen_id not in (None, orden.pk):
-            raise _error('La cotización ya está vinculada a otra orden.')
-        orden.cotizacion_origen = entidad
-        entidad.orden_trabajo_origen = orden
-        orden.save(update_fields=['cotizacion_origen', 'updated_at'])
-        entidad.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        return
-
-    recepcion = _recepciones_de_orden(orden).first()
-    if recepcion is None:
-        raise _error('La orden no tiene recepción relacionada: vincula primero la recepción.')
-    cita = _validar_cita(entidad, recepcion.pk)
+def _vincular_desde_recepcion(recepcion, tipo, cita):
+    _validar_cita(cita, recepcion.pk)
     cita.recepcion_generada = recepcion
     cita.save(update_fields=['recepcion_generada', 'updated_at'])
 
 
-def _desvincular_desde_orden(orden, tipo, entidad):
-    if tipo == 'recepcion':
-        if entidad.orden_trabajo_id != orden.pk:
-            raise _error('La recepción no está vinculada a esta orden.')
-        entidad.orden_trabajo = None
-        entidad.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'inspeccion':
-        if getattr(entidad, 'orden_trabajo_id') != orden.pk:
-            raise _error('La inspección no está vinculada a esta orden.')
-        entidad.orden_trabajo = None
-        entidad.save(update_fields=['orden_trabajo', 'updated_at'])
-        return
-
-    if tipo == 'cotizacion':
-        if _orden_de_cotizacion(entidad) is not None:
-            raise _error('No se puede quitar el vínculo de una cotización que ya generó una orden.')
-        if entidad.orden_trabajo_origen_id != orden.pk and orden.cotizacion_origen_id != entidad.pk:
-            raise _error('La cotización no está vinculada a esta orden.')
-        if orden.cotizacion_origen_id == entidad.pk:
-            orden.cotizacion_origen = None
-            orden.save(update_fields=['cotizacion_origen', 'updated_at'])
-        if entidad.orden_trabajo_origen_id == orden.pk:
-            entidad.orden_trabajo_origen = None
-            entidad.save(update_fields=['orden_trabajo_origen', 'updated_at'])
-        return
-
-    recepcion = _recepciones_de_orden(orden).first()
-    if recepcion is None:
-        raise _error('La orden no tiene recepción relacionada.')
-    if entidad.recepcion_generada_id != recepcion.pk:
+def _desvincular_desde_recepcion(recepcion, tipo, cita):
+    if cita.recepcion_generada_id != recepcion.pk:
         raise _error('La cita no está vinculada a esta recepción.')
-    entidad.recepcion_generada = None
-    entidad.save(update_fields=['recepcion_generada', 'updated_at'])
+    cita.recepcion_generada = None
+    cita.save(update_fields=['recepcion_generada', 'updated_at'])
+
+
+def _vincular_desde_inspeccion(inspeccion, tipo, recepcion):
+    if inspeccion.recepcion_id not in (None, recepcion.pk):
+        raise _error('La inspección ya está vinculada a otra recepción.')
+    if recepcion.estado == 'NO_ACEPTADA':
+        raise _error('No se puede vincular una recepción no aceptada.')
+    if recepcion.orden_trabajo_id:
+        raise _error('La recepción ya está asociada a una orden de trabajo.')
+    if recepcion.inspecciones.exclude(pk=inspeccion.pk).exists():
+        raise _error('La recepción ya tiene una inspección registrada.')
+    Cotizacion = apps.get_model('cotizaciones', 'Cotizacion')
+    from apps.cotizaciones.services import _visitas_de_orden
+
+    for cotizacion in Cotizacion.objects.filter(inspeccion_origen=inspeccion):
+        _validar_misma_visita(cotizacion, recepcion)
+        if cotizacion.recepcion_origen_id not in (None, recepcion.pk):
+            raise _error('La recepción no coincide con la de las cotizaciones vinculadas.')
+        if cotizacion.orden_trabajo_origen_id:
+            visitas = _visitas_de_orden(cotizacion.orden_trabajo_origen)
+            if visitas and ('recepcion', recepcion.pk) not in visitas:
+                raise _error('La recepción pertenece a otra visita que la OT vinculada.')
+    inspeccion.recepcion = recepcion
+    inspeccion.save(update_fields=['recepcion', 'updated_at'])
+
+
+def _desvincular_desde_inspeccion(inspeccion, tipo, recepcion):
+    if inspeccion.recepcion_id != recepcion.pk:
+        raise _error('La recepción no está vinculada a esta inspección.')
+    inspeccion.recepcion = None
+    inspeccion.save(update_fields=['recepcion', 'updated_at'])
+
+
+CAMPO_COTIZACION = {'recepcion': 'recepcion_origen', 'inspeccion': 'inspeccion_origen', 'orden': 'orden_trabajo_origen'}
+
+
+def _vincular_desde_cotizacion(cotizacion, tipo, entidad):
+    campo = CAMPO_COTIZACION[tipo]
+    if getattr(cotizacion, f'{campo}_id') not in (None, entidad.pk):
+        raise _error('La cotización ya tiene otro documento vinculado. Quita primero el vínculo editable.')
+    if tipo == 'recepcion' and cotizacion.inspeccion_origen_id and cotizacion.inspeccion_origen.recepcion_id not in (None, entidad.pk):
+        raise _error('La inspección de origen pertenece a otra recepción.')
+    if tipo == 'inspeccion' and entidad.recepcion_id and cotizacion.recepcion_origen_id not in (None, entidad.recepcion_id):
+        raise _error('La recepción de la cotización no coincide con la de la inspección.')
+    setattr(cotizacion, campo, entidad)
+    cotizacion.save(update_fields=[campo, 'updated_at'])
+
+
+def _desvincular_desde_cotizacion(cotizacion, tipo, entidad):
+    campo = CAMPO_COTIZACION[tipo]
+    if getattr(cotizacion, f'{campo}_id') != entidad.pk:
+        raise _error('El documento no está vinculado directamente a esta cotización.')
+    setattr(cotizacion, campo, None)
+    cotizacion.save(update_fields=[campo, 'updated_at'])
 
 
 OPERACIONES = {
     'recepcion': (_vincular_desde_recepcion, _desvincular_desde_recepcion),
     'inspeccion': (_vincular_desde_inspeccion, _desvincular_desde_inspeccion),
     'cotizacion': (_vincular_desde_cotizacion, _desvincular_desde_cotizacion),
-    'orden': (_vincular_desde_orden, _desvincular_desde_orden),
 }
 
 
+def _validar_contexto_cotizacion(cotizacion):
+    from apps.cotizaciones.services import _visita, _visitas_de_orden
+
+    inspeccion = cotizacion.inspeccion_origen
+    recepcion = cotizacion.recepcion_origen or (inspeccion.recepcion if inspeccion else None)
+    for origen in (inspeccion, recepcion):
+        if origen is not None:
+            _validar_misma_visita(cotizacion, origen)
+    destinos = {obj.orden_trabajo_id for obj in (inspeccion, recepcion) if obj and obj.orden_trabajo_id}
+    if cotizacion.orden_trabajo_origen_id:
+        destinos.add(cotizacion.orden_trabajo_origen_id)
+    if len(destinos) > 1:
+        raise _error('Los documentos pertenecen a distintas órdenes de trabajo.')
+    if destinos:
+        orden = OrdenTrabajo.objects.get(pk=next(iter(destinos)))
+        _validar_misma_visita(cotizacion, orden)
+        if orden.estado not in ('PENDIENTE', 'EN_ESPERA', 'EN_PROCESO'):
+            raise _error('La orden no admite presupuestos adicionales en su estado actual.')
+        visita, visitas = _visita(inspeccion, recepcion), _visitas_de_orden(orden)
+        if visita and visitas and visita not in visitas:
+            raise _error('Los documentos pertenecen a distintas visitas.')
+
+
 def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion, request):
+    _exigir_modificar(request, tipo_entidad)
     _exigir_modificar(request, tipo)
+    if tipo not in VINCULOS_EDITABLES[tipo_entidad]:
+        raise _error('Este vínculo es de consulta. Modifica la relación desde su documento de origen; para incorporar cotizaciones utiliza el flujo de la OT.')
     relacionada = _buscar_relacionada(tipo, entidad_id, request)
     if relacionada is None:
-        raise _error('No se encontró la entidad en la empresa actual.')
-    # Las relaciones manuales nunca incorporan ítems ni alteran una cotización aplicada.
-    Cotizacion = apps.get_model('cotizaciones', 'Cotizacion')
-    if tipo_entidad == 'cotizacion' or tipo == 'cotizacion':
-        cotizacion = entidad if tipo_entidad == 'cotizacion' else relacionada
-        cotizacion = Cotizacion.objects.select_for_update().get(pk=cotizacion.pk)
-        if cotizacion.orden_trabajo_aplicada_id:
-            raise _error('Una cotización aplicada no permite modificar sus relaciones.')
-        if tipo_entidad == 'cotizacion':
-            entidad = cotizacion
-        else:
-            relacionada = cotizacion
-    if isinstance(entidad, OrdenTrabajo):
-        entidad = OrdenTrabajo.objects.select_for_update().get(pk=entidad.pk)
-    if isinstance(relacionada, OrdenTrabajo):
-        relacionada = OrdenTrabajo.objects.select_for_update().get(pk=relacionada.pk)
-    for documento in (entidad, relacionada):
-        if (tipo_entidad == 'cotizacion' or tipo == 'cotizacion') and isinstance(documento, OrdenTrabajo) and documento.cotizaciones_aplicadas.exists():
-            raise _error('Una OT con cotizaciones aplicadas no permite modificar relaciones manualmente.')
+        raise _error('No se encontró la entidad en la empresa y taller actuales.')
+    # Mismo orden que la consolidación: cotización, inspección, recepción, OT.
+    pares = {tipo_entidad: entidad, tipo: relacionada}
+    for clase in ('cotizacion', 'inspeccion', 'recepcion', 'orden', 'cita'):
+        if clase in pares:
+            obj = pares[clase]
+            pares[clase] = type(obj).objects.para_request(request).select_for_update().filter(pk=obj.pk).first()
+            if pares[clase] is None:
+                raise _error('El documento ya no está disponible.')
+    entidad, relacionada = pares[tipo_entidad], pares[tipo]
+    motivo = _motivo_bloqueo(entidad, tipo_entidad)
+    if motivo:
+        raise _error(motivo)
     if accion == 'vincular':
         _validar_misma_visita(entidad, relacionada)
     vincular, desvincular = OPERACIONES[tipo_entidad]
-    if accion == 'vincular':
-        vincular(entidad, tipo, relacionada)
-    else:
-        desvincular(entidad, tipo, relacionada)
+    (vincular if accion == 'vincular' else desvincular)(entidad, tipo, relacionada)
+    if tipo_entidad == 'cotizacion':
+        _validar_contexto_cotizacion(entidad)
 
 
 def aplicar_relacion(entidad, tipo_entidad, data, request):
@@ -715,5 +544,5 @@ def aplicar_relacion(entidad, tipo_entidad, data, request):
 
 def responder_relaciones(request, entidad, tipo_entidad):
     if request.method == 'GET':
-        return Response(serializar_relaciones(entidad, tipo_entidad))
+        return Response(serializar_relaciones(entidad, tipo_entidad, request))
     return Response(aplicar_relacion(entidad, tipo_entidad, request.data, request))

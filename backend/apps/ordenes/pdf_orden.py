@@ -16,10 +16,10 @@ Página 1:
   ├──────────────────────────────────────────────────────────────────┤
   │ ① TRABAJO     servicios (técnico, hecho/pendiente) y repuestos    │
   │               Son · Notas para el cliente        Subtotal … TOTAL │
-  │ ___________________       ___________________                     │
   │ ② EVIDENCIA   fotos del trabajo (3 por fila)                      │
+  │ Condición · ___________________       ___________________         │
   └──────────────────────────────────────────────────────────────────┘
-Las firmas cierran la orden y las fotos quedan como anexo. Páginas 2+:
+La condición y las firmas cierran el documento, tras la evidencia. Páginas 2+:
 "EMPRESA · ORDEN DE TRABAJO Nº … (continuación)". Pie en todas: generado por /
 "Página X de Y".
 """
@@ -339,15 +339,13 @@ def _resumen_valores(doc: _DocumentoOrden, ancho: float) -> Table:
     return resumen
 
 
-def _seccion_trabajo(doc: _DocumentoOrden, ancho: float) -> tuple:
-    """Devuelve ``(flujo, resumen)``: el resumen de valores se entrega aparte
-    para que viaje junto con las firmas (``None`` si la orden no tiene ítems)."""
+def _seccion_trabajo(doc: _DocumentoOrden, ancho: float) -> list:
     encabezado = _EncabezadoFase(1, 'Trabajo', doc.resumen_trabajo(), ancho)
     if not (doc.servicios or doc.repuestos):
         return [KeepTogether([
             encabezado, Spacer(1, 9), _caja_vacia('Esta orden aún no tiene servicios ni repuestos.', ancho),
-        ]), Spacer(1, ESPACIO_FASE)], None
-    return [encabezado, Spacer(1, 9), *_tabla_trabajo(doc, ancho), Spacer(1, 12)], _resumen_valores(doc, ancho)
+        ])]
+    return [encabezado, Spacer(1, 9), *_tabla_trabajo(doc, ancho), Spacer(1, 12), _resumen_valores(doc, ancho)]
 
 
 def _seccion_evidencia(doc: _DocumentoOrden, ancho: float) -> list:
@@ -361,9 +359,8 @@ def _seccion_evidencia(doc: _DocumentoOrden, ancho: float) -> list:
     return [KeepTogether(flujo[:3]), *flujo[3:]]
 
 
-def _cierre(doc: _DocumentoOrden, ancho: float, resumen=None) -> list:
-    """Aviso y firmas. Van tras los valores (con los que viajan) y antes de la
-    evidencia: la hoja 1 queda como la orden firmable y las fotos, de anexo."""
+def _cierre(doc: _DocumentoOrden, ancho: float) -> list:
+    """Condición y firmas: cierran el documento, después de la evidencia."""
     cliente = getattr(doc.orden.cliente, 'nombre', '') or ''
     asesor = _nombre_persona(doc.orden.asesor)
     ancho_firma = min(ancho * 0.36, 190)
@@ -387,8 +384,7 @@ def _cierre(doc: _DocumentoOrden, ancho: float, resumen=None) -> list:
         texto = 'Con su firma, el cliente declara recibir el vehículo con el trabajo detallado en esta orden.'
     else:
         texto = 'Ningún trabajo adicional a los detallados en esta orden se realiza sin la aprobación del cliente.'
-    previo = [resumen, Spacer(1, 16)] if resumen is not None else []
-    return [KeepTogether([*previo, Paragraph(texto, CIERRE), Spacer(1, 34), firmas])]
+    return [KeepTogether([Paragraph(texto, CIERRE), Spacer(1, 34), firmas])]
 
 
 # ---------------------------------------------------------------------------
@@ -434,15 +430,15 @@ def exportar_orden_pdf(
         ),
     ])
 
-    trabajo, resumen = _seccion_trabajo(doc_datos, ancho)
     story = [
         NextPageTemplate('cn'),
         doc_datos.cabecera(ancho),
         doc_datos.datos(ancho),
         Spacer(1, ESPACIO_FASE),
-        *trabajo,
-        *_cierre(doc_datos, ancho, resumen),
-        Spacer(1, ESPACIO_FASE * 1.4),
+        *_seccion_trabajo(doc_datos, ancho),
+        Spacer(1, ESPACIO_FASE),
         *_seccion_evidencia(doc_datos, ancho),
+        Spacer(1, ESPACIO_FASE * 1.4),
+        *_cierre(doc_datos, ancho),
     ]
     doc.build(story, canvasmaker=NumberedCanvas)
