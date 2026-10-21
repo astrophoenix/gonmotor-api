@@ -520,6 +520,32 @@ def actualizar_relacion(entidad, tipo_entidad, tipo, entidad_id, accion, request
     (vincular if accion == 'vincular' else desvincular)(entidad, tipo, relacionada)
     if tipo_entidad == 'cotizacion':
         _validar_contexto_cotizacion(entidad)
+    _registrar_vinculo(request, entidad, tipo_entidad, relacionada, tipo, accion == 'vincular')
+
+
+NOMBRES_TIPO = {
+    'cita': 'Cita', 'recepcion': 'Recepción', 'inspeccion': 'Inspección',
+    'cotizacion': 'Cotización', 'orden': 'Orden de trabajo',
+}
+
+
+def _referencia(obj, tipo):
+    if tipo == 'cita':
+        return _etiqueta_cita(obj)
+    numero = {
+        'recepcion': 'numero_recepcion', 'inspeccion': 'numero_inspeccion',
+        'cotizacion': 'numero_cotizacion', 'orden': 'numero_orden',
+    }[tipo]
+    return getattr(obj, numero, None) or referencia_corta(obj)
+
+
+def _registrar_vinculo(request, entidad, tipo_entidad, relacionada, tipo, vinculado):
+    """Historial: el vínculo queda en los dos documentos (la cita no tiene historial)."""
+    from apps.core.historial_documentos import TIPOS, registrar_vinculo
+
+    for documento, otro, tipo_otro in ((entidad, relacionada, tipo), (relacionada, entidad, tipo_entidad)):
+        if documento._meta.label in TIPOS:
+            registrar_vinculo(request, documento, NOMBRES_TIPO[tipo_otro], _referencia(otro, tipo_otro), vinculado)
 
 
 def aplicar_relacion(entidad, tipo_entidad, data, request):

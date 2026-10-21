@@ -263,10 +263,11 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
                 f'La cotización pertenece a una visita distinta de la orden {orden.numero_orden}; '
                 'solo se agregan cotizaciones de la misma recepción.'
             )
+        creada = orden is None
         if orden is None:
             # La principal es la primera con visita, para que la recepción quede enlazada a la OT.
             principal = next((c for c, *_, visita in pendientes if visita is not None), seleccionadas[0])
-            orden = principal._crear_orden_trabajo(usuario=usuario)
+            orden = principal._crear_orden_trabajo(usuario=usuario, request=request)
         for cotizacion, servicios, repuestos, _ in pendientes:
             _incorporar_detalles(orden, servicios, repuestos)
             cotizacion.orden_trabajo_aplicada = orden
@@ -277,4 +278,20 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
                 'orden_trabajo_aplicada', 'fecha_aceptacion', 'aceptada_por', 'metodo_aceptacion', 'updated_at',
             ])
         orden.calcular_totales()
+        _registrar_aplicacion(request, orden, [c for c, *_ in pendientes], creada)
         return orden
+
+
+def _registrar_aplicacion(request, orden, cotizaciones, creada):
+    """Historial: un evento resumido por cotización, no uno por línea copiada."""
+    from apps.core.historial_documentos import Evento, registrar_evento
+
+    if creada:
+        numeros = ', '.join(c.numero_cotizacion for c in cotizaciones)
+        registrar_evento(request, orden, Evento.CREADO, 'Generada desde cotización', nuevo=numeros)
+    for cotizacion in cotizaciones:
+        registrar_evento(request, cotizacion, Evento.COTIZACION_APLICADA, 'Aplicada a la orden', nuevo=orden.numero_orden)
+        registrar_evento(
+            request, orden, Evento.COTIZACION_APLICADA, f'Cotización {cotizacion.numero_cotizacion}',
+            nuevo=f'Total {cotizacion.total:.2f}',
+        )

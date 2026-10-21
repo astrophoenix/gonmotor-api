@@ -48,6 +48,54 @@ class RegistroAuditoria(UuidPublicoModel):
             models.Index(fields=['empresa', 'modulo', '-fecha'], name='audit_empresa_modulo'),
         ]
 
+
+class EventoDocumento(UuidPublicoModel):
+    """Historial de cambios de un documento del flujo (ver `historial_documentos`).
+
+    Complementa a `RegistroAuditoria`: aquí sí se guarda el valor anterior y el
+    nuevo, pero solo de campos sensibles y solo cuando cambian. Las filas de un
+    mismo guardado comparten `operacion`. Sin escritura desde la API.
+    """
+
+    class TipoDocumento(models.TextChoices):
+        RECEPCION = 'recepcion', 'Recepción'
+        INSPECCION = 'inspeccion', 'Inspección'
+        COTIZACION = 'cotizacion', 'Cotización'
+        ORDEN = 'orden', 'Orden de trabajo'
+
+    class Evento(models.TextChoices):
+        CREADO = 'creado', 'Creado'
+        CAMPO = 'campo', 'Campo modificado'
+        ESTADO = 'estado', 'Cambio de estado'
+        LINEA_AGREGADA = 'linea_agregada', 'Línea agregada'
+        LINEA_EDITADA = 'linea_editada', 'Línea modificada'
+        LINEA_ELIMINADA = 'linea_eliminada', 'Línea eliminada'
+        SINCRONIZADO = 'sincronizado', 'Sincronizado'
+        COTIZACION_APLICADA = 'cotizacion_aplicada', 'Cotización aplicada'
+        VINCULO = 'vinculo', 'Vínculo del flujo'
+        FOTO_REEMPLAZADA = 'foto_reemplazada', 'Foto reemplazada'
+        FOTO_ELIMINADA = 'foto_eliminada', 'Foto eliminada'
+        ELIMINADO = 'eliminado', 'Eliminado'
+
+    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT)
+    taller = models.ForeignKey('empresas.Taller', null=True, on_delete=models.SET_NULL)
+    tipo_documento = models.CharField(max_length=20, choices=TipoDocumento.choices)
+    documento = models.UUIDField(help_text='ID público del documento')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    usuario_nombre = models.CharField(max_length=200)
+    fecha = models.DateTimeField(default=timezone.now, editable=False)
+    operacion = models.UUIDField(help_text='Agrupa los eventos de un mismo guardado')
+    evento = models.CharField(max_length=30, choices=Evento.choices)
+    etiqueta = models.CharField(max_length=200, blank=True)
+    valor_anterior = models.CharField(max_length=255, blank=True)
+    valor_nuevo = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-fecha', '-id']
+        indexes = [
+            models.Index(fields=['empresa', 'tipo_documento', 'documento', '-fecha'], name='evento_doc_fecha'),
+        ]
+
 # Se emite tras un borrado lógico de instancia (kwargs: instance, deleted_at).
 # Sirve para efectos laterales dentro del agregado sin acoplar los modelos.
 post_soft_delete = Signal()

@@ -27,6 +27,21 @@ from .models import RegistroAuditoria
 from .serializers import ModelSerializerPublico
 
 
+# Las inspecciones viven bajo `/api/ordenes/`: sin esto se registrarían como órdenes.
+SUBMODULOS_ORDENES = {
+    'inspecciones': 'inspecciones', 'inspeccion-servicios': 'inspecciones',
+    'inspeccion-repuestos': 'inspecciones', 'inspeccion-fotos': 'inspecciones',
+}
+
+
+def modulo_de_ruta(partes):
+    """Módulo de auditoría de una ruta `api/<modulo>/<recurso>/...` ya partida."""
+    modulo = partes[1] if len(partes) > 1 else ''
+    if modulo == 'ordenes' and len(partes) > 2:
+        return SUBMODULOS_ORDENES.get(partes[2], modulo)
+    return modulo
+
+
 def registrar_acceso(request, usuario, empresa):
     """Marca un login validado por el servidor, nunca datos del cliente."""
     request._acceso_auditoria = (usuario, empresa)
@@ -54,7 +69,7 @@ class AuditoriaMiddleware:
 
     def registrar(self, request, view, response):
         partes = request.path.strip('/').split('/')
-        modulo = partes[1] if len(partes) > 1 else ''
+        modulo = modulo_de_ruta(partes)
         if modulo == 'auditoria' or (modulo == 'token'):
             return
         acceso = getattr(request, '_acceso_auditoria', None)

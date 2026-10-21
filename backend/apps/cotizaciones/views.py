@@ -11,6 +11,7 @@ from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.core.historial_documentos import Evento, HistorialDocumentoMixin, instantanea, registrar_cambios, registrar_evento, registrar_linea
 from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TienePermiso, TieneRecurso
@@ -74,8 +75,9 @@ def _validar_origen_inspeccion(inspeccion):
     _validar_origen_cotizacion(inspeccion=inspeccion)
 
 
-class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
+class CotizacionViewSet(HistorialDocumentoMixin, LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = CotizacionSerializer
+    recurso_historial = 'cotizaciones'
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('cotizaciones')]
     taller_filter_field = 'sucursal'
     filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
@@ -194,15 +196,18 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
         inspeccion = serializer.validated_data.get('inspeccion_origen')
         _validar_origen_cotizacion(inspeccion=inspeccion)
         super().perform_create(serializer)
+        registrar_evento(self.request, serializer.instance, Evento.CREADO)
 
     def perform_update(self, serializer):
         with transaction.atomic():
             cotizacion = Cotizacion.objects.select_for_update().get(pk=serializer.instance.pk)
             if cotizacion.orden_trabajo_aplicada_id:
                 raise serializers.ValidationError('Una cotización aplicada no puede modificarse ni reabrirse.')
+            antes = instantanea(cotizacion)
             serializer.instance = cotizacion
             serializer.validate(dict(serializer.validated_data))
             super().perform_update(serializer)
+            registrar_cambios(self.request, serializer.instance, antes)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -215,6 +220,7 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
                 'Solo se puede eliminar una cotización pendiente. '
                 f'Esta cotización está "{cotizacion.get_estado_display()}".'
             )
+        registrar_evento(request, cotizacion, Evento.ELIMINADO)
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['get', 'post'])
@@ -231,6 +237,11 @@ class CotizacionViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelVie
             cotizacion.sincronizar_desde_inspeccion()
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
+        # Sincronizar reemplaza todas las líneas: un solo evento, no bajas y altas.
+        registrar_evento(
+            request, cotizacion, Evento.SINCRONIZADO, 'Líneas sincronizadas desde la inspección',
+            nuevo=f'{cotizacion.servicios.count()} servicios, {cotizacion.repuestos.count()} repuestos',
+        )
         return Response({
             'id': id_publico(cotizacion),
             'numero_cotizacion': cotizacion.numero_cotizacion,
@@ -348,6 +359,7 @@ class DetalleServicioCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
         cotizacion = serializer.validated_data['cotizacion']
         _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=cotizacion.pk))
         super().perform_create(serializer)
+        registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -355,11 +367,15 @@ class DetalleServicioCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
         destino = serializer.validated_data.get('cotizacion', serializer.instance.cotizacion).pk
         for cotizacion in Cotizacion.objects.select_for_update().filter(pk__in=[actual, destino]).order_by('pk'):
             _check_cotizacion_editable(cotizacion)
+        # Releída tras bloquear la cotización: es el valor anterior real.
+        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
         super().perform_update(serializer)
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     @transaction.atomic
     def perform_destroy(self, instance):
         _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=instance.cotizacion_id))
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         super().perform_destroy(instance)
 
 
@@ -378,6 +394,7 @@ class DetalleRepuestoCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
         cotizacion = serializer.validated_data['cotizacion']
         _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=cotizacion.pk))
         super().perform_create(serializer)
+        registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -385,9 +402,13 @@ class DetalleRepuestoCotizacionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
         destino = serializer.validated_data.get('cotizacion', serializer.instance.cotizacion).pk
         for cotizacion in Cotizacion.objects.select_for_update().filter(pk__in=[actual, destino]).order_by('pk'):
             _check_cotizacion_editable(cotizacion)
+        # Releída tras bloquear la cotización: es el valor anterior real.
+        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
         super().perform_update(serializer)
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     @transaction.atomic
     def perform_destroy(self, instance):
         _check_cotizacion_editable(Cotizacion.objects.select_for_update().get(pk=instance.cotizacion_id))
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         super().perform_destroy(instance)

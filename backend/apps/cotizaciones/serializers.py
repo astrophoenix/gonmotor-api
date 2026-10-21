@@ -282,8 +282,12 @@ class CotizacionSerializer(ValidarUsuariosEmpresaMixin, ModelSerializerPublico):
         cotizacion = super().create(validated_data)
         inspeccion = validated_data.get('inspeccion_origen')
         if inspeccion is not None and inspeccion.estado != 'FINALIZADA':
+            from apps.core.historial_documentos import instantanea, registrar_cambios
+
+            antes = instantanea(inspeccion)
             inspeccion.estado = 'FINALIZADA'
             inspeccion.save(update_fields=['estado', 'updated_at'])
+            registrar_cambios(request, inspeccion, antes)
         return cotizacion
 
     def update(self, instance, validated_data):

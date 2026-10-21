@@ -12,6 +12,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.historial_documentos import Evento, registrar_evento
 from apps.core.ids_publicos import filtrar_por_id_publico, id_publico, por_id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.mixins import FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
@@ -235,6 +236,7 @@ class CitaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, FiltroTallerMixin,
         cita = self.get_object()
         try:
             recepcion = cita.convertir_a_recepcion(usuario=request.user)
+            registrar_evento(request, recepcion, Evento.CREADO, 'Creada desde la cita')
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
         except IntegrityError as exc:

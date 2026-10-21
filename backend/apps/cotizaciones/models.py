@@ -241,7 +241,7 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
         taller = self._resolver_taller()
         return generar_codigo_secuencial(taller, 'ot')
 
-    def _crear_orden_trabajo(self, usuario=None):
+    def _crear_orden_trabajo(self, usuario=None, request=None):
         from apps.ordenes.models import (
             OrdenTrabajo,
             TipoTrabajo,
@@ -282,13 +282,19 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
             observaciones=inspeccion.diagnostico_tecnico if inspeccion else None,
         )
 
+        from apps.core.historial_documentos import instantanea, registrar_cambios
+
         if recepcion:
+            antes = instantanea(recepcion)
             recepcion.orden_trabajo = ot
             recepcion.save(update_fields=['orden_trabajo', 'updated_at'])
+            registrar_cambios(request, recepcion, antes)
         if inspeccion:
+            antes = instantanea(inspeccion)
             inspeccion.orden_trabajo = ot
             inspeccion.estado = 'FINALIZADA'
             inspeccion.save(update_fields=['orden_trabajo', 'estado', 'updated_at'])
+            registrar_cambios(request, inspeccion, antes)
 
         return ot
 

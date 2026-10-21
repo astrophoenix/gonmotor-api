@@ -13,6 +13,9 @@ from rest_framework.response import Response
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.ids_publicos import referencia_corta
+from apps.core.historial_documentos import (
+    Evento, HistorialDocumentoMixin, instantanea, registrar_cambios, registrar_evento, registrar_foto, registrar_linea,
+)
 from apps.core.serializers import FirmaField
 from apps.core.mixins import CreacionIdempotenteMixin, FiltroDocumentoPadreMixin, FiltroTallerMixin, LookupPublicoMixin, SoftDeleteDestroyMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
@@ -100,8 +103,9 @@ def _recepciones_con_relaciones():
         'fotos',
     )
 
-class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
+    recurso_historial = 'ordenes'
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     delete_identifier_fields = ['numero_orden']
     # Query param que fija el taller explícitamente (se valida igual que la
@@ -282,14 +286,17 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
         self._bloquear_cotizacion_inicial(serializer)
         serializer.validate(dict(serializer.validated_data))
         serializer.save()
+        registrar_evento(self.request, serializer.instance, Evento.CREADO)
 
     @transaction.atomic
     def perform_update(self, serializer):
         self._bloquear_cotizacion_inicial(serializer)
         orden = OrdenTrabajo.objects.select_for_update().get(pk=serializer.instance.pk)
+        antes = instantanea(orden)
         serializer.instance = orden
         serializer.validate(dict(serializer.validated_data))
         serializer.save()
+        registrar_cambios(self.request, serializer.instance, antes)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -312,6 +319,7 @@ class OrdenTrabajoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.M
                 'Solo se puede eliminar una orden de trabajo pendiente. '
                 f'Esta orden está "{orden.get_estado_display()}".'
             )
+        registrar_evento(request, orden, Evento.ELIMINADO)
         return super().destroy(request, *args, **kwargs)
 
 
@@ -325,8 +333,9 @@ def parsear_fecha(valor):
         return None
 
 
-class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
+class RecepcionVehiculoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = RecepcionVehiculoSerializer
+    recurso_historial = 'recepciones'
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('recepciones')]
     taller_filter_field = 'sucursal'
     filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
@@ -488,6 +497,7 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
             instance.estado = 'ACEPTADA'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
         self._conectar_cotizacion(instance)
+        registrar_evento(self.request, instance, Evento.CREADO)
 
     def _conectar_cotizacion(self, recepcion):
         """Liga la recepción con la cotización vigente del vehículo, si existe.
@@ -499,7 +509,9 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
 
         conectar_recepcion(recepcion)
 
+    @transaction.atomic
     def perform_update(self, serializer):
+        antes = instantanea(RecepcionVehiculo.objects.select_for_update().get(pk=serializer.instance.pk))
         instance = serializer.save()
         self._sincronizar_kilometraje_vehiculo(instance)
         if instance.firma_cliente and not instance.aceptacion_condiciones:
@@ -512,6 +524,12 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
             instance.aceptacion_condiciones = False
             instance.estado = 'PENDIENTE'
             instance.save(update_fields=['fecha_firma_cliente', 'aceptacion_condiciones', 'estado'])
+        registrar_cambios(self.request, instance, antes)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        registrar_evento(self.request, instance, Evento.ELIMINADO)
+        super().perform_destroy(instance)
 
     @action(detail=True, methods=['post'], url_path='firmar')
     def firmar(self, request, pk=None):
@@ -540,6 +558,7 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
         except serializers.ValidationError as error:
             return Response({'firma_cliente': error.detail}, status=status.HTTP_400_BAD_REQUEST)
 
+        antes = instantanea(recepcion)
         recepcion.firma_cliente = firma
         recepcion.aceptacion_condiciones = True
         recepcion.fecha_firma_cliente = timezone.now()
@@ -554,6 +573,7 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
             'updated_at',
         ])
         self._sincronizar_kilometraje_vehiculo(recepcion)
+        registrar_cambios(request, recepcion, antes)
 
         return Response(self.get_serializer(recepcion).data, status=status.HTTP_200_OK)
 
@@ -603,14 +623,16 @@ class RecepcionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.M
         serializer = InspeccionVehiculoSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         inspeccion = serializer.save()
+        registrar_evento(request, inspeccion, Evento.CREADO, 'Creada desde la recepción', nuevo=recepcion.numero_recepcion)
         return Response(
             InspeccionVehiculoSerializer(inspeccion, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
 
 
-class InspeccionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
+class InspeccionVehiculoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, FiltroTallerMixin, viewsets.ModelViewSet):
     serializer_class = InspeccionVehiculoSerializer
+    recurso_historial = 'inspecciones'
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('inspecciones')]
     taller_filter_field = 'sucursal'
     filter_backends = [BusquedaIndexadaFilter, filters.OrderingFilter]
@@ -784,8 +806,21 @@ class InspeccionVehiculoViewSet(LookupPublicoMixin, FiltroTallerMixin, viewsets.
                 'La inspección ya se convirtió en orden de trabajo y no puede eliminarse.'
             )
 
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        registrar_evento(self.request, serializer.instance, Evento.CREADO)
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        antes = instantanea(InspeccionVehiculo.objects.select_for_update().get(pk=serializer.instance.pk))
+        super().perform_update(serializer)
+        registrar_cambios(self.request, serializer.instance, antes)
+
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
-        self._check_editable(self.get_object())
+        inspeccion = self.get_object()
+        self._check_editable(inspeccion)
+        registrar_evento(request, inspeccion, Evento.ELIMINADO)
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['get', 'post'], url_path='relaciones')
@@ -807,13 +842,17 @@ class DetalleServicioInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
     def perform_create(self, serializer):
         _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
         super().perform_create(serializer)
+        registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
 
     def perform_update(self, serializer):
         _check_inspeccion_editable(self.get_object().inspeccion)
+        antes = instantanea(DetalleServicioInspeccion.objects.get(pk=serializer.instance.pk))
         super().perform_update(serializer)
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     def perform_destroy(self, instance):
         _check_inspeccion_editable(instance.inspeccion)
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         super().perform_destroy(instance)
 
 
@@ -831,13 +870,17 @@ class DetalleRepuestoInspeccionViewSet(LookupPublicoMixin, FiltroDocumentoPadreM
     def perform_create(self, serializer):
         _check_inspeccion_editable(serializer.validated_data.get('inspeccion'))
         super().perform_create(serializer)
+        registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
 
     def perform_update(self, serializer):
         _check_inspeccion_editable(self.get_object().inspeccion)
+        antes = instantanea(DetalleRepuestoInspeccion.objects.get(pk=serializer.instance.pk))
         super().perform_update(serializer)
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     def perform_destroy(self, instance):
         _check_inspeccion_editable(instance.inspeccion)
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         super().perform_destroy(instance)
 
 
@@ -856,10 +899,13 @@ class FotoInspeccionViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, Filtro
 
     def perform_update(self, serializer):
         _check_inspeccion_editable(self.get_object().inspeccion)
+        if 'imagen' in serializer.validated_data:
+            registrar_foto(self.request, Evento.FOTO_REEMPLAZADA, serializer.instance)
         super().perform_update(serializer)
 
     def perform_destroy(self, instance):
         _check_inspeccion_editable(instance.inspeccion)
+        registrar_foto(self.request, Evento.FOTO_ELIMINADA, instance)
         super().perform_destroy(instance)
 
 
@@ -905,10 +951,13 @@ class FotoOrdenTrabajoViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, Filt
 
     def perform_update(self, serializer):
         _check_orden_editable(self.get_object().orden_trabajo)
+        if 'imagen' in serializer.validated_data:
+            registrar_foto(self.request, Evento.FOTO_REEMPLAZADA, serializer.instance)
         super().perform_update(serializer)
 
     def perform_destroy(self, instance):
         _check_orden_editable(instance.orden_trabajo)
+        registrar_foto(self.request, Evento.FOTO_ELIMINADA, instance)
         super().perform_destroy(instance)
 
 
@@ -930,6 +979,7 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             _check_orden_editable(orden)
             serializer.save()
             orden.calcular_totales()
+            registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
         except OrdenTrabajo.DoesNotExist:
             empresa_id = get_empresa_id_desde_request(self.request)
             logger.error(
@@ -950,9 +1000,12 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         ordenes = list(OrdenTrabajo.objects.select_for_update().filter(pk__in=[origen, destino]).order_by('pk'))
         for orden in ordenes:
             _check_orden_editable(orden)
+        # Releída tras bloquear la orden: es el valor anterior real.
+        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
         serializer.save()
         for orden in ordenes:
             orden.calcular_totales()
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     @transaction.atomic
     def perform_destroy(self, instance):
@@ -960,6 +1013,8 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
         orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
+        instance.orden_trabajo = orden
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         instance.delete()
         orden.calcular_totales()
 
@@ -982,6 +1037,7 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             _check_orden_editable(orden)
             serializer.save()
             orden.calcular_totales()
+            registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
         except OrdenTrabajo.DoesNotExist:
             empresa_id = get_empresa_id_desde_request(self.request)
             logger.error(
@@ -1002,9 +1058,12 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         ordenes = list(OrdenTrabajo.objects.select_for_update().filter(pk__in=[origen, destino]).order_by('pk'))
         for orden in ordenes:
             _check_orden_editable(orden)
+        # Releída tras bloquear la orden: es el valor anterior real.
+        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
         serializer.save()
         for orden in ordenes:
             orden.calcular_totales()
+        registrar_linea(self.request, Evento.LINEA_EDITADA, serializer.instance, antes)
 
     @transaction.atomic
     def perform_destroy(self, instance):
@@ -1012,5 +1071,7 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
         orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
+        instance.orden_trabajo = orden
+        registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         instance.delete()
         orden.calcular_totales()

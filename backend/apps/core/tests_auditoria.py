@@ -204,3 +204,17 @@ class AuditoriaTests(APITestCase):
                 self.assertEqual(self.client.get(f'/api/auditoria/{ruta}/').status_code, 401)
                 self.client.force_authenticate(self.admin)
                 fijar_empresa(self.client, self.empresa)
+
+    def test_rutas_de_inspeccion_se_registran_como_inspecciones(self):
+        from .auditoria import modulo_de_ruta
+
+        casos = {
+            'api/ordenes/inspecciones/x/': 'inspecciones',
+            'api/ordenes/inspeccion-repuestos/x/': 'inspecciones',
+            'api/ordenes/ordenes-trabajo/x/': 'ordenes',
+            'api/ordenes/ot-servicios/x/': 'ordenes',
+            'api/recepciones/x/': 'recepciones',
+        }
+        for ruta, esperado in casos.items():
+            with self.subTest(ruta=ruta):
+                self.assertEqual(modulo_de_ruta(ruta.strip('/').split('/')), esperado)

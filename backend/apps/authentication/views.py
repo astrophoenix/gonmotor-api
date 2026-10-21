@@ -200,6 +200,15 @@ def _permisos_efectivos(contexto):
     return permisos_de_rol(contexto.rol, contexto.empresa_id)
 
 
+def _acciones_efectivas(contexto):
+    """Acciones especiales del rol vigente (el superusuario, todas)."""
+    if contexto.es_superusuario:
+        return sorted(AccionEspecial.objects.values_list('codigo', flat=True))
+    if not contexto.rol:
+        return []
+    return acciones_especiales_de_rol(contexto.rol, contexto.empresa_id)
+
+
 class UserProfileView(APIView):
     """
     Endpoint para obtener y actualizar los datos del usuario logueado actualmente.
@@ -227,6 +236,7 @@ class UserProfileView(APIView):
             'rol': contexto.rol,
             'es_superusuario': user.is_superuser,
             'permisos': _permisos_efectivos(contexto),
+            'acciones': _acciones_efectivas(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': _empresa_publica(empresa_id),
@@ -262,6 +272,7 @@ class UserProfileView(APIView):
             'rol': contexto.rol,
             'es_superusuario': user.is_superuser,
             'permisos': _permisos_efectivos(contexto),
+            'acciones': _acciones_efectivas(contexto),
             'roles_otorgables': _roles_otorgables(contexto),
             'roles_otorgables_catalogo': _roles_otorgables_catalogo(contexto),
             'empresa_id': _empresa_publica(contexto.empresa_id),

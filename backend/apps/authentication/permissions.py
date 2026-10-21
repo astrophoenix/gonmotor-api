@@ -12,7 +12,7 @@ Uso en un viewset:
 
 from rest_framework import permissions
 
-from .permisos_repo import permisos_en_request
+from .permisos_repo import acciones_en_request, permisos_en_request
 from .utils import get_contexto_desde_request
 
 
@@ -37,6 +37,23 @@ def TienePermiso(recurso, accion='modificar'):
     _TienePermiso.__name__ = f'TienePermiso_{recurso}'
     _TienePermiso.__qualname__ = _TienePermiso.__name__
     return _TienePermiso
+
+
+def TieneAccion(codigo):
+    """Clase de permiso para una acción especial (`AccionEspecial.codigo`) del rol."""
+
+    class _TieneAccion(permissions.BasePermission):
+        message = 'No tienes permiso para esta acción en esta empresa.'
+
+        def has_permission(self, request, view):
+            contexto = get_contexto_desde_request(request)
+            if not contexto.hay_contexto:
+                return False
+            return codigo in acciones_en_request(request, contexto.rol, contexto.empresa_id)
+
+    _TieneAccion.__name__ = f'TieneAccion_{codigo}'
+    _TieneAccion.__qualname__ = _TieneAccion.__name__
+    return _TieneAccion
 
 
 class EsAdminDeEmpresa(permissions.BasePermission):

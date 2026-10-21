@@ -208,16 +208,43 @@ ACCIONES_CATALOGO = (
         'Muestra en el panel de inicio las cotizaciones enviadas que esperan respuesta y su monto.',
         'cotizaciones',
     ),
+    (
+        'historial_recepciones',
+        'Ver historial de cambios',
+        'Muestra en cada recepción quién cambió qué y cuándo (estado, firma, kilometraje).',
+        'recepciones',
+    ),
+    (
+        'historial_inspecciones',
+        'Ver historial de cambios',
+        'Muestra en cada inspección quién cambió qué y cuándo (estado y plan de trabajo).',
+        'inspecciones',
+    ),
+    (
+        'historial_cotizaciones',
+        'Ver historial de cambios',
+        'Muestra en cada cotización quién cambió qué y cuándo (estado, precios, descuentos y líneas).',
+        'cotizaciones',
+    ),
+    (
+        'historial_ordenes',
+        'Ver historial de cambios',
+        'Muestra en cada orden de trabajo quién cambió qué y cuándo (estado, precios, descuentos y líneas).',
+        'ordenes',
+    ),
 )
 
-_ACCIONES_DASHBOARD = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO)
+_ACCIONES_DASHBOARD = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.startswith('dashboard_'))
+# El registro del historial nunca se apaga: estas acciones solo deciden quién lo consulta.
+ACCIONES_HISTORIAL = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.startswith('historial_'))
 
-# Semilla: quién recibe cada acción. Coincide con quién veía estos bloques
-# cuando el panel exigía `reportes`; el MECANICO no los recibe.
+# Semilla: quién recibe cada acción. Los bloques del panel coinciden con quién
+# los veía cuando el panel exigía `reportes`; el MECANICO no los recibe. El
+# historial de cambios es de supervisión: solo los roles de administración.
 MATRIZ_ACCIONES = {
-    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD,
-    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD,
-    'ADMIN_TALLER': _ACCIONES_DASHBOARD,
+    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
+    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
+    'ADMIN_TALLER': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
     'ASESOR': _ACCIONES_DASHBOARD,
     'CAJERO': _ACCIONES_DASHBOARD,
 }

@@ -267,6 +267,8 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     # La empresa viaja en la claim del JWT; solo el taller va en cabecera.
     'x-taller-id',
+    # Agrupa en el historial de documentos los eventos de un mismo guardado.
+    'x-operacion-id',
 ]
 
 # La web lee el nombre de los PDF/Excel descargados de esta cabecera; sin

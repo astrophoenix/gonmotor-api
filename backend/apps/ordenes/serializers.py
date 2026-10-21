@@ -853,8 +853,12 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
 
     def _guardar_fotos(self, instance, fotos):
         """Crea el bloque de fotos de la recepción (reemplaza cada vista existente)."""
+        from apps.core.historial_documentos import Evento, registrar_foto
+
         for tipo, procesada in fotos.items():
             valor = tipo.value if isinstance(tipo, FotoRecepcion.TipoVista) else tipo
+            for anterior in instance.fotos.filter(tipo_vista=valor):
+                registrar_foto(self.context.get('request'), Evento.FOTO_REEMPLAZADA, anterior)
             instance.fotos.filter(tipo_vista=valor).delete()
             FotoRecepcion.objects.create(
                 recepcion=instance,
