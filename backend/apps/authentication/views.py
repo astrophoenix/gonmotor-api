@@ -144,6 +144,8 @@ class SelectCompanyView(APIView):
         refresh['empresa_id'] = id_publico(empresa)
         refresh['rol'] = rol
 
+        from apps.core.auditoria import registrar_acceso
+        registrar_acceso(request, user, empresa)
         return Response({
             "access": str(refresh.access_token),
             "refresh": str(refresh),
