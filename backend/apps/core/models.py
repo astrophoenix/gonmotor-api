@@ -20,6 +20,33 @@ Estados de un registro soft-deletable:
 from django.db import models, transaction
 from django.dispatch import Signal
 from django.utils import timezone
+from django.conf import settings
+from .ids_publicos import UuidPublicoModel
+
+
+class RegistroAuditoria(UuidPublicoModel):
+    """Bitácora de operaciones HTTP exitosas; sin cuerpos ni credenciales.
+
+    Los nombres se conservan aunque el usuario o taller se eliminen. No se
+    publica ninguna operación de escritura sobre esta tabla en la API.
+    """
+    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    usuario_nombre = models.CharField(max_length=200)
+    taller = models.ForeignKey('empresas.Taller', null=True, on_delete=models.SET_NULL)
+    taller_nombre = models.CharField(max_length=150, blank=True)
+    fecha = models.DateTimeField(default=timezone.now, editable=False)
+    modulo = models.CharField(max_length=60)
+    accion = models.CharField(max_length=100)
+    registro_id = models.CharField(max_length=100, blank=True)
+    metodo = models.CharField(max_length=10)
+
+    class Meta:
+        ordering = ['-fecha', '-id']
+        indexes = [
+            models.Index(fields=['empresa', '-fecha'], name='audit_empresa_fecha'),
+            models.Index(fields=['empresa', 'modulo', '-fecha'], name='audit_empresa_modulo'),
+        ]
 
 # Se emite tras un borrado lógico de instancia (kwargs: instance, deleted_at).
 # Sirve para efectos laterales dentro del agregado sin acoplar los modelos.

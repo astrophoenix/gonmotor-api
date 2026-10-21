@@ -40,6 +40,7 @@ ACCIONES = ('ver', 'modificar')
 SOLO_VER = ('ver',)
 
 RECURSOS = (
+    'auditoria',        # historial de acciones (consulta administrativa)
     'empresa',          # datos del tenant (RUC, razón social, logo)
     'talleres',         # sucursales / configuración de talleres
     'usuarios',         # cuentas y roles
@@ -67,14 +68,14 @@ ROLES_TODOS_TALLERES = frozenset({'ADMIN_SISTEMA', 'ADMIN_EMPRESA'})
 _TODOS = ACCIONES
 
 MATRIZ_ROLES = {
-    'ADMIN_SISTEMA': {recurso: _TODOS for recurso in RECURSOS},
-    'ADMIN_EMPRESA': {recurso: _TODOS for recurso in RECURSOS},
+    'ADMIN_SISTEMA': {recurso: SOLO_VER if recurso == 'auditoria' else _TODOS for recurso in RECURSOS},
+    'ADMIN_EMPRESA': {recurso: SOLO_VER if recurso == 'auditoria' else _TODOS for recurso in RECURSOS},
     # Gerente de taller: opera su sucursal, no la configuración global de la
     # empresa ni las cuentas de los usuarios.
     'ADMIN_TALLER': {
         recurso: _TODOS
         for recurso in RECURSOS
-        if recurso not in ('empresa', 'usuarios')
+        if recurso not in ('empresa', 'usuarios', 'auditoria')
     },
     # Asesor de servicio: recibe, cotiza y acompaña la orden. No cobra.
     'ASESOR': {
@@ -162,6 +163,7 @@ def puede(rol, recurso, accion='modificar'):
 
 
 NOMBRES_RECURSOS = {
+    'auditoria': 'Auditoría',
     'empresa': 'Empresa',
     'talleres': 'Talleres',
     'usuarios': 'Usuarios',

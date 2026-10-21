@@ -260,6 +260,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if relaciones.count() == 1:
             relacion = relaciones.first()
             empresa = relacion.empresa
+            from apps.core.auditoria import registrar_acceso
+            if self.context.get('request') is not None:
+                registrar_acceso(self.context['request'], user, empresa)
             
             refresh = self.get_token_with_empresa(user, empresa, relacion.rol)
             
