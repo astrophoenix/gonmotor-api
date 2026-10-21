@@ -185,7 +185,7 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
         aplicadas = {c.orden_trabajo_aplicada_id for c in seleccionadas if c.orden_trabajo_aplicada_id}
         if orden is None and aplicadas:
             if len(aplicadas) != 1 or any(c.orden_trabajo_aplicada_id is None for c in seleccionadas):
-                raise ValueError('Indica la OT existente para incorporar cotizaciones adicionales.')
+                raise ValueError('Indica la OT existente para agregar cotizaciones adicionales.')
             orden = OrdenTrabajo.all_objects.get(pk=aplicadas.pop())
         if orden is not None:
             orden = OrdenTrabajo.all_objects.select_for_update().get(pk=orden.pk)
@@ -253,7 +253,7 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
         if not pendientes:
             return orden
         if orden is not None and orden.estado not in {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO'}:
-            raise ValueError('Solo se pueden incorporar cotizaciones a una OT pendiente, en espera o en proceso.')
+            raise ValueError('Solo se pueden agregar cotizaciones a una OT pendiente, en espera o en proceso.')
         # Una OT corresponde a una sola visita (recepción); las inspecciones de esa visita pueden ser varias.
         visitas = {visita for *_, visita in pendientes if visita is not None}
         if len(visitas) > 1:
@@ -261,7 +261,7 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
         if orden is not None and visitas and not visitas <= _visitas_de_orden(orden):
             raise ValueError(
                 f'La cotización pertenece a una visita distinta de la orden {orden.numero_orden}; '
-                'solo se incorporan cotizaciones de la misma recepción.'
+                'solo se agregan cotizaciones de la misma recepción.'
             )
         if orden is None:
             # La principal es la primera con visita, para que la recepción quede enlazada a la OT.
