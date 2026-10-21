@@ -14,7 +14,7 @@ Página 1:
   │ CLIENTE            │ VEHÍCULO            │ INSPECCIÓN             │
   ├──────────────────────────────────────────────────────────────────┤
   │ ① DIAGNÓSTICO     motivo · DTC · diagnóstico · recomendaciones    │
-  │ ② TESTIGOS        cuadrícula 10×2, encendido en color / apagado   │
+  │ ② TESTIGOS        cuadrícula 10×3, encendido en color / apagado   │
   │ ③ EVIDENCIA       fotos de los hallazgos (3 por fila)             │
   │ ④ PLAN DE TRABAJO servicios y repuestos, prioridad, opcional      │
   │ ___________________       ___________________                     │

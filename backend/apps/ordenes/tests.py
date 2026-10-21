@@ -1597,6 +1597,38 @@ class RecepcionFirmarApiTests(TestCase):
         self.assertEqual(inspeccion.recepcion_id, self.recepcion.pk)
         self.assertEqual(respuesta.json()['recepcion']['id'], str(self.recepcion.uuid))
 
+    def test_testigos_ev_y_adas_pasan_de_la_recepcion_a_la_inspeccion(self):
+        from .models import InspeccionVehiculo
+
+        firma = self.client.post(
+            self._url(), {'firma_cliente': firma_data_url()}, format='json'
+        )
+        self.assertEqual(firma.status_code, 200, firma.content)
+        type(self.recepcion).objects.filter(pk=self.recepcion.pk).update(
+            motivo_ingreso='Revisión de testigos', testigo_ev_listo=True, testigo_dpf=True, testigo_punto_ciego=True,
+        )
+        recepcion = self.client.get(f'/api/recepciones/{self.recepcion.uuid}/')
+        self.assertEqual(recepcion.status_code, 200, recepcion.content)
+        self.assertTrue(recepcion.json()['testigo_dpf'])
+        self.assertFalse(recepcion.json()['testigo_precolision'])
+
+        respuesta = self.client.post(f'/api/recepciones/{self.recepcion.uuid}/crear-inspeccion/')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        datos = respuesta.json()
+        self.assertTrue(datos['testigo_ev_listo'])
+        self.assertTrue(datos['testigo_dpf'])
+        self.assertTrue(datos['testigo_punto_ciego'])
+        self.assertFalse(datos['testigo_salida_carril'])
+
+        edicion = self.client.patch(
+            f'/api/ordenes/inspecciones/{datos["id"]}/', {'testigo_salida_carril': True}, format='json'
+        )
+        self.assertEqual(edicion.status_code, 200, edicion.content)
+        inspeccion = InspeccionVehiculo.objects.get(uuid=datos['id'])
+        self.assertTrue(inspeccion.testigo_salida_carril)
+        self.assertTrue(inspeccion.testigo_punto_ciego)
+
 class BackfillSucursalDocumentosTests(TestCase):
     """La migración de backfill asigna taller a los documentos huérfanos
     (creados cuando el API no persistía la sucursal)."""

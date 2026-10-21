@@ -487,6 +487,16 @@ class RecepcionVehiculo(UuidPublicoModel, BaseTallerModel):
     testigo_cinturon = models.BooleanField(default=False, verbose_name='Cinturón Desabrochado')
     testigo_freno_estacionamiento = models.BooleanField(default=False, verbose_name='Freno de Estacionamiento')
     testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
+    testigo_ev_listo = models.BooleanField(default=False, verbose_name='Vehículo Eléctrico Listo (READY)')
+    testigo_potencia_baja = models.BooleanField(default=False, verbose_name='Potencia Baja (EV)')
+    testigo_carga_ev = models.BooleanField(default=False, verbose_name='Carga del Vehículo Eléctrico')
+    testigo_bateria_alto_voltaje = models.BooleanField(default=False, verbose_name='Nivel Bajo de Batería de Alto Voltaje')
+    testigo_servicio_ev = models.BooleanField(default=False, verbose_name='Advertencia de Servicio (EV)')
+    testigo_dpf = models.BooleanField(default=False, verbose_name='Filtro de Partículas Diésel (DPF)')
+    testigo_antirrobo = models.BooleanField(default=False, verbose_name='Sistema Antirrobo')
+    testigo_precolision = models.BooleanField(default=False, verbose_name='Asistente de Precolisión')
+    testigo_salida_carril = models.BooleanField(default=False, verbose_name='Salida de Carril')
+    testigo_punto_ciego = models.BooleanField(default=False, verbose_name='Punto Ciego')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
 
     # --- INVENTARIO / CHECKLIST (Columna 1 Hoja Física) ---
@@ -696,6 +706,16 @@ class InspeccionVehiculo(UuidPublicoModel, BaseTallerModel):
     testigo_cinturon = models.BooleanField(default=False, verbose_name='Cinturón Desabrochado')
     testigo_freno_estacionamiento = models.BooleanField(default=False, verbose_name='Freno de Estacionamiento')
     testigo_frenos_fallo = models.BooleanField(default=False, verbose_name='Fallo en el Sistema de Frenos')
+    testigo_ev_listo = models.BooleanField(default=False, verbose_name='Vehículo Eléctrico Listo (READY)')
+    testigo_potencia_baja = models.BooleanField(default=False, verbose_name='Potencia Baja (EV)')
+    testigo_carga_ev = models.BooleanField(default=False, verbose_name='Carga del Vehículo Eléctrico')
+    testigo_bateria_alto_voltaje = models.BooleanField(default=False, verbose_name='Nivel Bajo de Batería de Alto Voltaje')
+    testigo_servicio_ev = models.BooleanField(default=False, verbose_name='Advertencia de Servicio (EV)')
+    testigo_dpf = models.BooleanField(default=False, verbose_name='Filtro de Partículas Diésel (DPF)')
+    testigo_antirrobo = models.BooleanField(default=False, verbose_name='Sistema Antirrobo')
+    testigo_precolision = models.BooleanField(default=False, verbose_name='Asistente de Precolisión')
+    testigo_salida_carril = models.BooleanField(default=False, verbose_name='Salida de Carril')
+    testigo_punto_ciego = models.BooleanField(default=False, verbose_name='Punto Ciego')
     otros_testigos_observaciones = models.CharField(max_length=255, blank=True, null=True, verbose_name='Otros Testigos u Observaciones del Tablero')
 
     fecha_inspeccion = models.DateTimeField(
