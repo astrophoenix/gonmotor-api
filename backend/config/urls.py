@@ -19,9 +19,11 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenRefreshView
-from apps.core.auditoria import AuditoriaListView
+from apps.core.auditoria import AuditoriaListView, AuditoriaExportView
 
 urlpatterns = [
+    path('api/auditoria/exportar-pdf/', AuditoriaExportView.as_view(formato='pdf'), name='auditoria-pdf'),
+    path('api/auditoria/export-excel/', AuditoriaExportView.as_view(formato='excel'), name='auditoria-excel'),
     path('api/auditoria/', AuditoriaListView.as_view(), name='auditoria-list'),
     # Panel de administración de Django
     path('admin/', admin.site.urls),

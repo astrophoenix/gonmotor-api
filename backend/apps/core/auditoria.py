@@ -7,12 +7,19 @@ strings completos, cookies, tokens o cabeceras de autenticación.
 """
 import uuid
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+from xml.sax.saxutils import escape
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.exceptions import ValidationError
+from rest_framework.renderers import JSONRenderer
+from reportlab.platypus import Paragraph
+
+from .utils.excel_export import ExcelExportConfig, ExcelExportService
+from .utils.pdf_export import PdfExportConfig, PdfExportService, contexto_reporte
 
 from apps.authentication.permissions import TienePermiso
 from apps.authentication.utils import get_contexto_desde_request, talleres_permitidos, taller_de_valor
@@ -126,3 +133,55 @@ class AuditoriaListView(generics.ListAPIView):
                 raise ValidationError({'hasta': 'La fecha final está fuera de rango.'})
             qs = qs.filter(fecha__lt=timezone.make_aware(datetime.combine(fin, time.min)))
         return qs
+
+
+MODULOS_AUDITORIA = {
+    'clientes': 'Clientes', 'vehiculos': 'Vehículos', 'proveedores': 'Proveedores',
+    'citas': 'Citas', 'recepciones': 'Recepciones', 'inspecciones': 'Inspecciones',
+    'cotizaciones': 'Cotizaciones', 'ordenes': 'Órdenes', 'gastos': 'Gastos',
+    'auth': 'Usuarios y acceso', 'configuracion': 'Configuración', 'empresas': 'Empresas',
+    'notificaciones': 'Notificaciones', 'repuestos': 'Repuestos', 'servicios': 'Servicios',
+    'core': 'General',
+}
+ACCIONES_AUDITORIA = {
+    'create': 'Crear', 'update': 'Editar', 'partial_update': 'Editar parcialmente',
+    'destroy': 'Eliminar', 'iniciar_sesion': 'Iniciar sesión', 'reactivar': 'Reactivar',
+    'anular': 'Anular', 'importar': 'Importar',
+}
+COLUMNAS_AUDITORIA = [
+    ('Fecha y hora (Ecuador)', 1.6), ('Usuario', 1.5), ('Módulo', 1.1),
+    ('Acción', 1.3), ('Registro', 2.5), ('Taller', 1.5),
+]
+
+
+def fila_auditoria(registro):
+    return [
+        timezone.localtime(registro.fecha, ZoneInfo('America/Guayaquil')).strftime('%d/%m/%Y %H:%M:%S'),
+        registro.usuario_nombre,
+        MODULOS_AUDITORIA.get(registro.modulo, registro.modulo),
+        ACCIONES_AUDITORIA.get(registro.accion, registro.accion.replace('_', ' ').replace('-', ' ')),
+        registro.registro_id or '—', registro.taller_nombre or 'Empresa',
+    ]
+
+
+class AuditoriaExportView(AuditoriaListView):
+    """Exporta el mismo historial filtrado, sin paginación y con su permiso de lectura."""
+    renderer_classes = [JSONRenderer]
+    formato = 'pdf'
+
+    def get(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        contexto = get_contexto_desde_request(request)
+        empresa, taller, usuario = contexto_reporte(request, contexto.empresa_id)
+        opciones = dict(
+            title='Historial de acciones', filename=f'auditoria.{"xlsx" if self.formato == "excel" else "pdf"}',
+            headers=COLUMNAS_AUDITORIA, empresa=empresa, taller=taller, usuario=usuario,
+        )
+        if self.formato == 'excel':
+            config = ExcelExportConfig(**opciones, row_builder=fila_auditoria)
+            return ExcelExportService(config, queryset).generate_response()
+        config = PdfExportConfig(
+            **opciones, orientacion='horizontal',
+            row_builder=lambda registro, estilo: [Paragraph(escape(valor), estilo) for valor in fila_auditoria(registro)],
+        )
+        return PdfExportService(config, queryset).generate_response()

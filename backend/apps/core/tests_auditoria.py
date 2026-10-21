@@ -149,3 +149,58 @@ class AuditoriaTests(APITestCase):
         self.assertEqual(len(response.data['results']), 10)
         self.assertIsNotNone(response.data['next'])
         self.assertEqual(len(self.client.get('/api/auditoria/?page=2').data['results']), 2)
+
+
+    def test_exportaciones_filtradas_sin_paginacion_y_aisladas_por_empresa(self):
+        from io import BytesIO
+        from openpyxl import load_workbook
+
+        RegistroAuditoria.objects.bulk_create([
+            RegistroAuditoria(
+                empresa=self.empresa, usuario_nombre='Ana exportada', modulo='clientes',
+                accion='create', metodo='POST',
+                fecha=datetime(2026, 10, 21, 0, 30, tzinfo=ZoneInfo('UTC')),
+            ) for _ in range(12)
+        ] + [
+            RegistroAuditoria(empresa=self.otra, usuario_nombre='Empresa ajena', modulo='clientes', accion='create', metodo='POST'),
+            RegistroAuditoria(empresa=self.empresa, usuario_nombre='Excluir por módulo', modulo='ordenes', accion='create', metodo='POST'),
+            RegistroAuditoria(empresa=self.empresa, usuario_nombre='Excluir por acción', modulo='clientes', accion='update', metodo='PATCH'),
+        ])
+        filtros = {'modulo': 'clientes', 'accion': 'create', 'search': 'Ana', 'desde': '2026-10-20', 'hasta': '2026-10-20', 'page': 2}
+        for ruta in ('export-excel', 'exportar-pdf'):
+            with self.subTest(ruta=ruta):
+                # Sin compresión para comprobar el contenido PDF sin dependencias adicionales.
+                with patch('reportlab.rl_config.pageCompression', 0):
+                    response = self.client.get(f'/api/auditoria/{ruta}/', filtros)
+                self.assertEqual(response.status_code, 200)
+                contenido = b''.join(response.streaming_content) if response.streaming else response.content
+                if ruta == 'export-excel':
+                    ws = load_workbook(BytesIO(contenido)).active
+                    filas = list(ws.values)
+                    self.assertEqual(sum(fila[1] == 'Ana exportada' for fila in filas), 12)
+                    self.assertTrue(any(fila[0] == '20/10/2026 19:30:00' for fila in filas))
+                    texto = str(filas)
+                else:
+                    self.assertTrue(contenido.startswith(b'%PDF'))
+                    texto = contenido.decode('latin-1')
+                    self.assertEqual(texto.count('Ana exportada'), 12)
+                    self.assertIn('20/10/2026 19:30:00', texto)
+                self.assertNotIn('Empresa ajena', texto)
+                self.assertNotIn('Excluir', texto)
+                self.assertEqual(self.client.get(f'/api/auditoria/{ruta}/', {'desde': 'ayer'}).status_code, 400)
+
+    def test_exportaciones_requieren_permiso_y_respetan_limites(self):
+        from django.test import override_settings
+
+        self.crear()
+        for ruta, setting in (('exportar-pdf', 'EXPORT_MAX_FILAS_PDF'), ('export-excel', 'EXPORT_MAX_FILAS_EXCEL')):
+            with self.subTest(ruta=ruta):
+                with override_settings(**{setting: 0}):
+                    self.assertEqual(self.client.get(f'/api/auditoria/{ruta}/').status_code, 400)
+                self.client.force_authenticate(self.operador)
+                fijar_empresa(self.client, self.empresa)
+                self.assertEqual(self.client.get(f'/api/auditoria/{ruta}/').status_code, 403)
+                self.client.force_authenticate(user=None)
+                self.assertEqual(self.client.get(f'/api/auditoria/{ruta}/').status_code, 401)
+                self.client.force_authenticate(self.admin)
+                fijar_empresa(self.client, self.empresa)
