@@ -33,6 +33,15 @@ def construir_mensaje_retiro(orden):
     )
 
 
+def construir_mensaje_saldo(orden, saldo):
+    """Recordatorio de cobro de una orden entregada a crédito."""
+    return (
+        f'Hola {orden.cliente.nombre}, el taller {orden.empresa.nombre_comercial} te recuerda que la orden '
+        f'{orden.numero_orden} de {_vehiculo_texto(orden.vehiculo)} tiene un saldo pendiente de '
+        f'$ {saldo:,.2f}. Si ya realizaste el pago, por favor ignora este mensaje. Gracias por tu confianza.'
+    )
+
+
 def construir_mensaje_cita(cita, horas_antes=None):
     """Recordatorio de una cita agendada (`horas_antes`: 24, 2 o None si es manual)."""
     momento = timezone.localtime(cita.fecha_hora_programada)

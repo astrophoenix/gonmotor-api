@@ -272,6 +272,7 @@ class NotificacionProgramada(UuidPublicoModel, BaseModel):
         CITA_24H = 'CITA_24H', 'Recordatorio de cita (24 h)'
         CITA_2H = 'CITA_2H', 'Recordatorio de cita (2 h)'
         CITA = 'CITA', 'Aviso de cita (manual)'
+        SALDO = 'SALDO', 'Recordatorio de saldo pendiente'
         MASIVA = 'MASIVA', 'Mensaje masivo / promocional'
 
     class Canal(models.TextChoices):

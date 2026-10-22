@@ -68,7 +68,7 @@ CAMPOS = {
         'tipo_trabajo': 'Tipo de trabajo', 'cliente': 'Cliente', 'vehiculo': 'Vehículo',
         'asesor': 'Asesor', 'mecanico_principal': 'Técnico responsable', 'kilometraje': 'Kilometraje',
         'fecha_ingreso': 'Fecha de ingreso', 'fecha_entrega': 'Fecha de entrega',
-        'observaciones': 'Observaciones',
+        'observaciones': 'Observaciones', 'saldo_al_entregar': 'Entregada a crédito con saldo',
     },
     'cotizaciones.Cotizacion': {
         'estado': 'Estado', 'cliente': 'Cliente', 'vehiculo': 'Vehículo', 'asesor': 'Asesor',

@@ -45,6 +45,8 @@ from .models import (
 )
 from .pdf_inspeccion import exportar_inspeccion_pdf
 from .pdf_orden import exportar_orden_pdf
+from apps.pagos.services import filtrar_por_estado_pago
+
 from .relaciones_flujo import responder_relaciones
 from .serializers import (
     DetalleRepuestoInspeccionSerializer,
@@ -236,12 +238,14 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
                 'asesor',
                 'mecanico_principal',
                 'cotizacion_origen',
+                'entrega_credito_autorizada_por',
             )
             .prefetch_related(
                 Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
                 Prefetch('repuestos', queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
                 'cotizaciones_aplicadas',
                 'fotos',
+                'pagos',
                 Prefetch('inspeccion', queryset=_inspecciones_con_relaciones()),
                 Prefetch('recepciones', queryset=_recepciones_con_relaciones()),
             )
@@ -266,6 +270,10 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
         fecha_hasta = parsear_fecha(params.get('fecha_hasta'))
         if fecha_hasta:
             queryset = queryset.filter(created_at__date__lte=fecha_hasta)
+
+        estado_pago = params.get('estado_pago')
+        if estado_pago:
+            queryset = filtrar_por_estado_pago(queryset, estado_pago)
 
         return queryset
 
@@ -361,6 +369,10 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             raise serializers.ValidationError(
                 f'No se puede eliminar la orden: tiene cotizaciones aplicadas ({", ".join(aplicadas)}). '
                 'Cancélala si ya no se ejecutará.'
+            )
+        if orden.pagos.exists():
+            raise serializers.ValidationError(
+                'No se puede eliminar la orden: tiene pagos registrados. Anúlala si ya no se ejecutará.'
             )
         if orden.estado != OrdenTrabajo.EstadoOrden.PENDIENTE:
             raise serializers.ValidationError(

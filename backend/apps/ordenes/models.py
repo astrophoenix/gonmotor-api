@@ -109,6 +109,23 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
         help_text='Lectura del odómetro del vehículo en esta orden de trabajo',
     )
 
+    # Entrega a crédito: saldo que quedó pendiente al entregar y quién la autorizó.
+    saldo_al_entregar = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name='Saldo pendiente al entregar',
+    )
+    entrega_credito_autorizada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='entregas_credito_autorizadas',
+        verbose_name='Entrega a crédito autorizada por',
+    )
+
     subtotal_servicios = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_repuestos = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_base_0 = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -202,6 +219,9 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 
         # El total final es la suma matemática perfecta
         self.total = self.subtotal_neto + self.monto_iva
+        # Sin saldos a favor: el total no baja de lo que el cliente ya pagó.
+        from apps.pagos.services import validar_total_cubre_pagos
+        validar_total_cubre_pagos(self)
         self.save()
 
 

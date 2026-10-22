@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'apps.notificaciones',
     'apps.proveedores',
     'apps.gastos',
+    'apps.pagos',
     'apps.reportes',
 ]
 

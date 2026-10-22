@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -12,6 +13,7 @@ from apps.authentication.utils import (
 from apps.core.mixins import ValidarDocumentoPadreMixin, ValidarTenantMixin, ValidarUsuariosEmpresaMixin
 from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 from apps.inventario.models import Repuesto, Servicio
+from apps.pagos.services import resumen_pagos, saldo_para_entrega, validar_anulacion_orden, validar_entrega
 
 from .models import (
     DetalleRepuestoInspeccion,
@@ -937,6 +939,8 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
     inspeccion = InspeccionVehiculoSerializer(read_only=True)
     fotos = FotoOrdenTrabajoSerializer(many=True, read_only=True)
     cotizaciones_aplicadas = serializers.SerializerMethodField()
+    # Confirmación explícita para entregar la orden con saldo pendiente.
+    entrega_a_credito = serializers.BooleanField(write_only=True, required=False, default=False)
 
     def get_cotizaciones_aplicadas(self, obj):
         return [id_publico(c) for c in obj.cotizaciones_aplicadas.all()]
@@ -962,6 +966,8 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'fecha_ingreso',
             'fecha_entrega',
             'kilometraje',
+            'entrega_a_credito',
+            'saldo_al_entregar',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -984,6 +990,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'empresa',
             'numero_orden',
             'is_active',
+            'saldo_al_entregar',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -1039,6 +1046,10 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                 raise serializers.ValidationError(
                     {'motivo_espera': 'Debes indicar el motivo de la espera (repuestos, aprobación del cliente, etc.).'}
                 )
+        if estado == 'CANCELADO' and self.instance and self.instance.estado != 'CANCELADO':
+            validar_anulacion_orden(self.instance)
+        if estado == 'ENTREGADO' and self.instance and self.instance.estado != 'ENTREGADO':
+            validar_entrega(self.instance, attrs.get('entrega_a_credito', False))
         self._validar_kilometraje(attrs)
         return attrs
 
@@ -1066,8 +1077,16 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
 
     def update(self, instance, validated_data):
         conservar_sucursal(validated_data)
-        if validated_data.get('estado') == 'ENTREGADO' and 'fecha_entrega' not in validated_data:
-            validated_data['fecha_entrega'] = timezone.now()
+        validated_data.pop('entrega_a_credito', None)
+        if validated_data.get('estado') == 'ENTREGADO' and instance.estado != 'ENTREGADO':
+            if 'fecha_entrega' not in validated_data:
+                validated_data['fecha_entrega'] = timezone.now()
+            # `validate` ya exigió la confirmación si queda saldo.
+            saldo = saldo_para_entrega(instance)
+            if saldo:
+                request = self.context.get('request')
+                validated_data['saldo_al_entregar'] = saldo
+                validated_data['entrega_credito_autorizada_por'] = getattr(request, 'user', None)
         return super().update(instance, validated_data)
 
     def to_representation(self, instance):
@@ -1077,6 +1096,8 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         rep['tipo_trabajo_display'] = instance.get_tipo_trabajo_display()
         rep['prioridad_display'] = instance.get_prioridad_display()
         rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
+        rep.update({clave: str(valor) if isinstance(valor, Decimal) else valor
+                    for clave, valor in resumen_pagos(instance).items()})
         if instance.vehiculo_id:
             rep['vehiculo'] = {
                 'id': id_publico(instance.vehiculo),
@@ -1106,6 +1127,8 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         rep['mecanico_nombre'] = (
             instance.mecanico_principal.get_full_name() or instance.mecanico_principal.username
         ) if instance.mecanico_principal_id else None
+        autorizo = instance.entrega_credito_autorizada_por if instance.entrega_credito_autorizada_por_id else None
+        rep['entrega_credito_autorizada_por_nombre'] = (autorizo.get_full_name() or autorizo.username) if autorizo else None
         rep['mecanico_rol'], rep['mecanico_rol_display'] = rol_de_usuario_en_empresa(
             instance.mecanico_principal_id, instance.empresa_id, request
         )
@@ -1192,6 +1215,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         return rep
 
     def create(self, validated_data):
+        validated_data.pop('entrega_a_credito', None)
         request = self.context.get('request')
         if request:
             empresa_id = get_empresa_id_desde_request(request)

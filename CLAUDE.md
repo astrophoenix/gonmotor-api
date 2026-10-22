@@ -41,6 +41,7 @@ gonmotor-api/
         ├── cotizaciones/       # Cotizacion + detalles de servicio/repuesto + PDF
         ├── inventario/         # Repuesto, RepuestoImagen, Servicio
         ├── gastos/             # Gasto
+        ├── pagos/              # PagoOrden: pagos, abonos y devoluciones de la OT (recurso `facturacion`)
         ├── reportes/           # rentabilidad por taller / empresa (sin modelos)
         └── notificaciones/     # recordatorios WhatsApp de mantenimiento
 ```
@@ -73,6 +74,7 @@ gonmotor-api/
 | `api/recepciones/` | **vive en `apps.ordenes`** (`apps/ordenes/recepciones_urls.py`) |
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/` |
 | `api/reportes/` | `rentabilidad-taller/`, `rentabilidad-empresa/` |
+| `api/pagos/` | pagos y devoluciones de órdenes (`?orden=`, `?cliente=`, alta, `{id}/anular/`; sin edición ni borrado), `cuentas-por-cobrar/` y `cuentas-por-cobrar/{orden}/recordar/` |
 | `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar por vehículo/probar), `programadas/` (cola: listar, alta manual de mantenimiento, editar, `cancelar/`, `enviar-ahora/`), `campanas/` (CRUD en borrador, `audiencia/`, `lanzar/`, `cancelar/`), `cron/procesar/` (cola, con `X-Cron-Token`). Aviso de retiro: `api/ordenes/ordenes-trabajo/{id}/notificar-retiro/`; aviso manual de cita: `api/citas/{id}/notificar/` |
 | `api/configuracion/` | `empresa/`, `sucursales/` |
 
@@ -183,6 +185,15 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - **Historial del vehículo**: agrupa en memoria los documentos enlazados en visitas (union-find sobre las mismas FKs) en un número fijo de consultas; regresión en `apps/vehiculos/tests_historial.py`.
 - `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
+
+### Pagos de la orden (`apps/pagos/`)
+- `PagoOrden` cuelga de la OT (`FiltroDocumentoPadreMixin`: mismo alcance empresa/taller) y se protege con `TieneRecurso('facturacion')`. Tipos `PAGO` y `DEVOLUCION`; la `fecha` la fija el servidor (el cierre de caja cuenta los movimientos del día) y `es_anticipo` marca los pagos recibidos antes de `COMPLETADO`. Un movimiento no se edita ni se borra: se anula con motivo (`POST {id}/anular/`).
+- **No hay saldos a favor** (`services.py`): un pago no supera el saldo pendiente; una devolución no supera lo pagado neto; anular una devolución no puede dejar lo pagado por encima del total. `OrdenTrabajo.calcular_totales()` llama a `validar_total_cubre_pagos`: un cambio de líneas que deje el total por debajo de lo pagado responde 400 pidiendo registrar antes la devolución. Para anular la OT (`CANCELADO`) lo pagado neto debe ser 0, y una OT con pagos (aunque anulados) no se elimina.
+- La OT serializada trae `total_pagado`, `total_devuelto`, `pagado_neto`, `saldo`, `estado_pago` (`PENDIENTE`/`PARCIAL`/`PAGADO`) y `estado_pago_display`, calculados en memoria sobre `pagos` precargado (`resumen_pagos`). Los ve quien vea la orden; la lista de movimientos exige `facturacion`/`ver`.
+- Una OT anulada tiene `estado_pago` `SIN_COBRO` y saldo 0. El listado filtra con `?estado_pago=PENDIENTE|PARCIAL|PAGADO|SIN_COBRO` (`filtrar_por_estado_pago`, subconsultas sobre los pagos vigentes).
+- **Entrega a crédito**: pasar la OT a `ENTREGADO` con saldo pendiente responde 400 (`entrega_a_credito` + `saldo`) salvo que llegue `entrega_a_credito: true`; entonces se guardan `saldo_al_entregar` y `entrega_credito_autorizada_por` (el usuario de la petición), y el saldo queda en el historial.
+- **Cuentas por cobrar** (`CuentasPorCobrarView`, `facturacion`/`ver`): solo OT `ENTREGADO` con saldo > 0 (`services.cuentas_por_cobrar`); una OT en proceso con anticipo no es deuda. Filtros `search`, `cliente`, `sucursal`; orden por defecto `fecha_entrega` (la más antigua primero). La respuesta paginada trae `resumen` (`total_por_cobrar`, `ordenes`, `clientes`, `por_taller`). `recordar/` (`facturacion`/`modificar`) envía en el acto una `NotificacionProgramada` tipo `SALDO` por la cola, con respaldo de canal como el aviso de retiro; la fila trae `ultimo_recordatorio`.
+- Cada pago, devolución y anulación deja un evento en el historial de la OT (`Evento.PAGO`, `DEVOLUCION`, `PAGO_ANULADO`). Tests: `apps/pagos/tests.py`.
 
 ### Historial de cambios de documentos
 - `apps/core/historial_documentos.py` + modelo `EventoDocumento`: valor anterior → nuevo de los campos sensibles declarados en `CAMPOS`, solo cuando cambian (comparados ya formateados; FKs por id). Complementa `RegistroAuditoria` (una fila por petición, sin valores), no lo reemplaza.
