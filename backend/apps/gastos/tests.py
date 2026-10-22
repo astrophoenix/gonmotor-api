@@ -1,11 +1,14 @@
 from datetime import date
+from io import BytesIO
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from apps.empresas.models import Empresa, Taller
+from apps.pagos.tests_exportes import filas_excel
 
 from .models import Gasto
 from apps.core.testing import fijar_empresa
@@ -152,9 +155,7 @@ class GastosExportarExcelTests(TestCase):
         fijar_empresa(self.client, str(self.empresa.uuid))
 
     def _filas(self, **params):
-        from apps.pagos.tests_exportes import filas_excel
-
-        respuesta = self.client.get(f'{ENDPOINT}export-excel/', params, **params.pop('headers', {}))
+        respuesta = self.client.get(f'{ENDPOINT}export-excel/', params)
         self.assertEqual(respuesta.status_code, 200)
         return filas_excel(respuesta, 'Fecha')
 
@@ -165,10 +166,6 @@ class GastosExportarExcelTests(TestCase):
 
     def test_taller_activo_y_formulas_neutralizadas(self):
         respuesta = self.client.get(f'{ENDPOINT}export-excel/', HTTP_X_TALLER_ID=str(self.central.uuid))
-        from io import BytesIO
-
-        from openpyxl import load_workbook
-
         hoja = load_workbook(BytesIO(respuesta.content)).active
         celdas = [celda for fila in hoja.iter_rows() for celda in fila if celda.value == '=1+1']
         self.assertEqual(len(celdas), 1)
