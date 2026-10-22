@@ -58,7 +58,7 @@ gonmotor-api/
 | `apps/core/services/text_improver.py` | Mejora de texto vía LLM compatible con OpenAI (por defecto Groq). Descubre el modelo disponible si `AI_TEXT_MODEL` está vacío. |
 | `apps/core/utils/{pdf_export,excel_export}.py` | Exportación PDF (reportlab) y Excel (openpyxl). |
 | `apps/core/utils/images.py` + `apps/core/archivos.py` | Servicio único de imágenes (ver «Imágenes») y borrado de archivos reemplazados/borrados. |
-| `apps/notificaciones/services/` | `whatsapp.py` (proveedores mock/Twilio/Meta), `recordatorios.py`, `mensajes.py`, `telefonos.py`. |
+| `apps/notificaciones/services/` | `whatsapp.py` (proveedores mock/Twilio/Meta), `correo.py` (backend de correo de Django), `despacho.py` (elige canal con respaldo), `cola.py` (envía `NotificacionProgramada` vencidas con reintentos), `mantenimiento.py` (próximo mantenimiento al entregar la OT), `avisos.py` (retiro y recordatorios de cita), `campanas.py` (audiencia y lanzamiento), `recordatorios.py`, `mensajes.py`, `telefonos.py`. Disparadores automáticos en `notificaciones/signals.py`. |
 
 ### Rutas (`config/urls.py`)
 
@@ -73,7 +73,7 @@ gonmotor-api/
 | `api/recepciones/` | **vive en `apps.ordenes`** (`apps/ordenes/recepciones_urls.py`) |
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/` |
 | `api/reportes/` | `rentabilidad-taller/`, `rentabilidad-empresa/` |
-| `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar/probar/ejecutar) |
+| `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar por vehículo/probar), `programadas/` (cola: listar, alta manual de mantenimiento, editar, `cancelar/`, `enviar-ahora/`), `campanas/` (CRUD en borrador, `audiencia/`, `lanzar/`, `cancelar/`), `cron/procesar/` (cola, con `X-Cron-Token`). Aviso de retiro: `api/ordenes/ordenes-trabajo/{id}/notificar-retiro/`; aviso manual de cita: `api/citas/{id}/notificar/` |
 | `api/configuracion/` | `empresa/`, `sucursales/` |
 
 La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export-excel/`.
@@ -199,7 +199,14 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Regresión: `apps/clientes/tests_importacion.py` y `tests_importacion_integridad.py`.
 
 ### Integraciones externas
-- **WhatsApp**: `WHATSAPP_MODE=mock` en local (sin llamadas externas, escribe en `logs/whatsapp_mock.log`). Proveedores Twilio/Meta documentados en `apps/notificaciones/services/whatsapp.py`. Comando programable: `python manage.py enviar_recordatorios_mantenimiento`.
+- **WhatsApp**: `WHATSAPP_MODE=mock` en local (sin llamadas externas, escribe en `logs/whatsapp_mock.log`). Proveedores Twilio/Meta documentados en `apps/notificaciones/services/whatsapp.py`. Con `meta_api`, los avisos que inicia el taller salen con plantillas aprobadas (`WHATSAPP_META_PLANTILLA_AVISO`, `WHATSAPP_META_PLANTILLA_PROMOCION` para campañas, `WHATSAPP_META_IDIOMA`); sin ellas se envía texto libre, que Meta solo acepta dentro de las 24 h desde el último mensaje del cliente. El barrido periódico de vehículos se eliminó: todo aviso automático pasa por la cola.
+- **Cola de notificaciones** (`NotificacionProgramada`): los avisos al cliente (retiro, mantenimiento, citas, masivos) se encolan con `fecha_programada` y los envía `python manage.py procesar_notificaciones` o `POST /api/notificaciones/cron/procesar/` (sin JWT, cabecera `X-Cron-Token` = `NOTIFICACIONES_CRON_TOKEN`; vacío = 503). En Render lo dispara cada 15 min `.github/workflows/procesar-notificaciones.yml`. Canal preferido con respaldo al otro (WhatsApp ↔ correo); hasta 3 intentos con espera creciente. Cada envío queda en `RegistroMensajeWhatsApp` (guarda ambos canales, ver `canal`). Tests: `apps/notificaciones/tests_cola.py`.
+- **Disparadores** (`apps/notificaciones/signals.py`, en `on_commit`; un fallo va al log y no rompe el guardado):
+  - OT que **pasa** a `ENTREGADO` → próximo mantenimiento (`services/mantenimiento.py`): km objetivo = odómetro + intervalo; fecha = la menor entre el tope por meses y la estimada por el ritmo de km entre las dos últimas entregas del vehículo en la empresa; aviso `dias_antelacion` antes a las 09:00. Intervalos: el menor de los `Servicio.intervalo_km/intervalo_meses` de la OT, si no los de `PreferenciaMantenimiento`. Sin alerta para GARANTIA/ESTETICA/SINIESTRO. Reemplaza el pendiente del vehículo (único por empresa + vehículo) y actualiza `proximo_mantenimiento_km/fecha` del vehículo.
+  - Cita guardada o eliminada → recordatorios `CITA_24H` y `CITA_2H` (se crean, mueven o cancelan; `recordatorios_cita_activos` en la preferencia). La cola vuelve a comprobar el estado de la cita antes de enviar.
+  - Retiro: manual, solo con la OT `COMPLETADO`; 409 si ya se avisó salvo `reenviar: true`.
+  - Campañas: solo a clientes con `acepta_promociones` y algún contacto; plantillas con `{cliente}`, `{empresa}` (`renderizar_plantilla` ignora llaves desconocidas). Lanzar exige además `empresa`/`modificar`.
+  - Tests: `apps/notificaciones/tests_disparadores.py`.
 - **IA de texto**: `POST /api/core/mejorar-texto/` `{texto, contexto?}` → `{mejorado}`. Máx. 500 caracteres. Variables `AI_TEXT_API_KEY`, `AI_TEXT_BASE_URL`, `AI_TEXT_MODEL` (opcional). No enviar datos personales.
 - **Correo**: reset de contraseña con token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL` (obligatoria en producción: su valor por defecto es de desarrollo).
 

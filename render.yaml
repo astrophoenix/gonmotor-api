@@ -23,6 +23,14 @@ services:
         value: "https://gonmotor-khhmdsaz0-gonmotor.vercel.app"
       - key: AI_TEXT_API_KEY
         sync: false
+      # Token del cron externo de notificaciones (.github/workflows/procesar-notificaciones.yml).
+      - key: NOTIFICACIONES_CRON_TOKEN
+        sync: false
+      # WhatsApp: sin valor = mock. Para Meta, definir en el panel WHATSAPP_MODE=meta_api,
+      # WHATSAPP_META_TOKEN, WHATSAPP_META_PHONE_NUMBER_ID y las plantillas
+      # (ver apps/notificaciones/services/whatsapp.py).
+      - key: WHATSAPP_MODE
+        sync: false
       - key: AI_TEXT_BASE_URL
         value: https://api.groq.com/openai/v1
       # AI_TEXT_MODEL opcional: si no se define, el backend elige un modelo disponible.

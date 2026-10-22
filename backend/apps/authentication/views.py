@@ -1,12 +1,21 @@
 import operator
+import logging
 from functools import reduce
+from smtplib import (
+    SMTPAuthenticationError, SMTPException, SMTPRecipientsRefused,
+    SMTPSenderRefused, SMTPServerDisconnected, SMTPNotSupportedError,
+)
+from ssl import SSLError
 
+from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions, filters
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
+from email.utils import parseaddr
 from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.renderers import JSONRenderer
@@ -431,6 +440,81 @@ class PasswordResetConfirmView(APIView):
         )
 
 
+class InvitacionEmpleadoError(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = (
+        'No se pudo enviar el correo de invitación. El empleado no fue guardado. '
+        'Contacta al administrador para revisar el servicio de correo e intenta nuevamente.'
+    )
+    default_code = 'invitacion_no_enviada'
+
+    def __init__(self, motivo=None, code=None):
+        mensaje = (
+            f'{motivo} El empleado no fue guardado.' if motivo else self.default_detail
+        )
+        codigo = code or self.default_code
+        super().__init__({'detail': mensaje, 'code': codigo}, code=codigo)
+
+
+def validar_correo_invitacion():
+    """Valida el SMTP antes de escribir el alta o intentar abrir una conexión."""
+    if settings.EMAIL_BACKEND != 'django.core.mail.backends.smtp.EmailBackend':
+        return
+    motivo = None
+    if not (settings.EMAIL_HOST or '').strip():
+        motivo = 'El servicio de correo no está configurado. Contacta al administrador para configurar el envío de invitaciones.'
+    elif not (settings.DEFAULT_FROM_EMAIL or '').strip():
+        motivo = 'Falta configurar el remitente de las invitaciones. Contacta al administrador.'
+    else:
+        try:
+            validate_email(parseaddr(settings.DEFAULT_FROM_EMAIL)[1])
+        except DjangoValidationError:
+            motivo = 'El remitente de las invitaciones no es válido. Contacta al administrador para corregirlo.'
+    if not motivo and bool(settings.EMAIL_HOST_USER) != bool(settings.EMAIL_HOST_PASSWORD):
+        motivo = 'La configuración de acceso al servicio de correo está incompleta. Contacta al administrador.'
+    if not motivo and settings.EMAIL_USE_TLS and settings.EMAIL_USE_SSL:
+        motivo = 'La configuración de seguridad del servicio de correo es incompatible. Contacta al administrador.'
+    if motivo:
+        raise InvitacionEmpleadoError(motivo, code='correo_no_configurado')
+
+
+def error_envio_invitacion(exc):
+    """Mensajes seguros: nunca exponer respuestas SMTP, destinatarios o credenciales."""
+    if isinstance(exc, SMTPAuthenticationError):
+        return InvitacionEmpleadoError(
+            'El servicio de correo rechazó la autenticación. Contacta al administrador para revisar las credenciales.',
+            code='correo_autenticacion_fallida',
+        )
+    if isinstance(exc, SMTPRecipientsRefused):
+        return InvitacionEmpleadoError(
+            'El servicio de correo rechazó el destinatario. Revisa el correo del empleado o contacta al administrador.',
+            code='correo_destinatario_rechazado',
+        )
+    if isinstance(exc, SMTPSenderRefused):
+        return InvitacionEmpleadoError(
+            'El servicio de correo rechazó el remitente. Contacta al administrador para verificarlo con el proveedor.',
+            code='correo_remitente_rechazado',
+        )
+    if isinstance(exc, (SSLError, SMTPNotSupportedError)):
+        return InvitacionEmpleadoError(
+            'No se pudo establecer una conexión segura con el servicio de correo. Contacta al administrador.',
+            code='correo_seguridad_fallida',
+        )
+    if isinstance(exc, TimeoutError):
+        return InvitacionEmpleadoError(
+            'El servicio de correo tardó demasiado en responder. Intenta nuevamente en unos minutos.',
+            code='correo_tiempo_agotado',
+        )
+    if isinstance(exc, SMTPServerDisconnected) or (
+        isinstance(exc, OSError) and not isinstance(exc, SMTPException)
+    ):
+        return InvitacionEmpleadoError(
+            'No se pudo conectar o se perdió la conexión con el servicio de correo. Intenta nuevamente; si persiste, contacta al administrador.',
+            code='correo_conexion_fallida',
+        )
+    return InvitacionEmpleadoError()
+
+
 class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
     """
     ViewSet para CRUD de empleados de la empresa actual.
@@ -497,6 +581,7 @@ class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
             return EmpleadoReadSerializer
         return EmpleadoWriteSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -533,6 +618,9 @@ class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
                 'email': 'Ya existe un usuario con este correo en el sistema.'
             })
         
+        if validated_data.get('tiene_acceso', True):
+            validar_correo_invitacion()
+
         user = User.objects.create_user(
             username=username,
             email=email,
@@ -596,7 +684,14 @@ class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
         html_part.set_payload(base64.b64encode(html_message.encode('utf-8')).decode('ascii'))
         html_part['Content-Transfer-Encoding'] = 'base64'
         email_msg.attach(html_part)
-        email_msg.send(fail_silently=False)
+        try:
+            if email_msg.send(fail_silently=False) != 1:
+                raise SMTPException('El servicio de correo no aceptó la invitación.')
+        except (SMTPException, OSError) as exc:
+            logging.getLogger(__name__).exception('No se pudo enviar la invitación de empleado.')
+            # La excepción sale del bloque atomic: revierte usuario, perfil y
+            # asignaciones, para que se pueda reintentar con el mismo correo.
+            raise error_envio_invitacion(exc) from exc
         
         read_serializer = EmpleadoReadSerializer(usuario_empresa, context={'request': request})
         headers = self.get_success_headers(read_serializer.data)

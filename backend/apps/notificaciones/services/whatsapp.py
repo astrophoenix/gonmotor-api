@@ -35,7 +35,30 @@ todos tienen cuota gratuita para desarrollo/equipo pequeño.
 ║      WHATSAPP_MODE=meta_api                                            ║
 ║      WHATSAPP_META_TOKEN=EAAG...                                       ║
 ║      WHATSAPP_META_PHONE_NUMBER_ID=10...                               ║
+║    Plantillas (ver «Plantillas de Meta» más abajo):                    ║
+║      WHATSAPP_META_PLANTILLA_AVISO=aviso_taller                        ║
+║      WHATSAPP_META_PLANTILLA_PROMOCION=promocion_taller                ║
+║      WHATSAPP_META_IDIOMA=es                                           ║
 ╚═══════════════════════════════════════════════════════════════════════╝
+
+Plantillas de Meta
+------------------
+Meta solo acepta texto libre si el cliente escribió al número en las últimas
+24 h. Todo aviso que inicia el taller (mantenimiento, retiro, citas,
+campañas) debe salir con una plantilla aprobada en WhatsApp Manager. Con
+`WHATSAPP_META_PLANTILLA_*` configuradas, el modo `meta_api` envía el texto
+del aviso como variable de la plantilla; vacías, envía texto libre (solo sirve
+en pruebas con números que escribieron antes).
+
+Crear dos plantillas, idioma Español (`es`), con dos variables de cuerpo:
+
+    aviso_taller       categoría UTILITY    cuerpo: «Aviso de {{1}}: {{2}}»
+    promocion_taller   categoría MARKETING  cuerpo: «Novedades de {{1}}: {{2}}»
+
+    {{1}} = nombre comercial de la empresa, {{2}} = texto completo del aviso
+    (el mismo que se ve en la cola; se envía en una sola línea).
+
+Los avisos usan `aviso_taller`; las campañas (`MASIVA`), `promocion_taller`.
 
 Respuesta común de cualquier proveedor:
 
@@ -63,6 +86,7 @@ O con contexto de negocio (persiste la bitácora):
 
 import logging
 import os
+import re
 
 import requests
 from django.conf import settings
@@ -114,7 +138,7 @@ def resumen_configuracion():
     return info
 
 
-def _enviar_mock(celular, mensaje):
+def _enviar_mock(celular, mensaje, plantilla=None):
     logger.warning(
         '[WHATSAPP MOCK] No se envió un mensaje real.\n'
         '  Para:   %s\n'
@@ -148,7 +172,7 @@ def _enviar_mock(celular, mensaje):
     }
 
 
-def _enviar_twilio_sandbox(celular, mensaje):
+def _enviar_twilio_sandbox(celular, mensaje, plantilla=None):
     sid = getattr(settings, 'WHATSAPP_TWILIO_ACCOUNT_SID', '')
     token = getattr(settings, 'WHATSAPP_TWILIO_AUTH_TOKEN', '')
     de = getattr(settings, 'WHATSAPP_TWILIO_FROM_NUMBER', 'whatsapp:+14155238886')
@@ -185,7 +209,7 @@ def _enviar_twilio_sandbox(celular, mensaje):
     }
 
 
-def _enviar_meta_api(celular, mensaje):
+def _enviar_meta_api(celular, mensaje, plantilla=None):
     token = getattr(settings, 'WHATSAPP_META_TOKEN', '')
     phone_number_id = getattr(settings, 'WHATSAPP_META_PHONE_NUMBER_ID', '')
     if not token or not phone_number_id:
@@ -199,12 +223,27 @@ def _enviar_meta_api(celular, mensaje):
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
     }
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': celular,
-        'type': 'text',
-        'text': {'body': mensaje},
-    }
+    if plantilla:
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': celular,
+            'type': 'template',
+            'template': {
+                'name': plantilla['nombre'],
+                'language': {'code': plantilla['idioma']},
+                'components': [{
+                    'type': 'body',
+                    'parameters': [{'type': 'text', 'text': valor} for valor in plantilla['parametros']],
+                }],
+            },
+        }
+    else:
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': celular,
+            'type': 'text',
+            'text': {'body': mensaje},
+        }
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=20)
     except requests.RequestException as exc:
@@ -233,12 +272,44 @@ _DESPACHADORES = {
 }
 
 
-def enviar_mensaje(celular, mensaje):
+# Límites de Meta para una variable de plantilla: sin saltos de línea ni
+# tabulaciones ni más de 4 espacios seguidos; el cuerpo entero ≤ 1024.
+_MAX_PARAMETRO_META = 900
+
+
+def _parametro_meta(texto):
+    limpio = re.sub(r'\s+', ' ', str(texto or '')).strip()
+    if len(limpio) > _MAX_PARAMETRO_META:
+        limpio = limpio[:_MAX_PARAMETRO_META - 1].rstrip() + '…'
+    return limpio or '-'
+
+
+def plantilla_meta(categoria, *, empresa_nombre, mensaje):
+    """Plantilla de Meta para un aviso (`categoria`: 'aviso' | 'promocion').
+
+    Devuelve None si el modo no es `meta_api` o la plantilla no está
+    configurada: entonces se envía texto libre.
+    """
+    if _modo_activo() != 'meta_api':
+        return None
+    clave = 'WHATSAPP_META_PLANTILLA_PROMOCION' if categoria == 'promocion' else 'WHATSAPP_META_PLANTILLA_AVISO'
+    nombre = (getattr(settings, clave, '') or '').strip()
+    if not nombre:
+        return None
+    return {
+        'nombre': nombre,
+        'idioma': getattr(settings, 'WHATSAPP_META_IDIOMA', 'es') or 'es',
+        'parametros': [_parametro_meta(empresa_nombre), _parametro_meta(mensaje)],
+    }
+
+
+def enviar_mensaje(celular, mensaje, *, plantilla=None):
     """Envía (o simula) un mensaje de WhatsApp por el proveedor activo.
 
     Args:
         celular: número local o internacional (se normaliza solo).
         mensaje: texto del mensaje.
+        plantilla: plantilla de Meta (`plantilla_meta`); solo la usa `meta_api`.
 
     Returns:
         dict con la respuesta común (ver docstring del módulo).
@@ -252,7 +323,7 @@ def enviar_mensaje(celular, mensaje):
 
     modo = _modo_activo()
     despachador = _DESPACHADORES.get(modo) or _enviar_mock
-    resultado = despachador(celular_normalizado, mensaje)
+    resultado = despachador(celular_normalizado, mensaje, plantilla)
     resultado['celular_normalizado'] = celular_normalizado
     return resultado
 
@@ -272,13 +343,49 @@ def whatsapp_enviar_y_registrar(
     Es la función que consumen las vistas y el comando programado para mantener
     un historial consistente en `RegistroMensajeWhatsApp`.
     """
+    resultado, _registro = enviar_y_registrar_con_registro(
+        empresa=empresa,
+        celular=celular,
+        mensaje=mensaje,
+        origen=origen,
+        vehiculo=vehiculo,
+        cliente_nombre=cliente_nombre,
+        user=user,
+    )
+    return resultado
+
+
+def enviar_y_registrar_con_registro(
+    *,
+    empresa,
+    celular,
+    mensaje,
+    origen='MANUAL',
+    vehiculo=None,
+    cliente_nombre='',
+    user=None,
+    categoria='aviso',
+):
+    """Como `whatsapp_enviar_y_registrar`, pero devuelve también el registro.
+
+    `categoria` ('aviso' | 'promocion') elige la plantilla de Meta.
+
+    Returns:
+        tuple(dict, RegistroMensajeWhatsApp | None): respuesta común y la fila
+        de la bitácora (None solo ante un error inesperado).
+    """
+    plantilla = plantilla_meta(
+        categoria,
+        empresa_nombre=getattr(empresa, 'nombre_comercial', ''),
+        mensaje=mensaje,
+    )
     try:
-        resultado = enviar_mensaje(celular, mensaje)
+        resultado = enviar_mensaje(celular, mensaje, plantilla=plantilla)
         estado = RegistroMensajeWhatsApp.EstadoMensaje.ENVIADO
         id_externo = resultado.get('id_externo', '')
         if resultado.get('simulado'):
             estado = RegistroMensajeWhatsApp.EstadoMensaje.SIMULADO
-        RegistroMensajeWhatsApp.objects.create(
+        registro = RegistroMensajeWhatsApp.objects.create(
             empresa=empresa,
             vehiculo=vehiculo,
             enviado_por=user,
@@ -290,15 +397,18 @@ def whatsapp_enviar_y_registrar(
             estado=estado,
             origen=origen,
             id_externo=id_externo,
-            metadatos={'wa_link': resultado.get('wa_link', '')},
+            metadatos={
+                'wa_link': resultado.get('wa_link', ''),
+                'plantilla': plantilla['nombre'] if plantilla else '',
+            },
         )
         result = dict(resultado)
         result['estado'] = estado
         result['registrado'] = True
-        return result
+        return result, registro
 
     except WhatsAppError as exc:
-        RegistroMensajeWhatsApp.objects.create(
+        registro = RegistroMensajeWhatsApp.objects.create(
             empresa=empresa,
             vehiculo=vehiculo,
             enviado_por=user,
@@ -322,7 +432,7 @@ def whatsapp_enviar_y_registrar(
             'error': str(exc),
             'registrado': True,
         }
-        return result
+        return result, registro
     except Exception as exc:  # pragma: no cover - red de seguridad
         logger.exception('Error inesperado enviando WhatsApp')
         result = {
@@ -336,4 +446,4 @@ def whatsapp_enviar_y_registrar(
             'error': str(exc),
             'registrado': False,
         }
-        return result
+        return result, None

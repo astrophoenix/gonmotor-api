@@ -224,6 +224,41 @@ class CitaViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, FiltroTallerMixin,
     @action(
         detail=True,
         methods=['post'],
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TienePermiso('citas', 'ver'),
+            TienePermiso('notificaciones', 'modificar'),
+        ],
+    )
+    def notificar(self, request, pk=None):
+        """Envía en el acto un aviso de la cita al cliente (WhatsApp o correo).
+
+        Cuerpo opcional: `canal` (whatsapp | correo). Solo con la cita
+        programada o confirmada; los recordatorios de 24 h y 2 h salen solos.
+        """
+        from apps.notificaciones.serializers import NotificacionProgramadaSerializer, NotificarRetiroSerializer
+        from apps.notificaciones.services import avisos
+
+        datos = NotificarRetiroSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        try:
+            notificacion, resultado = avisos.notificar_cita(
+                self.get_object(), user=request.user, canal=datos.validated_data['canal'],
+            )
+        except avisos.AvisoNoPermitido as exc:
+            return Response({'detail': str(exc)}, status=400)
+        notificacion.refresh_from_db()
+        return Response(
+            {
+                'resultado': resultado,
+                'notificacion': NotificacionProgramadaSerializer(notificacion, context={'request': request}).data,
+            },
+            status=201 if resultado.get('ok') else 400,
+        )
+
+    @action(
+        detail=True,
+        methods=['post'],
         # Convertir crea una recepción: además de modificar la cita, el rol
         # debe poder crear recepciones (si no, sería una puerta lateral).
         permission_classes=[

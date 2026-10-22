@@ -233,7 +233,7 @@ class AuditoriaTenantTests(TestCase):
             client.patch('/api/notificaciones/preferencias/', {'activo': False}, format='json').status_code, 403
         )
         self.assertEqual(
-            client.post('/api/notificaciones/recordatorios/ejecutar/', {'preview': True}, format='json').status_code,
+            client.post('/api/notificaciones/recordatorios/enviar-prueba/', {'celular': '0991234567'}, format='json').status_code,
             403,
         )
 

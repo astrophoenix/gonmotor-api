@@ -3,7 +3,7 @@
 El vehículo es global (la placa es única en el sistema) y varias empresas
 pueden atenderlo, pero cada cliente pertenece a una sola empresa. Por eso cada
 empresa tiene su propio dueño actual: asignar el de una no cierra el de otra, y
-ninguna lectura (ficha, listado, exportación, recordatorios de WhatsApp) debe
+ninguna lectura (ficha, listado, exportación, avisos al cliente) debe
 mostrar o usar el cliente de otra empresa.
 """
 
@@ -20,8 +20,7 @@ from apps.authentication.models import UsuarioEmpresa
 from apps.clientes.models import Cliente
 from apps.core.testing import fijar_empresa
 from apps.empresas.models import Empresa, Taller
-from apps.notificaciones.models import PreferenciaMantenimiento
-from apps.notificaciones.services.recordatorios import vehiculos_proximos_mantenimiento
+from apps.notificaciones.models import NotificacionProgramada
 from apps.vehiculos.models import Vehiculo, VehiculoPropietario, asignar_propietario_actual, vincular_empresa
 
 User = get_user_model()
@@ -100,20 +99,27 @@ class PropietarioPorEmpresaTests(TestCase):
         filas = self._api(self.empresa_b).get('/api/vehiculos/', {'cliente': str(self.cliente_a.uuid)}).json()['results']
         self.assertEqual(filas, [])
 
-    def test_los_recordatorios_solo_usan_clientes_de_la_propia_empresa(self):
+    def test_el_mantenimiento_programado_usa_el_cliente_de_la_propia_empresa(self):
         self._dos_duenos()
-        preferencia = PreferenciaMantenimiento.objects.create(
-            empresa=self.empresa_b, notificar_vehiculos_sin_programar=True,
+        respuesta = self._api(self.empresa_b).post(
+            '/api/notificaciones/programadas/',
+            {'vehiculo_id': str(self.vehiculo.uuid), 'km_objetivo': 10000},
+            format='json',
         )
-        candidatos = vehiculos_proximos_mantenimiento(self.empresa_b.pk, preferencia)
-        self.assertEqual([c['cliente'].pk for c in candidatos], [self.cliente_b.pk])
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        notificacion = NotificacionProgramada.objects.get(uuid=respuesta.data['id'])
+        self.assertEqual(notificacion.cliente, self.cliente_b)
+        self.assertEqual(notificacion.empresa, self.empresa_b)
 
-    def test_los_recordatorios_omiten_vehiculos_sin_dueno_en_la_empresa(self):
+    def test_el_mantenimiento_no_se_programa_sin_dueno_en_la_empresa(self):
         asignar_propietario_actual(self.vehiculo, self.cliente_a)
-        preferencia = PreferenciaMantenimiento.objects.create(
-            empresa=self.empresa_b, notificar_vehiculos_sin_programar=True,
+        respuesta = self._api(self.empresa_b).post(
+            '/api/notificaciones/programadas/',
+            {'vehiculo_id': str(self.vehiculo.uuid), 'km_objetivo': 10000},
+            format='json',
         )
-        self.assertEqual(vehiculos_proximos_mantenimiento(self.empresa_b.pk, preferencia), [])
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertFalse(NotificacionProgramada.objects.exists())
 
     def test_agregar_el_vehiculo_desde_un_cliente_no_quita_el_dueno_de_otra_empresa(self):
         asignar_propietario_actual(self.vehiculo, self.cliente_a)

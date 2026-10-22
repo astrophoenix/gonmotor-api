@@ -1,8 +1,8 @@
 """Tests del módulo de notificaciones WhatsApp (recordatorios de mantenimiento).
 
 Cubre: normalización de teléfonos, plantillas de mensajes, proveedor mock,
-bitácora `RegistroMensajeWhatsApp`, detección de mantenimiento próximo
-(fecha/km/sin programar), deduplicación y los endpoints de `/api/notificaciones/`.
+bitácora `RegistroMensajeWhatsApp`, recordatorio manual por vehículo (con su
+deduplicación) y los endpoints de `/api/notificaciones/`.
 """
 
 import os
@@ -148,7 +148,7 @@ class RecordatoriosServiceTests(TestCase):
         self.assertEqual(preferencia.dias_antelacion, 7)
         self.assertEqual(preferencia.frecuencia_dias, 30)
         self.assertTrue(preferencia.notificaciones_activas)
-        self.assertFalse(preferencia.notificar_vehiculos_sin_programar)
+        self.assertTrue(preferencia.recordatorios_cita_activos)
         self.assertTrue(preferencia.mensaje_plantilla)
 
     def test_enviar_mensaje_mock(self):
@@ -211,109 +211,6 @@ class RecordatoriosServiceTests(TestCase):
         self.assertEqual(
             RegistroMensajeWhatsApp.objects.filter(vehiculo=self.vehiculo).count(), 1
         )
-
-    def test_candidato_por_fecha(self):
-        Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
-            proxima_mantenimiento_fecha=timezone.localdate() + timedelta(days=2)
-        )
-        candidatos = svc.vehiculos_proximos_mantenimiento(
-            self.empresa.pk, svc.get_preferencia(self.empresa)
-        )
-        self.assertEqual(len(candidatos), 1)
-        self.assertEqual(candidatos[0]['vehiculo'], self.vehiculo)
-        self.assertEqual(candidatos[0]['motivo'], 'fecha')
-
-    def test_candidato_por_km(self):
-        Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
-            proximo_mantenimiento_km=30000, kilometraje_actual=30500
-        )
-        candidatos = svc.vehiculos_proximos_mantenimiento(
-            self.empresa.pk, svc.get_preferencia(self.empresa)
-        )
-        self.assertEqual(len(candidatos), 1)
-        self.assertEqual(candidatos[0]['motivo'], 'km')
-
-    def test_sin_programar_solo_con_preferencia(self):
-        preferencia = svc.get_preferencia(self.empresa)
-        self.assertEqual(
-            svc.vehiculos_proximos_mantenimiento(self.empresa.pk, preferencia), []
-        )
-        preferencia.notificar_vehiculos_sin_programar = True
-        preferencia.save()
-        candidatos = svc.vehiculos_proximos_mantenimiento(
-            self.empresa.pk, preferencia
-        )
-        self.assertEqual(len(candidatos), 1)
-        self.assertEqual(candidatos[0]['motivo'], 'sin_programar')
-
-    def test_sin_telefono_no_es_candidato(self):
-        Cliente.objects.filter(pk=self.cliente.pk).update(telefono='')
-        preferencia = svc.get_preferencia(self.empresa)
-        preferencia.notificar_vehiculos_sin_programar = True
-        preferencia.save()
-        self.assertEqual(
-            svc.vehiculos_proximos_mantenimiento(self.empresa.pk, preferencia), []
-        )
-
-    def test_deduplicacion_por_frecuencia(self):
-        preferencia = svc.get_preferencia(self.empresa)
-        RegistroMensajeWhatsApp.objects.create(
-            empresa=self.empresa,
-            vehiculo=self.vehiculo,
-            celular='593991234567',
-            mensaje='ya enviado',
-            estado=RegistroMensajeWhatsApp.EstadoMensaje.SIMULADO,
-            origen=RegistroMensajeWhatsApp.OrigenMensaje.PROGRAMADO,
-        )
-        Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
-            proxima_mantenimiento_fecha=timezone.localdate() + timedelta(days=2)
-        )
-        self.assertEqual(
-            svc.vehiculos_proximos_mantenimiento(self.empresa.pk, preferencia), []
-        )
-
-    def test_ejecutar_preview_devuelve_candidatos_sin_enviar(self):
-        Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
-            proxima_mantenimiento_fecha=timezone.localdate() + timedelta(days=2)
-        )
-        resultado = svc.ejecutar_para_empresa(
-            empresa=self.empresa,
-            preferencia=svc.get_preferencia(self.empresa),
-            preview=True,
-        )
-        self.assertTrue(resultado['preview'])
-        self.assertEqual(resultado['pendientes'], 1)
-        self.assertEqual(resultado['enviados'], 0)
-        self.assertEqual(resultado['candidatos'][0]['placa'], self.vehiculo.placa)
-
-    def test_ejecutar_envia_y_registra(self):
-        Vehiculo.objects.filter(pk=self.vehiculo.pk).update(
-            proxima_mantenimiento_fecha=timezone.localdate()
-        )
-        resultado = svc.ejecutar_para_empresa(
-            empresa=self.empresa,
-            preferencia=svc.get_preferencia(self.empresa),
-            user=self.user,
-        )
-        self.assertFalse(resultado['preview'])
-        self.assertEqual(resultado['enviados'], 1)
-        self.assertTrue(resultado['simulado'])
-        self.assertEqual(
-            RegistroMensajeWhatsApp.objects.filter(
-                vehiculo=self.vehiculo, origen=RegistroMensajeWhatsApp.OrigenMensaje.PROGRAMADO
-            ).count(),
-            1,
-        )
-
-    def test_ejecutar_detenido_si_notificaciones_inactivas(self):
-        preferencia = svc.get_preferencia(self.empresa)
-        preferencia.notificaciones_activas = False
-        preferencia.save()
-        resultado = svc.ejecutar_para_empresa(
-            empresa=self.empresa, preferencia=preferencia
-        )
-        self.assertTrue(resultado['detenido'])
-        self.assertEqual(resultado['enviados'], 0)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -391,13 +288,13 @@ class NotificacionesApiTests(TestCase):
     def test_preferencias_patch(self):
         resp = self.client.patch(
             '/api/notificaciones/preferencias/',
-            {'dias_antelacion': 14, 'notificar_vehiculos_sin_programar': True},
+            {'dias_antelacion': 14, 'recordatorios_cita_activos': False},
             format='json',
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data['dias_antelacion'], 14)
-        self.assertTrue(data['notificar_vehiculos_sin_programar'])
+        self.assertFalse(data['recordatorios_cita_activos'])
         self.assertEqual(data['empresa'], str(self.empresa.uuid))
 
     def test_enviar_prueba_ok(self):
@@ -425,39 +322,6 @@ class NotificacionesApiTests(TestCase):
             format='json',
         )
         self.assertEqual(resp.status_code, 400)
-
-    def test_ejecutar_preview(self):
-        self._marcar_fecha_cercana()
-        resp = self.client.post(
-            '/api/notificaciones/recordatorios/ejecutar/',
-            {'preview': True},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertTrue(data['preview'])
-        self.assertEqual(data['pendientes'], 1)
-        self.assertEqual(data['candidatos'][0]['placa'], self.vehiculo.placa)
-
-    def test_ejecutar_envia(self):
-        self._marcar_fecha_cercana()
-        resp = self.client.post(
-            '/api/notificaciones/recordatorios/ejecutar/',
-            {'preview': False},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['enviados'], 1)
-
-    def test_ejecutar_vehiculos_ids_filtra(self):
-        self._marcar_fecha_cercana()
-        resp = self.client.post(
-            '/api/notificaciones/recordatorios/ejecutar/',
-            {'preview': True, 'vehiculos_ids': [999999]},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['pendientes'], 0)
 
     def test_enviar_vehiculo_ok(self):
         resp = self.client.post(

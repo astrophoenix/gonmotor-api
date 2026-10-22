@@ -326,6 +326,16 @@ WHATSAPP_TWILIO_FROM_NUMBER = config('WHATSAPP_TWILIO_FROM_NUMBER', default='wha
 
 # Meta WhatsApp Cloud API (modo de pruebas de desarrollador)
 WHATSAPP_META_TOKEN = config('WHATSAPP_META_TOKEN', default='')
+WHATSAPP_META_PHONE_NUMBER_ID = config('WHATSAPP_META_PHONE_NUMBER_ID', default='')
+# Plantillas aprobadas en WhatsApp Manager (avisos que inicia el taller).
+# Vacías = texto libre (solo válido si el cliente escribió en las últimas 24 h).
+WHATSAPP_META_PLANTILLA_AVISO = config('WHATSAPP_META_PLANTILLA_AVISO', default='')
+WHATSAPP_META_PLANTILLA_PROMOCION = config('WHATSAPP_META_PLANTILLA_PROMOCION', default='')
+WHATSAPP_META_IDIOMA = config('WHATSAPP_META_IDIOMA', default='es')
+
+# Token secreto del cron externo que llama a POST /api/notificaciones/cron/procesar/
+# (cabecera X-Cron-Token). Vacío = endpoint deshabilitado.
+NOTIFICACIONES_CRON_TOKEN = config('NOTIFICACIONES_CRON_TOKEN', default='')
 
 
 

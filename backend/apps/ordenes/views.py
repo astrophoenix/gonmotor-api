@@ -274,6 +274,54 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'orden')
 
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='notificar-retiro',
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TienePermiso('ordenes', 'ver'),
+            TienePermiso('notificaciones', 'modificar'),
+        ],
+    )
+    def notificar_retiro(self, request, pk=None):
+        """Avisa al cliente, en el acto, que su vehículo está listo para retirar.
+
+        Solo con la orden COMPLETADO. Si ya se avisó, responde 409 salvo que
+        llegue `reenviar: true`. Cuerpo opcional: `canal` (whatsapp | correo).
+        """
+        from apps.notificaciones.serializers import NotificacionProgramadaSerializer, NotificarRetiroSerializer
+        from apps.notificaciones.services import avisos
+
+        datos = NotificarRetiroSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        orden = self.get_object()
+
+        anterior = avisos.ultimo_retiro_enviado(orden)
+        if anterior and not datos.validated_data['reenviar']:
+            return Response(
+                {
+                    'detail': 'El cliente ya fue avisado del retiro de esta orden.',
+                    'fecha_envio': anterior.fecha_envio,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            notificacion, resultado = avisos.notificar_retiro(
+                orden, user=request.user, canal=datos.validated_data['canal'],
+            )
+        except avisos.AvisoNoPermitido as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        notificacion.refresh_from_db()
+        return Response(
+            {
+                'resultado': resultado,
+                'notificacion': NotificacionProgramadaSerializer(notificacion, context={'request': request}).data,
+            },
+            status=status.HTTP_201_CREATED if resultado.get('ok') else status.HTTP_400_BAD_REQUEST,
+        )
+
     def _bloquear_cotizacion_inicial(self, serializer):
         from apps.cotizaciones.models import Cotizacion
         cotizacion = serializer.validated_data.get('cotizacion_origen')

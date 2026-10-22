@@ -280,6 +280,18 @@ class Servicio(UuidPublicoModel, BaseEmpresaModel):
         default=Decimal('0.1500'), 
         verbose_name="Porcentaje de IVA por defecto"
     )
+    intervalo_km = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='Repetir cada (km)',
+        help_text='Kilómetros hasta el próximo mantenimiento sugerido tras este servicio.',
+    )
+    intervalo_meses = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='Repetir cada (meses)',
+        help_text='Meses hasta el próximo mantenimiento sugerido tras este servicio.',
+    )
     contifico_producto_id = models.CharField(
         max_length=100,
         blank=True,

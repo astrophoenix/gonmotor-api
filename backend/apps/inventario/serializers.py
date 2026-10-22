@@ -171,6 +171,8 @@ class ServicioSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
             'categoria',
             'tiempo_estimado_minutos',
             'tareas_estandar',
+            'intervalo_km',
+            'intervalo_meses',
             'precio_referencial',
             'iva_porcentaje_defecto',
             'contifico_producto_id',

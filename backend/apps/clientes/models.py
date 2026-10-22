@@ -41,6 +41,11 @@ class Cliente(UuidPublicoModel, BaseEmpresaModel):
         blank=True,
         default=""
     )
+    acepta_promociones = models.BooleanField(
+        verbose_name="Acepta mensajes promocionales",
+        default=False,
+        help_text="Consentimiento para recibir campañas masivas por WhatsApp o correo.",
+    )
     direccion = models.TextField(
         verbose_name="Dirección",
         blank=True,
