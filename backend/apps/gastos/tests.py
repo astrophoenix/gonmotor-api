@@ -119,3 +119,59 @@ class GastosCrearTests(TestCase):
         respuesta = self.client.post(ENDPOINT, self._payload(taller=str(self.taller_ajeno.uuid)), format='json')
         self.assertEqual(respuesta.status_code, 400)
         self.assertIn('taller', respuesta.data)
+
+
+class GastosExportarExcelTests(TestCase):
+    """El Excel usa los mismos filtros y taller que el listado."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_superuser(username='gastos_excel', password='x')
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Excel Gastos',
+            ruc=str(uuid4().int % 10_000_000_000_000).zfill(13),
+            email_contacto='excel@test.com',
+        )
+        cls.central = Taller.objects.create(
+            empresa=cls.empresa, nombre='Central', codigo_sucursal='001', direccion='Av. 1',
+        )
+        cls.norte = Taller.objects.create(
+            empresa=cls.empresa, nombre='Norte', codigo_sucursal='002', direccion='Av. 2',
+        )
+        Gasto.objects.create(
+            empresa=cls.empresa, taller=cls.central, fecha=date(2026, 1, 10), monto=10,
+            categoria='ARRIENDO', descripcion='=1+1',
+        )
+        Gasto.objects.create(
+            empresa=cls.empresa, taller=cls.norte, fecha=date(2026, 2, 11), monto=20, categoria='INSUMOS',
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        fijar_empresa(self.client, str(self.empresa.uuid))
+
+    def _filas(self, **params):
+        from apps.pagos.tests_exportes import filas_excel
+
+        respuesta = self.client.get(f'{ENDPOINT}export-excel/', params, **params.pop('headers', {}))
+        self.assertEqual(respuesta.status_code, 200)
+        return filas_excel(respuesta, 'Fecha')
+
+    def test_exporta_con_filtros(self):
+        self.assertEqual(len(self._filas()), 2)
+        self.assertEqual([fila[2] for fila in self._filas(categoria='INSUMOS')], ['Insumos/Compras menores'])
+        self.assertEqual([fila[0] for fila in self._filas(fecha_desde='2026-02-01')], ['11/02/2026'])
+
+    def test_taller_activo_y_formulas_neutralizadas(self):
+        respuesta = self.client.get(f'{ENDPOINT}export-excel/', HTTP_X_TALLER_ID=str(self.central.uuid))
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        hoja = load_workbook(BytesIO(respuesta.content)).active
+        celdas = [celda for fila in hoja.iter_rows() for celda in fila if celda.value == '=1+1']
+        self.assertEqual(len(celdas), 1)
+        self.assertEqual(celdas[0].data_type, 's')
+        textos = [celda.value for fila in hoja.iter_rows() for celda in fila]
+        self.assertNotIn('Norte', textos)

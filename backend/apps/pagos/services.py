@@ -62,16 +62,7 @@ def resumen_pagos(orden):
         else:
             devuelto += pago.monto
     neto = pagado - devuelto
-    anulada = orden.estado == 'CANCELADO'
-    saldo = CERO if anulada else max((orden.total or CERO) - neto, CERO)
-    if anulada:
-        estado = EstadoPago.SIN_COBRO
-    elif saldo == CERO:
-        estado = EstadoPago.PAGADO
-    elif neto > CERO:
-        estado = EstadoPago.PARCIAL
-    else:
-        estado = EstadoPago.PENDIENTE
+    saldo, estado = saldo_y_estado(orden.estado, orden.total, neto)
     return {
         'total_pagado': pagado,
         'total_devuelto': devuelto,
@@ -82,8 +73,21 @@ def resumen_pagos(orden):
     }
 
 
+def saldo_y_estado(estado_orden, total, neto):
+    """`(saldo, estado_pago)` de una orden a partir de su total y lo pagado neto."""
+    if estado_orden == 'CANCELADO':
+        return CERO, EstadoPago.SIN_COBRO
+    saldo = max((total or CERO) - neto, CERO)
+    if saldo == CERO:
+        return saldo, EstadoPago.PAGADO
+    return saldo, EstadoPago.PARCIAL if neto > CERO else EstadoPago.PENDIENTE
+
+
 def anotar_saldo(queryset):
-    """Anota `pagado_neto_db` y `saldo_db` en un queryset de órdenes (para filtrar)."""
+    """Anota `pagado_neto_db` y `saldo_db` en un queryset de órdenes (para
+    filtrar o exportar). Si ya están anotados, lo deja igual."""
+    if 'saldo_db' in queryset.query.annotations:
+        return queryset
     vigentes = PagoOrden.objects.filter(orden_trabajo=OuterRef('pk'), anulado=False)
 
     def suma(tipo):

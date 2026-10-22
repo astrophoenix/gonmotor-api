@@ -45,7 +45,7 @@ from .models import (
 )
 from .pdf_inspeccion import exportar_inspeccion_pdf
 from .pdf_orden import exportar_orden_pdf
-from apps.pagos.services import filtrar_por_estado_pago
+from apps.pagos.services import EstadoPago, anotar_saldo, filtrar_por_estado_pago, saldo_y_estado
 
 from .relaciones_flujo import responder_relaciones
 from .serializers import (
@@ -186,6 +186,65 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
                 {'detail': f'No se pudo generar el PDF en este momento. ({str(e)})'},
                 status=500,
             )
+
+    EXCEL_HEADERS = [
+        ('Nº Orden', 1.1), ('Taller', 1.2), ('Ingreso', 1.2), ('Entrega', 1.2), ('Estado', 1.0),
+        ('Cliente', 2.0), ('Identificación', 1.2), ('Placa', 0.9), ('Tipo de trabajo', 1.1),
+        ('Base 0 %', 0.9), ('Base gravada', 0.9), ('Descuento', 0.9), ('IVA', 0.8), ('Total', 0.9),
+        ('Pagado', 0.9), ('Saldo', 0.9), ('Estado de pago', 1.1),
+    ]
+
+    @action(detail=False, methods=['get'], url_path='export-excel', url_name='export-excel')
+    def export_excel(self, request):
+        """Listado Excel para el contador: mismos filtros y alcance que el listado,
+        con bases imponibles, IVA y el cobro de cada orden."""
+        empresa_id = get_empresa_id_desde_request(request)
+        if not empresa_id:
+            return Response({'detail': 'No se pudo determinar la empresa activa.'}, status=403)
+
+        # Lo pagado sale de una subconsulta por orden: sin los prefetch del listado.
+        queryset = anotar_saldo(self.filter_queryset(self.get_queryset()).prefetch_related(None))
+        empresa, taller, usuario_nombre = contexto_reporte(request, empresa_id)
+
+        def row_builder(orden):
+            saldo, estado_pago = saldo_y_estado(orden.estado, orden.total, orden.pagado_neto_db)
+            return [
+                orden.numero_orden or referencia_corta(orden),
+                orden.sucursal.nombre if orden.sucursal_id else '-',
+                fecha_hora_local(orden.fecha_ingreso),
+                fecha_hora_local(orden.fecha_entrega),
+                orden.get_estado_display(),
+                orden.cliente.nombre if orden.cliente_id else '-',
+                orden.cliente.identificacion if orden.cliente_id else '-',
+                orden.vehiculo.placa if orden.vehiculo_id else '-',
+                orden.get_tipo_trabajo_display(),
+                orden.subtotal_base_0,
+                orden.subtotal_base_gravada,
+                orden.descuento,
+                orden.monto_iva,
+                orden.total,
+                orden.pagado_neto_db,
+                saldo,
+                EstadoPago.ETIQUETAS[estado_pago],
+            ]
+
+        config = ExcelExportConfig(
+            title='Listado de Órdenes de Trabajo',
+            filename='listado_ordenes.xlsx',
+            headers=self.EXCEL_HEADERS,
+            empresa=empresa,
+            taller=taller,
+            usuario=usuario_nombre,
+            row_builder=row_builder,
+            alignments=['left'] * 9 + ['right'] * 7 + ['left'],
+        )
+        try:
+            return ExcelExportService(config, queryset).generate_response()
+        except ExporteDemasiadoGrande:
+            raise  # DRF responde 400 con el detalle
+        except Exception:
+            logger.exception('Error al generar el Excel del listado de órdenes')
+            return Response({'detail': 'No se pudo generar el Excel en este momento.'}, status=500)
 
     @action(detail=True, methods=['get'], url_path='exportar-pdf', url_name='exportar-pdf')
     def exportar_pdf(self, request, pk=None):
