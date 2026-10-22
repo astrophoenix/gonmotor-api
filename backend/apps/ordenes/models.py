@@ -47,6 +47,10 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
         ALTA = 'ALTA', 'Alta'
         URGENTE = 'URGENTE', 'Urgente / Emergencia'
 
+    class TipoComprobante(models.TextChoices):
+        FACTURA = 'FACTURA', 'Factura'
+        NOTA_VENTA = 'NOTA_VENTA', 'Nota de venta'
+
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='ordenes_trabajo')
     sucursal = models.ForeignKey(
         'empresas.Taller',
@@ -126,6 +130,17 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
         verbose_name='Entrega a crédito autorizada por',
     )
 
+    # Comprobante emitido fuera del sistema (facturador del SRI o talonario).
+    tipo_comprobante = models.CharField(
+        max_length=12, choices=TipoComprobante.choices, blank=True, default='',
+        verbose_name='Tipo de comprobante',
+    )
+    numero_factura = models.CharField(
+        max_length=17, blank=True, default='', verbose_name='Número de comprobante',
+        help_text='Formato SRI: 001-001-000000123',
+    )
+    fecha_factura = models.DateField(null=True, blank=True, verbose_name='Fecha del comprobante')
+
     subtotal_servicios = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_repuestos = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     subtotal_base_0 = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -145,7 +160,14 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
             models.UniqueConstraint(
                 fields=['empresa', 'sucursal', 'numero_orden'],
                 name='ot_empresa_sucursal_numero_unico'
-            )
+            ),
+            # Un comprobante externo corresponde a una sola OT viva de la empresa.
+            # Factura y nota de venta llevan secuencias distintas en el SRI.
+            models.UniqueConstraint(
+                fields=['empresa', 'tipo_comprobante', 'numero_factura'],
+                condition=models.Q(deleted_at__isnull=True) & ~models.Q(numero_factura=''),
+                name='ot_comprobante_unico_vivo',
+            ),
         ]
         indexes = [
             models.Index(

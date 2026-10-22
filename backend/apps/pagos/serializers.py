@@ -83,6 +83,29 @@ class AnularPagoSerializer(serializers.Serializer):
     )
 
 
+class ComprobanteOrdenSerializer(serializers.Serializer):
+    """Factura o nota de venta emitida fuera del sistema. Número vacío = quitarlo."""
+
+    tipo_comprobante = serializers.ChoiceField(
+        choices=OrdenTrabajo.TipoComprobante.choices, default=OrdenTrabajo.TipoComprobante.FACTURA,
+    )
+    numero_factura = serializers.RegexField(
+        r'^\d{3}-\d{3}-\d{9}$',
+        allow_blank=True,
+        error_messages={'invalid': 'Usa el formato del SRI: 001-001-000000123.'},
+    )
+    fecha_factura = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs['numero_factura']:
+            fecha = attrs.get('fecha_factura')
+            if fecha is None:
+                raise serializers.ValidationError({'fecha_factura': 'Indica la fecha del comprobante.'})
+            if fecha > timezone.localdate():
+                raise serializers.ValidationError({'fecha_factura': 'La fecha no puede ser futura.'})
+        return attrs
+
+
 class CuentaPorCobrarSerializer(ModelSerializerPublico):
     """Orden entregada con saldo (anotada por `services.cuentas_por_cobrar`)."""
 

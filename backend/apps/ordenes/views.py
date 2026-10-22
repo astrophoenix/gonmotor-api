@@ -45,7 +45,7 @@ from .models import (
 )
 from .pdf_inspeccion import exportar_inspeccion_pdf
 from .pdf_orden import exportar_orden_pdf
-from apps.pagos.services import filtrar_por_estado_pago
+from apps.pagos.services import filtrar_por_estado_pago, filtrar_sin_factura, registrar_comprobante
 
 from .relaciones_flujo import responder_relaciones
 from .serializers import (
@@ -275,6 +275,9 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
         if estado_pago:
             queryset = filtrar_por_estado_pago(queryset, estado_pago)
 
+        if params.get('sin_factura') in ('1', 'true'):
+            queryset = filtrar_sin_factura(queryset)
+
         return queryset
 
     @action(detail=True, methods=['get', 'post'], url_path='relaciones')
@@ -329,6 +332,29 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             },
             status=status.HTTP_201_CREATED if resultado.get('ok') else status.HTTP_400_BAD_REQUEST,
         )
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='factura',
+        permission_classes=[
+            permissions.IsAuthenticated,
+            TienePermiso('ordenes', 'ver'),
+            TienePermiso('facturacion', 'modificar'),
+        ],
+    )
+    @transaction.atomic
+    def factura(self, request, pk=None):
+        """Registra, cambia o quita (número vacío) la factura o nota de venta externa."""
+        from apps.pagos.serializers import ComprobanteOrdenSerializer
+
+        datos = ComprobanteOrdenSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=self.get_object().pk)
+        antes = instantanea(orden)
+        registrar_comprobante(orden, **datos.validated_data)
+        registrar_cambios(request, orden, antes)
+        return Response(self.get_serializer(self.get_queryset().get(pk=orden.pk)).data)
 
     def _bloquear_cotizacion_inicial(self, serializer):
         from apps.cotizaciones.models import Cotizacion

@@ -42,6 +42,26 @@ def construir_mensaje_saldo(orden, saldo):
     )
 
 
+def construir_mensaje_recibo(pago, saldo):
+    """Confirmación al cliente de un pago o una devolución registrada."""
+    orden = pago.orden_trabajo
+    fecha = timezone.localtime(pago.fecha)
+    if pago.tipo == 'DEVOLUCION':
+        cuerpo = f'te confirma la devolucion de $ {pago.monto:,.2f}'
+    else:
+        cuerpo = f'confirma la recepcion de tu pago de $ {pago.monto:,.2f}'
+    detalle = f' ({pago.get_forma_pago_display()}'
+    detalle += f', comprobante {pago.referencia})' if pago.referencia else ')'
+    cierre = (
+        f' Saldo pendiente: $ {saldo:,.2f}.' if saldo > 0 else ' La orden no tiene saldo pendiente.'
+    )
+    return (
+        f'Hola {orden.cliente.nombre}, el taller {orden.empresa.nombre_comercial} {cuerpo}{detalle} '
+        f'el {fecha:%d/%m/%Y} para la orden {orden.numero_orden} de {_vehiculo_texto(orden.vehiculo)}.'
+        f'{cierre} Gracias por tu confianza.'
+    )
+
+
 def construir_mensaje_cita(cita, horas_antes=None):
     """Recordatorio de una cita agendada (`horas_antes`: 24, 2 o None si es manual)."""
     momento = timezone.localtime(cita.fecha_hora_programada)
