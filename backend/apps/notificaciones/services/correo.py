@@ -2,7 +2,8 @@
 
 Usa el backend de correo de Django: en local (`config.settings.local`) es el
 de consola, así que el mensaje solo se imprime y queda como SIMULADO en la
-bitácora; en producción es SMTP con las variables `EMAIL_*` del `.env`.
+bitácora; en producción es Resend (API HTTP vía django-anymail) si hay
+`RESEND_API_KEY`, o SMTP con las variables `EMAIL_*`.
 
 La respuesta sigue el mismo contrato que `whatsapp.enviar_mensaje`
 (`ok`, `simulado`, `proveedor`, `descripcion`...), para que el despachador
@@ -12,7 +13,7 @@ trate igual a los dos canales.
 import logging
 
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 
@@ -30,9 +31,16 @@ class CorreoError(Exception):
     """Error controlado al enviar un correo."""
 
 
+def _backend():
+    return (getattr(settings, 'EMAIL_BACKEND', '') or '').lower()
+
+
 def _es_simulado():
-    backend = (getattr(settings, 'EMAIL_BACKEND', '') or '').lower()
-    return any(nombre in backend for nombre in _BACKENDS_SIMULADOS)
+    return any(nombre in _backend() for nombre in _BACKENDS_SIMULADOS)
+
+
+def _proveedor():
+    return 'resend' if 'resend' in _backend() else 'correo'
 
 
 def enviar_correo(destinatario, asunto, mensaje):
@@ -47,23 +55,27 @@ def enviar_correo(destinatario, asunto, mensaje):
     except ValidationError as exc:
         raise CorreoError('El correo del destinatario está vacío o no es válido.') from exc
 
+    correo = EmailMessage(
+        subject=asunto or ASUNTO_DEFAULT,
+        body=mensaje,
+        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None,
+        to=[destinatario],
+    )
     try:
-        send_mail(
-            subject=asunto or ASUNTO_DEFAULT,
-            message=mensaje,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None,
-            recipient_list=[destinatario],
-            fail_silently=False,
-        )
+        correo.send(fail_silently=False)
     except Exception as exc:
         raise CorreoError(f'No se pudo enviar el correo: {exc}') from exc
+
+    # django-anymail (Resend) deja el ID del mensaje en `anymail_status`.
+    estado_anymail = getattr(correo, 'anymail_status', None)
+    id_externo = (getattr(estado_anymail, 'message_id', None) or '') if estado_anymail else ''
 
     simulado = _es_simulado()
     return {
         'ok': True,
         'simulado': simulado,
-        'proveedor': 'correo',
-        'id_externo': '',
+        'proveedor': _proveedor(),
+        'id_externo': str(id_externo),
         'correo': destinatario,
         'descripcion': (
             f'Correo simulado hacia {destinatario} (backend de desarrollo).'
@@ -96,7 +108,7 @@ def correo_enviar_y_registrar(
         'correo': (correo or '').strip(),
         'mensaje': mensaje,
         'canal': 'correo',
-        'proveedor': 'correo',
+        'proveedor': _proveedor(),
         'origen': origen,
         'metadatos': {'asunto': asunto or ASUNTO_DEFAULT},
     }
@@ -112,7 +124,7 @@ def correo_enviar_y_registrar(
         return {
             'ok': False,
             'simulado': False,
-            'proveedor': 'correo',
+            'proveedor': base['proveedor'],
             'correo': base['correo'],
             'estado': RegistroMensajeWhatsApp.EstadoMensaje.ERROR,
             'descripcion': str(exc),
@@ -124,7 +136,9 @@ def correo_enviar_y_registrar(
         RegistroMensajeWhatsApp.EstadoMensaje.SIMULADO
         if resultado['simulado'] else RegistroMensajeWhatsApp.EstadoMensaje.ENVIADO
     )
-    registro = RegistroMensajeWhatsApp.objects.create(**base, estado=estado)
+    registro = RegistroMensajeWhatsApp.objects.create(
+        **base, estado=estado, id_externo=resultado['id_externo'],
+    )
     resultado['estado'] = estado
     resultado['registrado'] = True
     return resultado, registro

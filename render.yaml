@@ -31,6 +31,12 @@ services:
       # (ver apps/notificaciones/services/whatsapp.py).
       - key: WHATSAPP_MODE
         sync: false
+      # Correo por la API de Resend (django-anymail). El remitente debe ser de un
+      # dominio verificado en Resend, p. ej. "GonMotor <avisos@tudominio.com>".
+      - key: RESEND_API_KEY
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
       - key: AI_TEXT_BASE_URL
         value: https://api.groq.com/openai/v1
       # AI_TEXT_MODEL opcional: si no se define, el backend elige un modelo disponible.

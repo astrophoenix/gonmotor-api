@@ -86,7 +86,7 @@ La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export
 - **djangorestframework-simplejwt** (access 60 min, refresh 30 días, rotación + blacklist)
 - **PostgreSQL** vía `psycopg2-binary` (también en local; el `db.sqlite3` del directorio es residual)
 - `python-decouple` (config por `.env`), `django-cors-headers`, `django-countries`
-- `reportlab` (PDF), `openpyxl` (Excel), `Pillow` + `pillow-heif` (imágenes, HEIC), `requests` (LLM, WhatsApp)
+- `django-anymail` (correo vía Resend), `reportlab` (PDF), `openpyxl` (Excel), `Pillow` + `pillow-heif` (imágenes, HEIC), `requests` (LLM, WhatsApp)
 - Producción: `gunicorn` (2 workers × 2 hilos: una subida lenta o un PDF no bloquea al resto), `whitenoise` (estáticos comprimidos), SMTP para correo
 - Idioma `es-ec`, zona horaria `America/Guayaquil`
 
@@ -219,7 +219,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
   - Campañas: solo a clientes con `acepta_promociones` y algún contacto; plantillas con `{cliente}`, `{empresa}` (`renderizar_plantilla` ignora llaves desconocidas). Lanzar exige además `empresa`/`modificar`.
   - Tests: `apps/notificaciones/tests_disparadores.py`.
 - **IA de texto**: `POST /api/core/mejorar-texto/` `{texto, contexto?}` → `{mejorado}`. Máx. 500 caracteres. Variables `AI_TEXT_API_KEY`, `AI_TEXT_BASE_URL`, `AI_TEXT_MODEL` (opcional). No enviar datos personales.
-- **Correo**: reset de contraseña con token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL` (obligatoria en producción: su valor por defecto es de desarrollo).
+- **Correo**: en producción sale por **Resend** (API HTTP con `django-anymail`) cuando existe `RESEND_API_KEY`; sin ella, SMTP con `EMAIL_*`. `DEFAULT_FROM_EMAIL` debe ser de un dominio verificado en Resend. Lo usan el reset de contraseña (token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL`, obligatoria en producción) y el canal correo de las notificaciones, que guarda el ID de Resend en `RegistroMensajeWhatsApp.id_externo`.
 
 ### Sesiones y límites de autenticación
 - JWT: access de 15 min (el cliente lo renueva solo) y refresh de 30 días con rotación + lista negra.
