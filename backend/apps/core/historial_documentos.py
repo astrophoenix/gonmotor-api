@@ -78,6 +78,8 @@ CAMPOS = {
         'observaciones': 'Observaciones',
     },
     'ordenes.DetalleServicioOrdenTrabajo': {
+        'es_subcontratado': 'Trabajo subcontratado', 'proveedor': 'Proveedor externo',
+        'cantidad': 'Cantidad externa', 'costo_unitario': 'Costo unitario',
         'es_adicional': 'Trabajo adicional', 'aprobado': 'Aprobado por el cliente',
         'medio_aprobacion': 'Medio de aprobación', 'fecha_aprobacion': 'Fecha de aprobación',
         'aprobado_por': 'Aprobación registrada por',
@@ -86,6 +88,7 @@ CAMPOS = {
         'mecanico_asignado': 'Técnico',
     },
     'ordenes.DetalleRepuestoOrdenTrabajo': {
+        'provisto_cliente': 'Provisto por el cliente', 'costo_unitario': 'Costo unitario',
         'es_adicional': 'Trabajo adicional', 'aprobado': 'Aprobado por el cliente',
         'medio_aprobacion': 'Medio de aprobación', 'fecha_aprobacion': 'Fecha de aprobación',
         'aprobado_por': 'Aprobación registrada por',
@@ -252,9 +255,16 @@ def registrar_cambios(request, documento, antes):
 
 def _resumen_linea(linea):
     _, _, cantidad, precio = LINEAS[linea._meta.label]
+    if getattr(linea, 'es_subcontratado', False):
+        cantidad = 'cantidad'
     texto = f'{getattr(linea, cantidad)} × {getattr(linea, precio) or 0:.2f}'
     if getattr(linea, 'es_adicional', False):
         texto += ' · Adicional ' + ('aprobado' if linea.aprobado else 'pendiente de aprobación')
+    if getattr(linea, 'provisto_cliente', False):
+        texto += ' · Provisto por el cliente'
+    if getattr(linea, 'es_subcontratado', False):
+        proveedor = linea.proveedor.nombre if linea.proveedor_id else '—'
+        texto += f' · Subcontratado: {proveedor} · costo unitario {linea.costo_unitario:.2f}'
     if getattr(linea, 'descuento', None):
         texto += f' (desc. {linea.descuento:.2f})'
     return texto

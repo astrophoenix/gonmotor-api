@@ -306,7 +306,7 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
                 'entrega_credito_autorizada_por',
             )
             .prefetch_related(
-                Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'aprobado_por')),
+                Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'aprobado_por', 'proveedor')),
                 Prefetch(
                     'repuestos',
                     queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'despachado_por', 'aprobado_por'),
@@ -380,7 +380,7 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             .filter(vehiculo=vehiculo)
             .exclude(estado=OrdenTrabajo.EstadoOrden.CANCELADO)
             .select_related('sucursal')
-            .prefetch_related('servicios', 'repuestos')
+            .prefetch_related(Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('proveedor')), 'repuestos')
             .order_by('-fecha_ingreso', '-id')
         )
         excluir = request.query_params.get('excluir')
@@ -555,11 +555,16 @@ def _visita_para_copiar(orden):
                 'descuento': str(linea.descuento),
                 'iva_porcentaje': str(linea.iva_porcentaje),
                 'servicio_codigo': linea.servicio_codigo,
+                **({'es_subcontratado': True, 'cantidad': str(linea.cantidad),
+                    'proveedor': id_publico(linea.proveedor) if linea.proveedor_id else None,
+                    'proveedor_nombre': linea.proveedor.nombre if linea.proveedor_id else None,
+                    'costo_unitario': str(linea.costo_unitario)} if linea.es_subcontratado else {}),
             }
             for linea in orden.servicios.all() if linea.aprobado
         ],
         'repuestos': [
             {
+                'provisto_cliente': linea.provisto_cliente,
                 'codigo_repuesto': linea.codigo_repuesto,
                 'descripcion': linea.descripcion,
                 'cantidad': str(linea.cantidad),
@@ -1250,7 +1255,7 @@ class DetalleServicioOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPub
     ordering_fields = ['id']
     ordering = ['id']
 
-    relaciones_extra = ('aprobado_por',)
+    relaciones_extra = ('aprobado_por', 'proveedor')
     documento_padre = 'orden_trabajo'
     documento_query_param = 'orden'
 
@@ -1261,6 +1266,8 @@ class DetalleServicioOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPub
         try:
             _check_orden_editable(orden)
             from .adicionales import preparar_linea
+            from .lineas_especiales import preparar_especial
+            preparar_especial(None, serializer.validated_data, self.request, es_repuesto=serializer.Meta.model is DetalleRepuestoOrdenTrabajo)
             preparar_linea(None, serializer.validated_data)
             serializer.save()
             orden.calcular_totales()
@@ -1289,6 +1296,8 @@ class DetalleServicioOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPub
         serializer.instance = type(serializer.instance).objects.select_for_update().get(pk=serializer.instance.pk)
         antes = instantanea(serializer.instance)
         from .adicionales import preparar_linea
+        from .lineas_especiales import preparar_especial
+        preparar_especial(serializer.instance, serializer.validated_data, self.request, es_repuesto=serializer.Meta.model is DetalleRepuestoOrdenTrabajo)
         preparar_linea(serializer.instance, serializer.validated_data)
         serializer.save()
         for orden in ordenes:
@@ -1328,6 +1337,8 @@ class DetalleRepuestoOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPub
         try:
             _check_orden_editable(orden)
             from .adicionales import preparar_linea
+            from .lineas_especiales import preparar_especial
+            preparar_especial(None, serializer.validated_data, self.request, es_repuesto=serializer.Meta.model is DetalleRepuestoOrdenTrabajo)
             preparar_linea(None, serializer.validated_data)
             serializer.save()
             orden.calcular_totales()
@@ -1356,6 +1367,8 @@ class DetalleRepuestoOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPub
         serializer.instance = type(serializer.instance).objects.select_for_update().get(pk=serializer.instance.pk)
         antes = instantanea(serializer.instance)
         from .adicionales import preparar_linea
+        from .lineas_especiales import preparar_especial
+        preparar_especial(serializer.instance, serializer.validated_data, self.request, es_repuesto=serializer.Meta.model is DetalleRepuestoOrdenTrabajo)
         preparar_linea(serializer.instance, serializer.validated_data)
         serializer.save()
         for orden in ordenes:

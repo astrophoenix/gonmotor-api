@@ -35,6 +35,8 @@ def _referencia(linea):
 
 
 def despachar(linea, *, usuario, cantidad=None, permitir_negativo=False):
+    if linea.provisto_cliente:
+        raise serializers.ValidationError('El repuesto es provisto por el cliente; no se despacha del almacén.')
     if not linea.aprobado:
         raise serializers.ValidationError('El repuesto adicional está pendiente de aprobación del cliente.')
     orden = linea.orden_trabajo
