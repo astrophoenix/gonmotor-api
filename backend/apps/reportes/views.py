@@ -238,3 +238,103 @@ def rentabilidad_empresa(request):
         return error
 
     return _respuesta(request, empresa_id, filters)
+
+
+# ── Resumen del negocio (RF-07) ───────────────────────────────────────────
+def _filtros_resumen(request):
+    """Periodo obligatorio en días (por defecto, el mes en curso hasta hoy)."""
+    filters, error = _parse_report_filters(request)
+    if error:
+        return None, error
+    hoy = timezone.localdate()
+    desde = filters['parsed_desde'] or hoy.replace(day=1)
+    hasta = filters['parsed_hasta'] or hoy
+    if desde > hasta:
+        return None, Response({'error': 'fecha_desde no puede ser posterior a fecha_hasta'}, status=400)
+    from .resumen import MAX_DIAS
+
+    if (hasta - desde).days + 1 > MAX_DIAS:
+        return None, Response({'error': f'El periodo no puede superar {MAX_DIAS} días.'}, status=400)
+    return {**filters, 'desde': desde, 'hasta': hasta}, None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
+def resumen_negocio(request):
+    """Resumen del dueño: facturado, cobrado, por cobrar, gastos y utilidad del
+    periodo frente al anterior de igual duración (ver `resumen.py`)."""
+    from .resumen import calcular_resumen
+
+    empresa_id = get_empresa_id_desde_request(request)
+    if not empresa_id:
+        return Response({'error': 'empresa_id requerido'}, status=400)
+    filters, error = _filtros_resumen(request)
+    if error:
+        return error
+    talleres = _talleres_alcance(request, empresa_id, filters['parsed_taller_id'])
+    return Response(calcular_resumen(empresa_id, talleres, filters['desde'], filters['hasta']))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
+def resumen_negocio_pdf(request):
+    from io import BytesIO
+
+    from django.http import FileResponse
+
+    from apps.core.utils.pdf_export import contexto_reporte, generar_listado_pdf
+
+    from .resumen import calcular_resumen
+
+    empresa_id = get_empresa_id_desde_request(request)
+    if not empresa_id:
+        return Response({'error': 'empresa_id requerido'}, status=400)
+    filters, error = _filtros_resumen(request)
+    if error:
+        return error
+    talleres = _talleres_alcance(request, empresa_id, filters['parsed_taller_id'])
+    datos = calcular_resumen(empresa_id, talleres, filters['desde'], filters['hasta'])
+
+    def dinero(valor):
+        return f'$ {Decimal(valor):,.2f}'
+
+    nombres = {
+        'facturado': 'Facturado (con IVA)', 'ingresos': 'Ingresos sin IVA', 'cobrado': 'Cobrado',
+        'por_cobrar': 'Por cobrar al cierre', 'costo_trabajos': 'Costo de los trabajos', 'gastos': 'Gastos',
+        'utilidad': 'Utilidad', 'ticket_promedio': 'Ticket promedio',
+        'ordenes_entregadas': 'Órdenes entregadas', 'ordenes_creadas': 'Órdenes creadas',
+    }
+    filas = []
+    for clave, nombre in nombres.items():
+        kpi = datos['kpis'][clave]
+        formato = str if clave.startswith('ordenes_') else dinero
+        pct = f'{kpi["variacion_pct"]:+.1f} %' if kpi['variacion_pct'] is not None else '—'
+        filas.append([nombre, formato(kpi['actual']), formato(kpi['anterior']), formato(kpi['variacion']), pct])
+    for fila in datos['actual']['cobrado']['por_forma']:
+        filas.append([f'Cobrado en {fila["forma_pago_display"].lower()}', dinero(fila['neto']), '', '', ''])
+    for fila in datos['actual']['gastos']['por_categoria']:
+        filas.append([f'Gasto: {fila["categoria_display"]}', dinero(fila['total']), '', '', ''])
+
+    periodo = datos['periodo']
+    anterior = datos['periodo_anterior']
+    empresa, taller, usuario = contexto_reporte(request, empresa_id)
+    buffer = BytesIO()
+    generar_listado_pdf(
+        buffer,
+        titulo=f'Resumen del negocio {periodo["desde"]} a {periodo["hasta"]}',
+        columnas=[
+            ('Indicador', 2.4), ('Periodo', 1.3, 'R'), (f'Anterior ({anterior["desde"]} a {anterior["hasta"]})', 1.8, 'R'),
+            ('Variación', 1.2, 'R'), ('%', 0.8, 'R'),
+        ],
+        filas=filas,
+        empresa=empresa,
+        taller=taller,
+        usuario=usuario,
+        total_registros=len(filas),
+        orientacion='vertical',
+    )
+    buffer.seek(0)
+    return FileResponse(
+        buffer, content_type='application/pdf', as_attachment=True,
+        filename=f'resumen_negocio_{periodo["desde"]}_{periodo["hasta"]}.pdf',
+    )
