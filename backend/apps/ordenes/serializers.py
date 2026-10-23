@@ -59,7 +59,7 @@ def url_imagen_absoluta(request, url):
 def _validar_detalle_aplicado(instance, attrs):
     if instance is None or not instance.detalle_cotizacion_origen_id:
         return
-    permitidos = {'mecanico_asignado', 'completado', 'costo_unitario'}
+    permitidos = {'mecanico_asignado', 'completado', 'costo_unitario', 'garantia_dias', 'garantia_km'}
     if any(campo not in permitidos and valor != getattr(instance, campo)
            for campo, valor in attrs.items()):
         raise serializers.ValidationError('No se pueden modificar datos comerciales ni reasignar un detalle cotizado.')
@@ -70,6 +70,8 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
     version_aprobacion = serializers.CharField(read_only=True)
     aprobado_por_nombre = serializers.CharField(source='aprobado_por.username', read_only=True, default=None)
     campos_usuario = ('mecanico_asignado',)
+    garantia_dias = serializers.IntegerField(min_value=0, max_value=2147483647, required=False)
+    garantia_km = serializers.IntegerField(min_value=0, max_value=2147483647, required=False)
     proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True, default=None)
 
     class Meta:
@@ -82,7 +84,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
             'detalle_cotizacion_origen',
             'es_subcontratado', 'proveedor', 'proveedor_nombre', 'cantidad',
             'servicio',
-            'servicio_codigo',
+            'servicio_codigo', 'garantia_dias', 'garantia_km',
             'descripcion',
             'mecanico_asignado',
             'horas_aplicadas',
@@ -120,7 +122,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
                 sid = validated_data.get('servicio')
                 scode = validated_data.get('servicio_codigo')
                 if sid:
-                    serv = Servicio.objects.filter(id=sid, empresa_id=empresa_id, is_active=True).first()
+                    serv = Servicio.objects.filter(id=sid.pk, empresa_id=empresa_id, is_active=True).first()
                 if not serv and scode:
                     serv = Servicio.objects.filter(empresa_id=empresa_id, codigo=scode.strip().upper(), is_active=True).first()
             if serv:
@@ -992,6 +994,7 @@ class RecepcionVehiculoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixi
 
 
 class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, ModelSerializerPublico):
+    orden_garantia_numero = serializers.CharField(source='orden_garantia_origen.numero_orden', read_only=True, default=None)
     campos_usuario = ('asesor', 'mecanico_principal')
     servicios = DetalleServicioOrdenTrabajoSerializer(many=True, read_only=True)
     repuestos = DetalleRepuestoOrdenTrabajoSerializer(many=True, read_only=True)
@@ -1021,7 +1024,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'estado',
             'motivo_espera',
             'prioridad',
-            'tipo_trabajo',
+            'tipo_trabajo', 'orden_garantia_origen', 'orden_garantia_numero',
             'observaciones',
             'fecha_ingreso',
             'fecha_entrega',
@@ -1093,6 +1096,10 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         }
 
     def validate(self, attrs):
+        from .garantias import validar_orden
+        validar_orden(self.instance, attrs, get_empresa_id_desde_request(self.context.get('request')))
+        if self.instance and self.instance.tipo_trabajo == 'GARANTIA' and attrs.get('tipo_trabajo', 'GARANTIA') != 'GARANTIA':
+            raise serializers.ValidationError({'tipo_trabajo': 'Una orden de garantía conserva su tipo; registra los trabajos cobrables en otra OT.'})
         if self.instance and self.instance.cotizaciones_aplicadas.exists():
             for campo in ('cotizacion_origen', 'cliente', 'vehiculo', 'sucursal'):
                 if campo in attrs and attrs[campo] != getattr(self.instance, campo):

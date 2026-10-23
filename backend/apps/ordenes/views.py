@@ -131,6 +131,30 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
     ordering_fields = ['numero_orden', 'created_at', 'total']
     ordering = ['-created_at']
 
+    @action(detail=False, methods=['get'], url_path='garantias-vehiculo')
+    def garantias_vehiculo(self, request):
+        from apps.vehiculos.models import Vehiculo
+        from .garantias import condiciones
+
+        empresa_id = get_empresa_id_desde_request(request)
+        vehiculo = por_id_publico(Vehiculo.objects.de_empresa(empresa_id), request.query_params.get('vehiculo')).first()
+        if vehiculo is None:
+            raise NotFound('El vehículo no está disponible en esta empresa.')
+        km = serializers.IntegerField(min_value=0, required=False)
+        kilometraje = None
+        if request.query_params.get('kilometraje') not in (None, ''):
+            kilometraje = km.run_validation(request.query_params['kilometraje'])
+        ordenes = OrdenTrabajo.objects.para_request(request).filter(
+            vehiculo=vehiculo, estado='ENTREGADO', is_active=True,
+        ).exclude(tipo_trabajo='GARANTIA').select_related('sucursal').order_by('-fecha_entrega', '-pk')
+        origenes = [{'id': id_publico(o), 'numero_orden': o.numero_orden, 'fecha_entrega': o.fecha_entrega,
+                     'taller': o.sucursal.nombre if o.sucursal_id else ''} for o in ordenes]
+        lineas = DetalleServicioOrdenTrabajo.objects.filter(
+            orden_trabajo__in=ordenes, aprobado=True, completado=True,
+        ).select_related('orden_trabajo__sucursal').order_by('orden_trabajo_id', 'pk')
+        coberturas = [c for linea in lineas if (c := condiciones(linea, kilometraje=kilometraje)) is not None]
+        return Response({'garantias': coberturas, 'ordenes_origen': origenes})
+
     # Filtros del panel "Búsqueda" del listado. Se aplican por query params
     # (no django-filter) siguiendo el criterio de recepciones/inspecciones.
     FILTROS_LISTADO = {
@@ -303,6 +327,7 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
                 'asesor',
                 'mecanico_principal',
                 'cotizacion_origen',
+                'orden_garantia_origen',
                 'entrega_credito_autorizada_por',
             )
             .prefetch_related(
@@ -550,6 +575,7 @@ def _visita_para_copiar(orden):
         'servicios': [
             {
                 'descripcion': linea.descripcion,
+                'garantia_dias': linea.garantia_dias or 0, 'garantia_km': linea.garantia_km or 0,
                 'horas_aplicadas': str(linea.horas_aplicadas),
                 'precio_unitario': str(linea.precio_unitario),
                 'descuento': str(linea.descuento),

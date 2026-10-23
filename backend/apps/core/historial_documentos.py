@@ -65,6 +65,7 @@ CAMPOS = {
     },
     'ordenes.OrdenTrabajo': {
         'estado': 'Estado', 'motivo_espera': 'Motivo de espera', 'prioridad': 'Prioridad',
+        'orden_garantia_origen': 'Orden original de la garantía',
         'tipo_trabajo': 'Tipo de trabajo', 'cliente': 'Cliente', 'vehiculo': 'Vehículo',
         'asesor': 'Asesor', 'mecanico_principal': 'Técnico responsable', 'kilometraje': 'Kilometraje',
         'fecha_ingreso': 'Fecha de ingreso', 'fecha_entrega': 'Fecha de entrega',
@@ -79,6 +80,7 @@ CAMPOS = {
     },
     'ordenes.DetalleServicioOrdenTrabajo': {
         'es_subcontratado': 'Trabajo subcontratado', 'proveedor': 'Proveedor externo',
+        'garantia_dias': 'Garantía (días)', 'garantia_km': 'Garantía (km)',
         'cantidad': 'Cantidad externa', 'costo_unitario': 'Costo unitario',
         'es_adicional': 'Trabajo adicional', 'aprobado': 'Aprobado por el cliente',
         'medio_aprobacion': 'Medio de aprobación', 'fecha_aprobacion': 'Fecha de aprobación',

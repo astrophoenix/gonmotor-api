@@ -180,6 +180,7 @@ class _DocumentoOrden(_Documento):
             estado += f' · {o.motivo_espera}'
         filas_doc = [
             ('Tipo', o.get_tipo_trabajo_display()),
+            *([('Garantía de', o.orden_garantia_origen.numero_orden)] if o.orden_garantia_origen_id else []),
             ('Estado', estado),
             ('Mecánico', _nombre_persona(o.mecanico_principal)),
             ('Asesor', _nombre_persona(o.asesor)),
@@ -232,6 +233,11 @@ def _descripcion_servicio(servicio) -> str:
     """Descripción + línea gris con el técnico y si el servicio ya se hizo."""
     texto = _texto(servicio.descripcion) or '—'
     detalle = []
+    if servicio.garantia_dias or servicio.garantia_km:
+        condiciones = []
+        if servicio.garantia_dias: condiciones.append(f'{servicio.garantia_dias} días')
+        if servicio.garantia_km: condiciones.append(f'{servicio.garantia_km} km')
+        detalle.append('Garantía: ' + ' o '.join(condiciones) + ' desde la entrega')
     if servicio.es_subcontratado:
         detalle.append('Subcontratado: ' + _escape_xml(servicio.proveedor.nombre if servicio.proveedor_id else '—'))
     tecnico = _nombre_persona(servicio.mecanico_asignado)

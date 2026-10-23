@@ -197,6 +197,8 @@ class ServicioViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             'codigo': item.codigo,
             'nombre': item.nombre,
             'tiempo_estimado_minutos': item.tiempo_estimado_minutos,
+            'garantia_dias': item.garantia_dias, 'garantia_km': item.garantia_km,
+            'costo_referencial': str(item.costo_referencial),
             'precio_referencial': str(item.precio_referencial),
             'iva_porcentaje_defecto': str(item.iva_porcentaje_defecto),
         } for item in items]

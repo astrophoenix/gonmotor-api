@@ -180,6 +180,7 @@ class ServicioSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
             'categoria',
             'tiempo_estimado_minutos',
             'tareas_estandar',
+            'garantia_dias', 'garantia_km',
             'intervalo_km',
             'intervalo_meses',
             'precio_referencial',

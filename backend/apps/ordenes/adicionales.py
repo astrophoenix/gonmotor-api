@@ -10,7 +10,7 @@ ABIERTAS = {'PENDIENTE', 'EN_PROCESO', 'EN_ESPERA'}
 COMERCIALES = {
     'descripcion', 'precio_unitario', 'horas_aplicadas', 'cantidad', 'descuento',
     'iva_porcentaje', 'servicio', 'servicio_codigo', 'repuesto', 'codigo_repuesto',
-    'provisto_cliente', 'es_subcontratado', 'proveedor',
+    'provisto_cliente', 'es_subcontratado', 'proveedor', 'garantia_dias', 'garantia_km',
 }
 
 
