@@ -76,7 +76,7 @@ gonmotor-api/
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/` |
 | `api/reportes/` | `rentabilidad-taller/`, `rentabilidad-empresa/` |
 | `api/caja/` | `estado/`, `abrir/`, `sesiones/` (historial; `{id}/cerrar/`, `reabrir/`, `movimientos/`, `pdf/`), `movimientos/{id}/anular/` |
-| `api/pagos/` | pagos y devoluciones de órdenes (`?orden=`, `?cliente=`, alta, `{id}/anular/`; sin edición ni borrado), `cuentas-por-cobrar/` y `cuentas-por-cobrar/{orden}/recordar/` |
+| `api/pagos/` | pagos y devoluciones de órdenes (`?orden=`, `?cliente=`, `?fecha_desde/hasta=`, `?tipo=`, `?forma_pago=`, `?anulado=`; alta, `{id}/anular/`, `export-excel/`; sin edición ni borrado), `cuentas-por-cobrar/` (+ `export-excel/`) y `cuentas-por-cobrar/{orden}/recordar/` |
 | `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar por vehículo/probar), `programadas/` (cola: listar, alta manual de mantenimiento, editar, `cancelar/`, `enviar-ahora/`), `campanas/` (CRUD en borrador, `audiencia/`, `lanzar/`, `cancelar/`), `cron/procesar/` (cola, con `X-Cron-Token`). Aviso de retiro: `api/ordenes/ordenes-trabajo/{id}/notificar-retiro/`; aviso manual de cita: `api/citas/{id}/notificar/` |
 | `api/configuracion/` | `empresa/`, `sucursales/` |
 
@@ -195,6 +195,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - Una OT anulada tiene `estado_pago` `SIN_COBRO` y saldo 0. El listado filtra con `?estado_pago=PENDIENTE|PARCIAL|PAGADO|SIN_COBRO` (`filtrar_por_estado_pago`, subconsultas sobre los pagos vigentes).
 - **Entrega a crédito**: pasar la OT a `ENTREGADO` con saldo pendiente responde 400 (`entrega_a_credito` + `saldo`) salvo que llegue `entrega_a_credito: true`; entonces se guardan `saldo_al_entregar` y `entrega_credito_autorizada_por` (el usuario de la petición), y el saldo queda en el historial.
 - **Cuentas por cobrar** (`CuentasPorCobrarView`, `facturacion`/`ver`): solo OT `ENTREGADO` con saldo > 0 (`services.cuentas_por_cobrar`); una OT en proceso con anticipo no es deuda. Filtros `search`, `cliente`, `sucursal`; orden por defecto `fecha_entrega` (la más antigua primero). La respuesta paginada trae `resumen` (`total_por_cobrar`, `ordenes`, `clientes`, `por_taller`). `recordar/` (`facturacion`/`modificar`) envía en el acto una `NotificacionProgramada` tipo `SALDO` por la cola, con respaldo de canal como el aviso de retiro; la fila trae `ultimo_recordatorio`.
+- **Exportes Excel para el contador** (mismos filtros, búsqueda y alcance que su listado): órdenes (`ordenes-trabajo/export-excel/`: bases 0 % y gravada, descuento, IVA, total, pagado, saldo y estado de pago anotados con `anotar_saldo`, sin N+1), pagos (`pagos/export-excel/`, devoluciones en negativo), cuentas por cobrar y gastos (`gastos/export-excel/`). `saldo_y_estado()` es la regla única de saldo/estado de pago (la usan `resumen_pagos` y los exportes). Tests: `apps/pagos/tests_exportes.py`.
 - Cada pago, devolución y anulación deja un evento en el historial de la OT (`Evento.PAGO`, `DEVOLUCION`, `PAGO_ANULADO`). Tests: `apps/pagos/tests.py`.
 
 ### Caja del taller (`apps/caja/`)
