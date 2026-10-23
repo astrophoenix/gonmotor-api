@@ -1027,7 +1027,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'tipo_trabajo', 'orden_garantia_origen', 'orden_garantia_numero',
             'observaciones',
             'fecha_ingreso',
-            'fecha_entrega',
+            'fecha_entrega', 'fecha_anulacion',
             'kilometraje',
             'entrega_a_credito',
             'saldo_al_entregar',
@@ -1052,6 +1052,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'updated_at',
         ]
         read_only_fields = [
+            'fecha_anulacion',
             'id',
             'empresa',
             'numero_orden',

@@ -22,11 +22,16 @@ class MovimientoCajaSerializer(ModelSerializerPublico):
     registrado_por_nombre = serializers.SerializerMethodField()
     anulado_por_nombre = serializers.SerializerMethodField()
 
+    anulable_desde_caja = serializers.SerializerMethodField()
+
+    def get_anulable_desde_caja(self, obj):
+        return not hasattr(obj, 'pago_compra')
+
     class Meta:
         model = MovimientoCaja
         fields = [
             'id', 'tipo', 'tipo_display', 'monto', 'motivo', 'gasto', 'fecha', 'registrado_por_nombre',
-            'anulado', 'fecha_anulacion', 'anulado_por_nombre', 'motivo_anulacion',
+            'anulado', 'fecha_anulacion', 'anulado_por_nombre', 'motivo_anulacion', 'anulable_desde_caja',
         ]
         read_only_fields = fields
 
@@ -102,7 +107,7 @@ class SesionCajaSerializer(ModelSerializerPublico):
             ).order_by('-fecha', '-id')
         ]
         rep['movimientos'] = MovimientoCajaSerializer(
-            instance.movimientos.select_related('registrado_por', 'anulado_por').order_by('-fecha', '-id'),
+            instance.movimientos.select_related('registrado_por', 'anulado_por', 'pago_compra').order_by('-fecha', '-id'),
             many=True, context=self.context,
         ).data
         return rep

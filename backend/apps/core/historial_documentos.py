@@ -69,6 +69,7 @@ CAMPOS = {
         'tipo_trabajo': 'Tipo de trabajo', 'cliente': 'Cliente', 'vehiculo': 'Vehículo',
         'asesor': 'Asesor', 'mecanico_principal': 'Técnico responsable', 'kilometraje': 'Kilometraje',
         'fecha_ingreso': 'Fecha de ingreso', 'fecha_entrega': 'Fecha de entrega',
+        'fecha_anulacion': 'Fecha de anulación',
         'observaciones': 'Observaciones', 'saldo_al_entregar': 'Entregada a crédito con saldo',
         'tipo_comprobante': 'Tipo de comprobante', 'numero_factura': 'Número de comprobante',
         'fecha_factura': 'Fecha del comprobante',

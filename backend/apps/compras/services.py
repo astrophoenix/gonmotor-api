@@ -84,11 +84,28 @@ def registrar_compra(*, empresa_id, taller, proveedor, lineas, usuario, forma_pa
     compra.subtotal, compra.monto_iva, compra.total = subtotal, iva, subtotal + iva
     compra.save(update_fields=['subtotal', 'monto_iva', 'total', 'updated_at'])
     if compra.condicion == Compra.Condicion.CONTADO and compra.total > 0:
+        movimiento = _egreso_de_contado(compra, monto=compra.total, forma_pago=forma_pago_contado, usuario=usuario)
         PagoCompra.objects.create(
+            movimiento_caja=movimiento,
             compra=compra, monto=compra.total, forma_pago=forma_pago_contado,
             registrado_por=usuario, observacion='Pago de contado',
         )
     return compra
+
+
+def _egreso_de_contado(compra, *, monto, forma_pago, usuario):
+    if compra.condicion != Compra.Condicion.CONTADO or forma_pago != 'EFECTIVO':
+        return None
+    from apps.caja import services as caja
+    from apps.caja.models import MovimientoCaja
+    sesion = caja.sesion_abierta(compra.taller, bloquear=True) if compra.taller_id else None
+    if sesion is None:
+        raise serializers.ValidationError('Abre la caja del taller para registrar una compra de contado en efectivo.')
+    monto_caja = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01')).run_validation(monto)
+    return caja.registrar_movimiento(
+        sesion, tipo=MovimientoCaja.Tipo.EGRESO, monto=monto_caja,
+        motivo=f'Compra {compra.numero_factura} · {compra.proveedor.nombre}'[:255], usuario=usuario,
+    )
 
 
 def registrar_pago(compra, *, monto, usuario, **datos):
@@ -101,10 +118,19 @@ def registrar_pago(compra, *, monto, usuario, **datos):
         raise serializers.ValidationError(
             {'monto': f'El pago supera el saldo pendiente con el proveedor ({_dinero(pendiente)}).'}
         )
-    return PagoCompra.objects.create(compra=compra, monto=monto, registrado_por=usuario, **datos)
+    movimiento = _egreso_de_contado(compra, monto=monto, forma_pago=datos.get('forma_pago'), usuario=usuario)
+    return PagoCompra.objects.create(compra=compra, monto=monto, registrado_por=usuario, movimiento_caja=movimiento, **datos)
 
 
 def _anular_pago(pago, usuario, motivo):
+    if pago.movimiento_caja_id:
+        from apps.caja import services as caja
+        from apps.caja.models import MovimientoCaja, SesionCaja
+        sesion_id = MovimientoCaja.objects.values_list('sesion_id', flat=True).get(pk=pago.movimiento_caja_id)
+        sesion = SesionCaja.objects.select_for_update().get(pk=sesion_id)
+        movimiento = MovimientoCaja.objects.select_for_update().get(pk=pago.movimiento_caja_id)
+        movimiento.sesion = sesion
+        caja.anular_movimiento(movimiento, usuario=usuario, motivo=motivo, desde_compra=True)
     pago.anulado = True
     pago.fecha_anulacion = timezone.now()
     pago.anulado_por = usuario

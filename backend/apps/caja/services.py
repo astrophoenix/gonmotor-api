@@ -215,7 +215,11 @@ def registrar_movimiento(sesion, *, tipo, monto, motivo, usuario, categoria_gast
     )
 
 
-def anular_movimiento(movimiento, *, usuario, motivo):
+def anular_movimiento(movimiento, *, usuario, motivo, desde_compra=False):
+    if not desde_compra:
+        from apps.compras.models import PagoCompra
+        if PagoCompra.objects.filter(movimiento_caja_id=movimiento.pk).exists():
+            raise serializers.ValidationError('Este egreso pertenece a una compra. Anula el pago o la compra desde Compras.')
     validar_abierta(movimiento.sesion, 'anular sus movimientos')
     if movimiento.anulado:
         raise serializers.ValidationError('El movimiento ya está anulado.')

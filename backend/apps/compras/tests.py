@@ -170,6 +170,8 @@ class PagosYSaldoTests(ComprasBase):
 class AnularCompraTests(ComprasBase):
 
     def test_anular_revierte_stock_y_anula_pagos(self):
+        abierta = self.client.post('/api/caja/abrir/', {'monto_inicial': '200'}, format='json')
+        self.assertEqual(abierta.status_code, 201, abierta.data)
         compra = self._comprar(condicion='CONTADO').data
         respuesta = self.client.post(f'{ENDPOINT}{compra["id"]}/anular/', {'motivo': 'Factura equivocada'}, format='json')
         self.assertEqual(respuesta.status_code, 200, respuesta.content)

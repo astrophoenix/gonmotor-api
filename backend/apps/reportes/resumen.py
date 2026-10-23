@@ -40,7 +40,7 @@ DEFINICIONES = {
     'costo_trabajos': 'Costo de repuestos y mano de obra de las órdenes entregadas.',
     'utilidad': 'Ingresos sin IVA − costo de los trabajos − gastos.',
     'ticket_promedio': 'Facturado ÷ órdenes entregadas.',
-    'anuladas': 'Órdenes anuladas cuya última modificación cae en el periodo.',
+    'anuladas': 'Órdenes anuladas por fecha de anulación; los registros anteriores sin fecha usan su última modificación.',
 }
 
 
@@ -86,10 +86,10 @@ def _metricas(empresa_id, talleres, desde, hasta):
         total=Sum('total'), base_0=Sum('subtotal_base_0'), base_gravada=Sum('subtotal_base_gravada'),
         iva=Sum('monto_iva'), cantidad=Count('pk'),
     )
-    conteos = ordenes.aggregate(
+    conteos = ordenes.annotate(anulada_en=Coalesce('fecha_anulacion', 'updated_at')).aggregate(
         creadas=Count('pk', filter=Q(created_at__date__gte=desde, created_at__date__lte=hasta)),
         anuladas=Count('pk', filter=Q(
-            estado='CANCELADO', updated_at__date__gte=desde, updated_at__date__lte=hasta,
+            estado='CANCELADO', anulada_en__date__gte=desde, anulada_en__date__lte=hasta,
         )),
         # Abiertas al cierre: creadas hasta ese día, ni anuladas ni entregadas antes.
         abiertas=Count('pk', filter=Q(created_at__date__lte=hasta) & (

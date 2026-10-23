@@ -176,7 +176,7 @@ class MovimientoCajaViewSet(LookupPublicoMixin, viewsets.GenericViewSet):
 
     def get_queryset(self):
         sesiones = SesionCajaViewSet(request=self.request, action='list', format_kwarg=None).get_queryset()
-        return MovimientoCaja.objects.filter(sesion__in=sesiones.values('pk')).select_related('sesion', 'gasto')
+        return MovimientoCaja.objects.filter(sesion__in=sesiones.values('pk')).select_related('sesion', 'gasto', 'pago_compra')
 
     @action(detail=True, methods=['post'])
     @transaction.atomic

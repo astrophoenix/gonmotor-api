@@ -99,6 +99,9 @@ class DetalleCompra(UuidPublicoModel, models.Model):
 class PagoCompra(UuidPublicoModel, BaseModel):
     """Pago al proveedor contra una compra. No se edita ni se borra: se anula."""
 
+    movimiento_caja = models.OneToOneField(
+        'caja.MovimientoCaja', on_delete=models.PROTECT, null=True, blank=True, related_name='pago_compra',
+    )
     compra = models.ForeignKey(Compra, on_delete=models.PROTECT, related_name='pagos')
     forma_pago = models.CharField(max_length=20, choices=[
         ('EFECTIVO', 'Efectivo'),

@@ -1,3 +1,7 @@
+from io import BytesIO
+from unittest.mock import patch
+from openpyxl import load_workbook
+
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import uuid4
@@ -191,3 +195,60 @@ class ResumenNegocioTests(TestCase):
         respuesta = self._api().get(f'{URL}exportar-pdf/', JUNIO)
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+
+    def test_excel_mismos_indicadores_numericos_y_periodos(self):
+        r = self._api().get(f'{URL}export-excel/', JUNIO)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn('spreadsheetml', r['Content-Type'])
+        self.assertIn('2026-06-01_2026-06-30.xlsx', r['Content-Disposition'])
+        ws = load_workbook(BytesIO(r.content)).active
+        filas = {fila[0]: fila[1:] for fila in ws.iter_rows(values_only=True) if fila[0]}
+        self.assertEqual(filas['Facturado (con IVA)'][:4], (230, 115, 115, 100))
+        self.assertEqual(filas['Utilidad'][0], 85)
+        self.assertEqual(filas['Cobrado en efectivo'][0], 90)
+        self.assertEqual(filas['Órdenes entregadas'][0], 2)
+        self.assertTrue(any('2026-05-02' in str(v) for row in ws.values for v in row))
+        for row in ws.iter_rows():
+            if row[0].value == 'Facturado (con IVA)':
+                self.assertEqual(row[1].data_type, 'n')
+
+    def test_excel_respeta_taller_tenant_permiso_y_fechas(self):
+        r = self._api(self.jefe_a1).get(f'{URL}export-excel/', JUNIO)
+        ws = load_workbook(BytesIO(r.content)).active
+        filas = {fila[0]: fila[1:] for fila in ws.iter_rows(values_only=True) if fila[0]}
+        self.assertEqual(filas['Facturado (con IVA)'][0], 115)
+        self.assertEqual(self._api(self.mecanico).get(f'{URL}export-excel/', JUNIO).status_code, 403)
+        self.assertEqual(self._api().get(f'{URL}export-excel/', {'fecha_desde':'2026-99-01'}).status_code, 400)
+        api = self._api(); fijar_empresa(api, self.otra)
+        self.assertEqual(api.get(f'{URL}export-excel/', JUNIO).status_code, 403)
+
+    def test_excel_escapa_nombre_de_empresa_como_texto(self):
+        self.empresa.nombre_comercial = '=HYPERLINK("https://example.test","x")'
+        self.empresa.save()
+        r = self._api().get(f'{URL}export-excel/', JUNIO)
+        ws = load_workbook(BytesIO(r.content)).active
+        self.assertEqual(ws['A1'].data_type, 's')
+        self.assertTrue(ws['A1'].value.startswith('='))
+
+    def test_fecha_anulacion_fija_no_cambia_con_edicion_y_no_es_escribible(self):
+        orden = self._orden('CANCEL-TEST', self.a1, creada=date(2026,6,1))
+        anula = _momento(date(2026,6,10))
+        with patch('django.utils.timezone.now', return_value=anula):
+            r = self._api().patch(f'/api/ordenes/ordenes-trabajo/{orden.uuid}/', {'estado':'CANCELADO','fecha_anulacion':'2020-01-01T00:00:00Z'}, format='json')
+        self.assertEqual(r.status_code,200,r.data)
+        orden.refresh_from_db(); self.assertEqual(orden.fecha_anulacion,anula)
+        with patch('django.utils.timezone.now', return_value=_momento(date(2026,7,5))):
+            r = self._api().patch(f'/api/ordenes/ordenes-trabajo/{orden.uuid}/', {'observaciones':'Corrección'}, format='json')
+        self.assertEqual(r.status_code,200,r.data)
+        orden.refresh_from_db(); self.assertEqual(orden.fecha_anulacion,anula)
+        self.assertEqual(self._get()['actual']['ordenes']['anuladas'],1)
+        self.assertEqual(self._get({'fecha_desde':'2026-07-01','fecha_hasta':'2026-07-31'})['actual']['ordenes']['anuladas'],0)
+
+    def test_anulacion_modelo_y_update_fields_conservan_fecha(self):
+        orden = self._orden('CANCEL-MODEL', self.a1, creada=date(2026,6,1))
+        anula = _momento(date(2026,6,10))
+        with patch('django.utils.timezone.now', return_value=anula):
+            orden.estado = 'CANCELADO'; orden.save(update_fields=['estado'])
+        orden.refresh_from_db(); self.assertEqual(orden.fecha_anulacion,anula)
+        orden.observaciones = 'Nota'; orden.save(update_fields=['observaciones'])
+        orden.refresh_from_db(); self.assertEqual(orden.fecha_anulacion,anula)
