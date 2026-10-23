@@ -647,6 +647,7 @@ class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
             rol=validated_data.get('rol'),
             is_active=validated_data.get('is_active', True),
             tiene_acceso=validated_data.get('tiene_acceso', True),
+            comision_porcentaje=validated_data.get('comision_porcentaje', 0),
         )
         usuario_empresa.talleres.set(validated_data.get('talleres', []))
 
@@ -726,6 +727,7 @@ class EmpleadoViewSet(LookupPublicoMixin, viewsets.ModelViewSet):
         usuario_empresa.rol = validated_data.get('rol', usuario_empresa.rol)
         usuario_empresa.is_active = validated_data.get('is_active', usuario_empresa.is_active)
         usuario_empresa.tiene_acceso = validated_data.get('tiene_acceso', usuario_empresa.tiene_acceso)
+        usuario_empresa.comision_porcentaje = validated_data.get('comision_porcentaje', usuario_empresa.comision_porcentaje)
         usuario_empresa.save()
         if 'talleres' in validated_data:
             usuario_empresa.talleres.set(validated_data.get('talleres', []))

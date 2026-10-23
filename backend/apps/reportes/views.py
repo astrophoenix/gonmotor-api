@@ -25,8 +25,14 @@ def _parse_report_filters(request):
     fecha_hasta = request.query_params.get('fecha_hasta') or None
     taller_id = request.query_params.get('taller_id') or None
 
-    parsed_desde = parse_date(fecha_desde) if fecha_desde else None
-    parsed_hasta = parse_date(fecha_hasta) if fecha_hasta else None
+    def fecha_valida(valor):
+        try:
+            return parse_date(valor) if valor else None
+        except ValueError:
+            return None
+
+    parsed_desde = fecha_valida(fecha_desde)
+    parsed_hasta = fecha_valida(fecha_hasta)
     if fecha_desde and parsed_desde is None:
         return None, Response({'error': 'fecha_desde debe tener formato YYYY-MM-DD'}, status=400)
     if fecha_hasta and parsed_hasta is None:
@@ -338,3 +344,18 @@ def resumen_negocio_pdf(request):
         buffer, content_type='application/pdf', as_attachment=True,
         filename=f'resumen_negocio_{periodo["desde"]}_{periodo["hasta"]}.pdf',
     )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
+def productividad_mecanicos(request):
+    from .productividad import calcular_productividad
+
+    empresa_id = get_empresa_id_desde_request(request)
+    if not empresa_id:
+        return Response({'error': 'No se pudo determinar la empresa activa.'}, status=400)
+    filtros, error = _filtros_resumen(request)
+    if error:
+        return error
+    talleres = _talleres_alcance(request, empresa_id, filtros['parsed_taller_id'])
+    return Response(calcular_productividad(empresa_id, talleres, filtros['desde'], filtros['hasta']))
