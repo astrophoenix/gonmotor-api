@@ -135,7 +135,7 @@ class _DocumentoOrden(_Documento):
         self.repuestos = [l for l in orden.repuestos.all() if l.aprobado]
         self.fotos = [f for f in orden.fotos.all() if f.imagen or f.miniatura]
         self.hechos = sum(1 for s in self.servicios if s.completado)
-        self.horas = sum((_como_decimal(s.horas_aplicadas) for s in self.servicios), Decimal('0'))
+        self.horas = sum((_como_decimal(s.horas_aplicadas) for s in self.servicios if not s.es_subcontratado), Decimal('0'))
 
         self.recepcion = next(iter(orden.recepciones.all()), None)
         self.inspeccion = _inspeccion_de(orden)
@@ -232,6 +232,8 @@ def _descripcion_servicio(servicio) -> str:
     """Descripción + línea gris con el técnico y si el servicio ya se hizo."""
     texto = _texto(servicio.descripcion) or '—'
     detalle = []
+    if servicio.es_subcontratado:
+        detalle.append('Subcontratado: ' + _escape_xml(servicio.proveedor.nombre if servicio.proveedor_id else '—'))
     tecnico = _nombre_persona(servicio.mecanico_asignado)
     if tecnico:
         detalle.append(_escape_xml(tecnico))
@@ -269,8 +271,9 @@ def _tabla_trabajo(doc: _DocumentoOrden, ancho: float) -> list:
     ]
 
     grupos = [
-        ('Mano de obra', doc.servicios, 'servicio_codigo', 'horas_aplicadas', _descripcion_servicio),
-        ('Repuestos', doc.repuestos, 'codigo_repuesto', 'cantidad', lambda r: _texto(r.descripcion) or '—'),
+        ('Mano de obra', [s for s in doc.servicios if not s.es_subcontratado], 'servicio_codigo', 'horas_aplicadas', _descripcion_servicio),
+        ('Trabajos subcontratados', [s for s in doc.servicios if s.es_subcontratado], 'servicio_codigo', 'cantidad', _descripcion_servicio),
+        ('Repuestos', doc.repuestos, 'codigo_repuesto', 'cantidad', lambda r: (_texto(r.descripcion) or '—') + ('<br/>Provisto por el cliente' if r.provisto_cliente else '')),
     ]
     numero = 0
     for titulo, items, campo_codigo, campo_cantidad, descripcion in grupos:
@@ -350,7 +353,10 @@ def _seccion_trabajo(doc: _DocumentoOrden, ancho: float) -> list:
     if doc.pendientes:
         flujo += [Spacer(1, 12), Paragraph('ADICIONALES PENDIENTES DE APROBACIÓN (NO INCLUIDOS EN EL TOTAL)', BLOQUE_TITULO)]
         for linea in doc.pendientes:
-            texto = f'{linea.descripcion} · Importe propuesto sin IVA: {_money(linea.subtotal)}'
+            etiqueta = ' · Provisto por el cliente' if getattr(linea, 'provisto_cliente', False) else ''
+            if getattr(linea, 'es_subcontratado', False):
+                etiqueta += ' · Subcontratado'
+            texto = f'{linea.descripcion}{etiqueta} · Importe propuesto sin IVA: {_money(linea.subtotal)}'
             flujo += [Spacer(1, 4), Paragraph(_escape_xml(texto), TEXTO)]
     return flujo
 

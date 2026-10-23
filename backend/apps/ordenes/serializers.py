@@ -16,6 +16,7 @@ from apps.inventario.models import Repuesto, Servicio
 from apps.pagos.services import resumen_pagos, saldo_para_entrega, validar_anulacion_orden, validar_entrega
 
 from .adicionales import preparar_linea
+from .lineas_especiales import preparar_especial
 from .despacho import validar_sin_despachos
 
 from .models import (
@@ -69,6 +70,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
     version_aprobacion = serializers.CharField(read_only=True)
     aprobado_por_nombre = serializers.CharField(source='aprobado_por.username', read_only=True, default=None)
     campos_usuario = ('mecanico_asignado',)
+    proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True, default=None)
 
     class Meta:
         model = DetalleServicioOrdenTrabajo
@@ -78,6 +80,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
             'aprobado_por', 'aprobado_por_nombre',
             'orden_trabajo',
             'detalle_cotizacion_origen',
+            'es_subcontratado', 'proveedor', 'proveedor_nombre', 'cantidad',
             'servicio',
             'servicio_codigo',
             'descripcion',
@@ -100,6 +103,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
         return ot.empresa_id if ot else None
 
     def validate(self, attrs):
+        preparar_especial(self.instance, attrs, self.context.get('request'), es_repuesto=False)
         _validar_detalle_aplicado(self.instance, attrs)
         preparar_linea(self.instance, dict(attrs))
         empresa_id = self._get_empresa_id(attrs)
@@ -109,7 +113,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
         return attrs
 
     def create(self, validated_data):
-        if 'costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None:
+        if not validated_data.get('es_subcontratado') and ('costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None):
             empresa_id = self._get_empresa_id(validated_data)
             serv = None
             if empresa_id:
@@ -139,6 +143,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
     cantidad_pendiente_despacho = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
 
     class Meta:
+        extra_kwargs = {'precio_unitario': {'required': False}}
         model = DetalleRepuestoOrdenTrabajo
         fields = [
             'id',
@@ -146,6 +151,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
             'aprobado_por', 'aprobado_por_nombre',
             'orden_trabajo',
             'detalle_cotizacion_origen',
+            'provisto_cliente',
             'contifico_producto_id',
             'codigo_repuesto',
             'repuesto',
@@ -174,6 +180,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
         return (usuario.get_full_name() or usuario.username) if usuario else None
 
     def validate(self, attrs):
+        preparar_especial(self.instance, attrs, self.context.get('request'), es_repuesto=True)
         _validar_detalle_aplicado(self.instance, attrs)
         preparar_linea(self.instance, dict(attrs))
         repuesto = attrs.get('repuesto')
@@ -193,7 +200,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
         linea = self.instance
         if linea is None or not linea.cantidad_despachada:
             return
-        for campo in ('repuesto', 'codigo_repuesto', 'orden_trabajo'):
+        for campo in ('repuesto', 'codigo_repuesto', 'orden_trabajo', 'provisto_cliente'):
             if campo in attrs and attrs[campo] != getattr(linea, campo):
                 raise serializers.ValidationError(
                     {campo: 'La línea tiene repuestos despachados; devuélvelos al almacén antes de cambiarla.'}
@@ -208,7 +215,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
         return ot.empresa_id if ot else None
 
     def create(self, validated_data):
-        if 'costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None:
+        if not validated_data.get('provisto_cliente') and ('costo_unitario' not in validated_data or validated_data.get('costo_unitario') is None):
             empresa_id = self._get_empresa_id(validated_data)
             codigo = validated_data.get('codigo_repuesto')
             if empresa_id and codigo:

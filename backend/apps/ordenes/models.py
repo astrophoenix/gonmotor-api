@@ -293,15 +293,22 @@ class DetalleServicioOrdenTrabajo(UuidPublicoModel, LineaAdicional):
         verbose_name='Servicio del catálogo',
     )
     servicio_codigo = models.CharField(max_length=50, blank=True, null=True)
+    es_subcontratado = models.BooleanField(default=False)
+    proveedor = models.ForeignKey(
+        'proveedores.Proveedor', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='trabajos_subcontratados',
+    )
+    cantidad = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1.00'))
 
     def save(self, *args, **kwargs):
         # 1. Calcular el bruto total de la línea
-        bruto_linea = Decimal(self.horas_aplicadas) * Decimal(self.precio_unitario)
+        unidades = Decimal(self.cantidad if self.es_subcontratado else self.horas_aplicadas)
+        bruto_linea = unidades * Decimal(self.precio_unitario)
         # 2. Restar el descuento asignado a esta línea
         self.subtotal = max(Decimal('0.00'), bruto_linea - Decimal(self.descuento))
         # 3. El IVA se calcula directamente sobre el subtotal neto de la línea
         self.monto_iva = (self.subtotal * self.iva_porcentaje).quantize(Decimal('0.01'))
-        self.costo_total = (Decimal(self.horas_aplicadas) * Decimal(self.costo_unitario)).quantize(Decimal('0.01'))
+        self.costo_total = (unidades * Decimal(self.costo_unitario)).quantize(Decimal('0.01'))
         self.margen_linea = (self.subtotal - self.costo_total).quantize(Decimal('0.01'))
         super().save(*args, **kwargs)
 
@@ -313,6 +320,7 @@ class DetalleServicioOrdenTrabajo(UuidPublicoModel, LineaAdicional):
 class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     """Líneas de repuestos consumidos en la orden."""
 
+    provisto_cliente = models.BooleanField(default=False)
     contifico_producto_id = models.CharField(max_length=100, blank=True, null=True)
     detalle_cotizacion_origen = models.OneToOneField(
         'cotizaciones.DetalleRepuestoCotizacion', on_delete=models.PROTECT,
@@ -344,6 +352,8 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     def save(self, *args, **kwargs):
+        if self.provisto_cliente:
+            self.precio_unitario = self.costo_unitario = self.descuento = Decimal('0.00')
         # 1. Calcular el bruto total de la línea
         bruto_linea = Decimal(self.cantidad) * Decimal(self.precio_unitario)
 
@@ -362,7 +372,7 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     def resolver_repuesto(self):
         """Vincula la línea al catálogo por su código (las líneas de cotización
         y las antiguas solo traen el código)."""
-        if self.repuesto_id or not self.codigo_repuesto or not self.orden_trabajo_id:
+        if self.provisto_cliente or self.repuesto_id or not self.codigo_repuesto or not self.orden_trabajo_id:
             return
         from apps.inventario.models import Repuesto
 
@@ -372,6 +382,8 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
 
     @property
     def cantidad_pendiente_despacho(self):
+        if self.provisto_cliente:
+            return Decimal('0.00')
         return max(Decimal(self.cantidad) - Decimal(self.cantidad_despachada), Decimal('0.00'))
 
     def __str__(self):
