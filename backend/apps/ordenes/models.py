@@ -79,6 +79,9 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
         related_name='ordenes_asignadas',
         help_text='Mecánico o técnico responsable de la reparación'
     )
+    orden_garantia_origen = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True, related_name='ordenes_garantia',
+    )
     cotizacion_origen = models.OneToOneField(
         'cotizaciones.Cotizacion',
         on_delete=models.SET_NULL,
@@ -292,6 +295,8 @@ class DetalleServicioOrdenTrabajo(UuidPublicoModel, LineaAdicional):
         related_name='detalles_ot',
         verbose_name='Servicio del catálogo',
     )
+    garantia_dias = models.PositiveIntegerField(null=True, default=None)
+    garantia_km = models.PositiveIntegerField(null=True, default=None)
     servicio_codigo = models.CharField(max_length=50, blank=True, null=True)
     es_subcontratado = models.BooleanField(default=False)
     proveedor = models.ForeignKey(
@@ -301,6 +306,17 @@ class DetalleServicioOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     cantidad = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1.00'))
 
     def save(self, *args, **kwargs):
+        if self._state.adding:
+            from apps.inventario.models import Servicio
+            servicio = self.servicio if self.servicio_id else None
+            if servicio is None and self.servicio_codigo:
+                servicio = Servicio.objects.filter(empresa_id=self.orden_trabajo.empresa_id, codigo=self.servicio_codigo.strip().upper(), is_active=True).first()
+            for campo in ('garantia_dias', 'garantia_km'):
+                if getattr(self, campo) is None:
+                    setattr(self, campo, getattr(servicio, campo, 0))
+        if self.orden_trabajo.tipo_trabajo == 'GARANTIA':
+            self.precio_unitario = self.descuento = Decimal('0.00')
+            self.garantia_dias = self.garantia_km = 0
         # 1. Calcular el bruto total de la línea
         unidades = Decimal(self.cantidad if self.es_subcontratado else self.horas_aplicadas)
         bruto_linea = unidades * Decimal(self.precio_unitario)
@@ -352,6 +368,8 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     monto_iva = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     def save(self, *args, **kwargs):
+        if self.orden_trabajo.tipo_trabajo == 'GARANTIA':
+            self.precio_unitario = self.descuento = Decimal('0.00')
         if self.provisto_cliente:
             self.precio_unitario = self.costo_unitario = self.descuento = Decimal('0.00')
         # 1. Calcular el bruto total de la línea

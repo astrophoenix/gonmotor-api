@@ -266,6 +266,9 @@ class Cotizacion(UuidPublicoModel, BaseTallerModel):
                 'Asócialos a la cotización o a su recepción de origen.'
             )
 
+        if tipo_trabajo == 'GARANTIA':
+            raise ValueError('Crea la OT de garantía desde Órdenes y selecciona la reparación original; no se genera una garantía cobrable desde una cotización.')
+
         numero_orden = self._generar_numero_orden()
         sucursal_ot = self._resolver_taller()
 

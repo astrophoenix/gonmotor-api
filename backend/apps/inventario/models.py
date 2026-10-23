@@ -282,6 +282,8 @@ class Servicio(UuidPublicoModel, BaseEmpresaModel):
         default=Decimal('0.1500'), 
         verbose_name="Porcentaje de IVA por defecto"
     )
+    garantia_dias = models.PositiveIntegerField(default=0, verbose_name='Garantía (días)')
+    garantia_km = models.PositiveIntegerField(default=0, verbose_name='Garantía (km)')
     intervalo_km = models.PositiveIntegerField(
         null=True,
         blank=True,

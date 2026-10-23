@@ -252,6 +252,8 @@ def aplicar_cotizaciones(cotizaciones, orden=None, usuario=None, metodo_aceptaci
 
         if not pendientes:
             return orden
+        if orden is not None and orden.tipo_trabajo == 'GARANTIA':
+            raise ValueError('Los trabajos de una OT de garantía se registran sin cobro desde la orden; no se incorporan cotizaciones cobrables.')
         if orden is not None and orden.estado not in {'PENDIENTE', 'EN_ESPERA', 'EN_PROCESO'}:
             raise ValueError('Solo se pueden agregar cotizaciones a una OT pendiente, en espera o en proceso.')
         # Una OT corresponde a una sola visita (recepción); las inspecciones de esa visita pueden ser varias.

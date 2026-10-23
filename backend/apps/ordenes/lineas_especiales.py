@@ -8,6 +8,8 @@ from apps.authentication.permissions import TienePermiso
 
 
 def preparar_especial(linea, attrs, request, *, es_repuesto):
+    from .garantias import preparar_linea_garantia
+    preparar_linea_garantia(linea, attrs)
     if es_repuesto:
         cliente = attrs.get('provisto_cliente', getattr(linea, 'provisto_cliente', False))
         if cliente:

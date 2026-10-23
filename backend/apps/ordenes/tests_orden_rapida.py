@@ -111,6 +111,7 @@ class DatosVehiculoTests(TestCase):
         self.assertEqual(servicio, {
             'descripcion': 'Cambio de aceite', 'horas_aplicadas': '0.50', 'precio_unitario': '15.00',
             'descuento': '1.00', 'iva_porcentaje': '0.1500', 'servicio_codigo': 'SRV-01',
+            'garantia_dias': 0, 'garantia_km': 0,
         })
         self.assertEqual(repuesto['codigo_repuesto'], 'FIL-01')
         self.assertEqual(repuesto['precio_unitario'], '8.50')
