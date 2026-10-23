@@ -101,10 +101,10 @@ def _get_rentabilidad(empresa_id, talleres, fecha_desde, fecha_hasta):
     ordenes = ots.values('pk')
 
     cmv_rep = DetalleRepuestoOrdenTrabajo.objects.filter(
-        orden_trabajo_id__in=ordenes,
+        orden_trabajo_id__in=ordenes, aprobado=True,
     ).aggregate(total=Sum('costo_total'))['total'] or CERO
     cmv_serv = DetalleServicioOrdenTrabajo.objects.filter(
-        orden_trabajo_id__in=ordenes,
+        orden_trabajo_id__in=ordenes, aprobado=True,
     ).aggregate(total=Sum('costo_total'))['total'] or CERO
     total_gastos = gastos.aggregate(total=Sum('monto'))['total'] or CERO
 
@@ -164,11 +164,11 @@ def _get_evolucion_mensual(empresa_id, talleres, fecha_hasta):
 
     ingresos = _por_mes(ots, 'fecha_entrega', 'subtotal_neto')
     costos_rep = _por_mes(
-        DetalleRepuestoOrdenTrabajo.objects.filter(orden_trabajo_id__in=ordenes),
+        DetalleRepuestoOrdenTrabajo.objects.filter(orden_trabajo_id__in=ordenes, aprobado=True),
         'orden_trabajo__fecha_entrega', 'costo_total',
     )
     costos_serv = _por_mes(
-        DetalleServicioOrdenTrabajo.objects.filter(orden_trabajo_id__in=ordenes),
+        DetalleServicioOrdenTrabajo.objects.filter(orden_trabajo_id__in=ordenes, aprobado=True),
         'orden_trabajo__fecha_entrega', 'costo_total',
     )
     gastos_mes = _por_mes(gastos, 'fecha', 'monto')

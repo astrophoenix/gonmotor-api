@@ -214,40 +214,57 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 
 
     def calcular_totales(self):
-        # Sumas directas de los servicios
-        subtotal_serv = sum(item.subtotal for item in self.servicios.all())
-        
-        # Sumas directas de los repuestos
-        subtotal_rep = sum(item.subtotal for item in self.repuestos.all())
-        
-        # Suma total de todos los descuentos otorgados en las líneas
-        desc_servicios = sum(item.descuento for item in self.servicios.all())
-        desc_repuestos = sum(item.descuento for item in self.repuestos.all())
-        self.descuento = Decimal(desc_servicios + desc_repuestos)
-
-        self.subtotal_servicios = Decimal(subtotal_serv)
-        self.subtotal_repuestos = Decimal(subtotal_rep)
-        
-        # El neto de la orden es simplemente la suma de los netos de los detalles
+        # Las propuestas conservan sus importes, pero no participan del cobro.
+        servicios = [linea for linea in self.servicios.all() if linea.aprobado]
+        repuestos = [linea for linea in self.repuestos.all() if linea.aprobado]
+        lineas = servicios + repuestos
+        cero = Decimal('0.00')
+        self.subtotal_servicios = sum((linea.subtotal for linea in servicios), cero)
+        self.subtotal_repuestos = sum((linea.subtotal for linea in repuestos), cero)
+        self.descuento = sum((linea.descuento for linea in lineas), cero)
         self.subtotal_neto = self.subtotal_servicios + self.subtotal_repuestos
-
-        # Sumarizar las bases impositivas e IVAs procesados individualmente
-        self.subtotal_base_0 = sum(item.subtotal for item in self.servicios.all() if item.iva_porcentaje == 0) + sum(item.subtotal for item in self.repuestos.all() if item.iva_porcentaje == 0)
-
-        self.subtotal_base_gravada = sum(item.subtotal for item in self.servicios.all() if item.iva_porcentaje > 0) + sum(item.subtotal for item in self.repuestos.all() if item.iva_porcentaje > 0)
-
-        # Suma exacta de los montos de IVA de cada fila
-        self.monto_iva = sum(item.monto_iva for item in self.servicios.all()) + sum(item.monto_iva for item in self.repuestos.all())
-
-        # El total final es la suma matemática perfecta
+        self.subtotal_base_0 = sum((linea.subtotal for linea in lineas if linea.iva_porcentaje == 0), cero)
+        self.subtotal_base_gravada = sum((linea.subtotal for linea in lineas if linea.iva_porcentaje > 0), cero)
+        self.monto_iva = sum((linea.monto_iva for linea in lineas), cero)
         self.total = self.subtotal_neto + self.monto_iva
-        # Sin saldos a favor: el total no baja de lo que el cliente ya pagó.
         from apps.pagos.services import validar_total_cubre_pagos
         validar_total_cubre_pagos(self)
         self.save()
 
 
-class DetalleServicioOrdenTrabajo(UuidPublicoModel, models.Model):
+class LineaAdicional(models.Model):
+    """La aprobación pertenece a la versión comercial de una línea adicional."""
+
+    class Medio(models.TextChoices):
+        WHATSAPP = 'WHATSAPP', 'WhatsApp'
+        LLAMADA = 'LLAMADA', 'Llamada'
+        PRESENCIAL = 'PRESENCIAL', 'Presencial'
+        EMAIL = 'EMAIL', 'Correo'
+        OTRO = 'OTRO', 'Otro'
+
+    es_adicional = models.BooleanField(default=False)
+    aprobado = models.BooleanField(default=True)
+    medio_aprobacion = models.CharField(max_length=12, choices=Medio.choices, blank=True, default='')
+    fecha_aprobacion = models.DateTimeField(null=True, blank=True)
+    aprobado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def version_aprobacion(self):
+        from .adicionales import version_linea
+        return version_linea(self)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.es_adicional:
+            self.aprobado = False
+        super().save(*args, **kwargs)
+
+
+class DetalleServicioOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     """Líneas de mano de obra aplicadas en la orden."""
 
     detalle_cotizacion_origen = models.OneToOneField(
@@ -293,7 +310,7 @@ class DetalleServicioOrdenTrabajo(UuidPublicoModel, models.Model):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'
 
 
-class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, models.Model):
+class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, LineaAdicional):
     """Líneas de repuestos consumidos en la orden."""
 
     contifico_producto_id = models.CharField(max_length=100, blank=True, null=True)

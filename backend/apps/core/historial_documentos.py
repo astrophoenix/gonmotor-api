@@ -78,11 +78,17 @@ CAMPOS = {
         'observaciones': 'Observaciones',
     },
     'ordenes.DetalleServicioOrdenTrabajo': {
+        'es_adicional': 'Trabajo adicional', 'aprobado': 'Aprobado por el cliente',
+        'medio_aprobacion': 'Medio de aprobación', 'fecha_aprobacion': 'Fecha de aprobación',
+        'aprobado_por': 'Aprobación registrada por',
         'descripcion': 'Descripción', 'horas_aplicadas': 'Horas', 'precio_unitario': 'Precio unitario',
         'descuento': 'Descuento', 'iva_porcentaje': 'IVA', 'completado': 'Completado',
         'mecanico_asignado': 'Técnico',
     },
     'ordenes.DetalleRepuestoOrdenTrabajo': {
+        'es_adicional': 'Trabajo adicional', 'aprobado': 'Aprobado por el cliente',
+        'medio_aprobacion': 'Medio de aprobación', 'fecha_aprobacion': 'Fecha de aprobación',
+        'aprobado_por': 'Aprobación registrada por',
         'codigo_repuesto': 'Código', 'descripcion': 'Descripción', 'cantidad': 'Cantidad',
         'precio_unitario': 'Precio unitario', 'descuento': 'Descuento', 'iva_porcentaje': 'IVA',
     },
@@ -247,6 +253,8 @@ def registrar_cambios(request, documento, antes):
 def _resumen_linea(linea):
     _, _, cantidad, precio = LINEAS[linea._meta.label]
     texto = f'{getattr(linea, cantidad)} × {getattr(linea, precio) or 0:.2f}'
+    if getattr(linea, 'es_adicional', False):
+        texto += ' · Adicional ' + ('aprobado' if linea.aprobado else 'pendiente de aprobación')
     if getattr(linea, 'descuento', None):
         texto += f' (desc. {linea.descuento:.2f})'
     return texto

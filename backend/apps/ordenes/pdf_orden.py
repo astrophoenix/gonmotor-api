@@ -130,8 +130,9 @@ class _DocumentoOrden(_Documento):
             logo = _coincidir_logo(empresa, taller)
         self.logo_bin, self.logo_ancho, self.logo_alto = _leer_logo(logo, LOGO_MAX * 2.2, LOGO_MAX)
 
-        self.servicios = list(orden.servicios.all())
-        self.repuestos = list(orden.repuestos.all())
+        self.pendientes = [l for l in list(orden.servicios.all()) + list(orden.repuestos.all()) if not l.aprobado]
+        self.servicios = [l for l in orden.servicios.all() if l.aprobado]
+        self.repuestos = [l for l in orden.repuestos.all() if l.aprobado]
         self.fotos = [f for f in orden.fotos.all() if f.imagen or f.miniatura]
         self.hechos = sum(1 for s in self.servicios if s.completado)
         self.horas = sum((_como_decimal(s.horas_aplicadas) for s in self.servicios), Decimal('0'))
@@ -341,11 +342,17 @@ def _resumen_valores(doc: _DocumentoOrden, ancho: float) -> Table:
 
 def _seccion_trabajo(doc: _DocumentoOrden, ancho: float) -> list:
     encabezado = _EncabezadoFase(1, 'Trabajo', doc.resumen_trabajo(), ancho)
-    if not (doc.servicios or doc.repuestos):
-        return [KeepTogether([
-            encabezado, Spacer(1, 9), _caja_vacia('Esta orden aún no tiene servicios ni repuestos.', ancho),
-        ])]
-    return [encabezado, Spacer(1, 9), *_tabla_trabajo(doc, ancho), Spacer(1, 12), _resumen_valores(doc, ancho)]
+    flujo = [encabezado, Spacer(1, 9)]
+    if doc.servicios or doc.repuestos:
+        flujo += [*_tabla_trabajo(doc, ancho), Spacer(1, 12), _resumen_valores(doc, ancho)]
+    else:
+        flujo += [_caja_vacia('Esta orden aún no tiene servicios ni repuestos aprobados.', ancho)]
+    if doc.pendientes:
+        flujo += [Spacer(1, 12), Paragraph('ADICIONALES PENDIENTES DE APROBACIÓN (NO INCLUIDOS EN EL TOTAL)', BLOQUE_TITULO)]
+        for linea in doc.pendientes:
+            texto = f'{linea.descripcion} · Importe propuesto sin IVA: {_money(linea.subtotal)}'
+            flujo += [Spacer(1, 4), Paragraph(_escape_xml(texto), TEXTO)]
+    return flujo
 
 
 def _seccion_evidencia(doc: _DocumentoOrden, ancho: float) -> list:

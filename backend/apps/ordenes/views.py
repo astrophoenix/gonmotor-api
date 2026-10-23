@@ -306,10 +306,10 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
                 'entrega_credito_autorizada_por',
             )
             .prefetch_related(
-                Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
+                Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'aprobado_por')),
                 Prefetch(
                     'repuestos',
-                    queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'despachado_por'),
+                    queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'despachado_por', 'aprobado_por'),
                 ),
                 'cotizaciones_aplicadas',
                 'fotos',
@@ -556,7 +556,7 @@ def _visita_para_copiar(orden):
                 'iva_porcentaje': str(linea.iva_porcentaje),
                 'servicio_codigo': linea.servicio_codigo,
             }
-            for linea in orden.servicios.all()
+            for linea in orden.servicios.all() if linea.aprobado
         ],
         'repuestos': [
             {
@@ -567,7 +567,7 @@ def _visita_para_copiar(orden):
                 'descuento': str(linea.descuento),
                 'iva_porcentaje': str(linea.iva_porcentaje),
             }
-            for linea in orden.repuestos.all()
+            for linea in orden.repuestos.all() if linea.aprobado
         ],
     }
 
@@ -1227,13 +1227,30 @@ class FotoOrdenTrabajoViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, Filt
         super().perform_destroy(instance)
 
 
-class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class AprobacionAdicionalViewMixin:
+    @action(detail=True, methods=['post'], url_path='aprobar')
+    @transaction.atomic
+    def aprobar(self, request, pk=None):
+        from .adicionales import aprobar_linea
+
+        linea = self.get_object()  # Siempre dentro del alcance empresa/taller.
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=linea.orden_trabajo_id)
+        linea = type(linea).objects.select_for_update().get(pk=linea.pk)
+        linea.orden_trabajo = orden
+        antes = instantanea(linea)
+        if aprobar_linea(linea, request.data, request.user):
+            registrar_linea(request, Evento.LINEA_EDITADA, linea, antes)
+        return Response(self.get_serializer(linea).data)
+
+
+class DetalleServicioOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleServicioOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
 
+    relaciones_extra = ('aprobado_por',)
     documento_padre = 'orden_trabajo'
     documento_query_param = 'orden'
 
@@ -1243,6 +1260,8 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         serializer.validated_data['orden_trabajo'] = orden
         try:
             _check_orden_editable(orden)
+            from .adicionales import preparar_linea
+            preparar_linea(None, serializer.validated_data)
             serializer.save()
             orden.calcular_totales()
             registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
@@ -1267,7 +1286,10 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         for orden in ordenes:
             _check_orden_editable(orden)
         # Releída tras bloquear la orden: es el valor anterior real.
-        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
+        serializer.instance = type(serializer.instance).objects.select_for_update().get(pk=serializer.instance.pk)
+        antes = instantanea(serializer.instance)
+        from .adicionales import preparar_linea
+        preparar_linea(serializer.instance, serializer.validated_data)
         serializer.save()
         for orden in ordenes:
             orden.calcular_totales()
@@ -1279,19 +1301,23 @@ class DetalleServicioOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
         orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
+        from .adicionales import validar_abierta
+        if instance.es_adicional:
+            validar_abierta(orden)
         instance.orden_trabajo = orden
         registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         instance.delete()
         orden.calcular_totales()
 
 
-class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
+class DetalleRepuestoOrdenTrabajoViewSet(AprobacionAdicionalViewMixin, LookupPublicoMixin, FiltroDocumentoPadreMixin, viewsets.ModelViewSet):
     serializer_class = DetalleRepuestoOrdenTrabajoSerializer
     permission_classes = [permissions.IsAuthenticated, TieneRecurso('ordenes')]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['id']
     ordering = ['id']
 
+    relaciones_extra = ('aprobado_por',)
     documento_padre = 'orden_trabajo'
     documento_query_param = 'orden'
 
@@ -1301,6 +1327,8 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         serializer.validated_data['orden_trabajo'] = orden
         try:
             _check_orden_editable(orden)
+            from .adicionales import preparar_linea
+            preparar_linea(None, serializer.validated_data)
             serializer.save()
             orden.calcular_totales()
             registrar_linea(self.request, Evento.LINEA_AGREGADA, serializer.instance)
@@ -1325,7 +1353,10 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
         for orden in ordenes:
             _check_orden_editable(orden)
         # Releída tras bloquear la orden: es el valor anterior real.
-        antes = instantanea(type(serializer.instance).objects.get(pk=serializer.instance.pk))
+        serializer.instance = type(serializer.instance).objects.select_for_update().get(pk=serializer.instance.pk)
+        antes = instantanea(serializer.instance)
+        from .adicionales import preparar_linea
+        preparar_linea(serializer.instance, serializer.validated_data)
         serializer.save()
         for orden in ordenes:
             orden.calcular_totales()
@@ -1337,6 +1368,9 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
         orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
+        from .adicionales import validar_abierta
+        if instance.es_adicional:
+            validar_abierta(orden)
         instance = DetalleRepuestoOrdenTrabajo.objects.select_for_update().get(pk=instance.pk)
         if instance.cantidad_despachada:
             raise serializers.ValidationError(
