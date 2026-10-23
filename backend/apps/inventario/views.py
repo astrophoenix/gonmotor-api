@@ -1,6 +1,7 @@
 import operator
 from functools import reduce
 
+from django.db import transaction
 from django.db.models import F, Q
 from rest_framework import filters, permissions, viewsets
 from rest_framework.decorators import action
@@ -19,13 +20,16 @@ from apps.core.utils.pdf_export import (
     contexto_reporte,
 )
 
-from .models import Repuesto, RepuestoImagen, Servicio
+from . import services
+from .models import MovimientoInventario, Repuesto, RepuestoImagen, Servicio
 from .serializers import (
+    AjustarStockSerializer,
+    MovimientoInventarioSerializer,
     RepuestoImagenSerializer,
     RepuestoSerializer,
     ServicioSerializer,
 )
-from apps.authentication.permissions import TieneRecurso
+from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.utils.export_limits import ExporteDemasiadoGrande
 from apps.core.filters import BusquedaIndexadaFilter
 from apps.core.importacion import ErroresImportacionView, ImportarView, PlantillaImportacionView
@@ -69,6 +73,39 @@ class RepuestoViewSet(LookupPublicoMixin, SoftDeleteDestroyMixin, viewsets.Model
             queryset = queryset.filter(stock_actual__lte=F('stock_minimo'))
 
         return queryset.prefetch_related('imagenes')
+
+    @action(detail=True, methods=['get'], url_path='movimientos')
+    def movimientos(self, request, pk=None):
+        """Kardex del repuesto (más recientes primero)."""
+        repuesto = self.get_object()
+        queryset = MovimientoInventario.objects.filter(repuesto=repuesto).select_related(
+            'usuario', 'orden_trabajo', 'compra',
+        )
+        pagina = self.paginate_queryset(queryset)
+        return self.get_paginated_response(MovimientoInventarioSerializer(pagina, many=True).data)
+
+    @action(
+        detail=True, methods=['post'], url_path='ajustar-stock',
+        permission_classes=[permissions.IsAuthenticated, TienePermiso('inventario', 'modificar')],
+    )
+    @transaction.atomic
+    def ajustar_stock(self, request, pk=None):
+        """Ajuste por conteo físico: deja el stock en `stock_contado` con un movimiento AJUSTE."""
+        datos = AjustarStockSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        repuesto = services.bloquear_repuesto(self.get_object().pk)
+        diferencia = datos.validated_data['stock_contado'] - repuesto.stock_actual
+        if diferencia == 0:
+            return Response({'detail': 'El stock contado es igual al registrado; no hay nada que ajustar.'}, status=400)
+        services.mover_stock(
+            repuesto,
+            tipo=MovimientoInventario.Tipo.AJUSTE,
+            cantidad=diferencia,
+            usuario=request.user,
+            permitir_negativo=True,
+            motivo=datos.validated_data['motivo'].strip(),
+        )
+        return Response(self.get_serializer(repuesto).data)
 
     @action(detail=False, methods=['get'])
     def opciones(self, request):

@@ -153,7 +153,7 @@ class AuditoriaListView(generics.ListAPIView):
 MODULOS_AUDITORIA = {
     'clientes': 'Clientes', 'vehiculos': 'Vehículos', 'proveedores': 'Proveedores',
     'citas': 'Citas', 'recepciones': 'Recepciones', 'inspecciones': 'Inspecciones',
-    'cotizaciones': 'Cotizaciones', 'ordenes': 'Órdenes', 'gastos': 'Gastos', 'pagos': 'Pagos', 'caja': 'Caja',
+    'cotizaciones': 'Cotizaciones', 'ordenes': 'Órdenes', 'gastos': 'Gastos', 'pagos': 'Pagos', 'caja': 'Caja', 'compras': 'Compras',
     'auth': 'Usuarios y acceso', 'configuracion': 'Configuración', 'empresas': 'Empresas',
     'notificaciones': 'Notificaciones', 'repuestos': 'Repuestos', 'servicios': 'Servicios',
     'core': 'General',

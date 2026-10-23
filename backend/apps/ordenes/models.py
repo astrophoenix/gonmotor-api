@@ -303,6 +303,18 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, models.Model):
     )
     orden_trabajo = models.ForeignKey(OrdenTrabajo, on_delete=models.CASCADE, related_name='repuestos')
     codigo_repuesto = models.CharField(max_length=50, blank=True, null=True)
+    # Repuesto del catálogo: solo las líneas con repuesto mueven stock al
+    # despacharse. Si llega solo el código, `save()` lo resuelve.
+    repuesto = models.ForeignKey(
+        'inventario.Repuesto', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='detalles_ot', verbose_name='Repuesto del catálogo',
+    )
+    cantidad_despachada = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0.00'))
+    fecha_despacho = models.DateTimeField(null=True, blank=True, verbose_name='Último despacho')
+    despachado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='repuestos_despachados',
+    )
     descripcion = models.CharField(max_length=255, verbose_name='Descripción del Repuesto')
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
     costo_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -327,7 +339,23 @@ class DetalleRepuestoOrdenTrabajo(UuidPublicoModel, models.Model):
         self.costo_total = (Decimal(self.cantidad) * Decimal(self.costo_unitario)).quantize(Decimal('0.01'))
         self.margen_linea = (self.subtotal - self.costo_total).quantize(Decimal('0.01'))
 
+        self.resolver_repuesto()
         super().save(*args, **kwargs)
+
+    def resolver_repuesto(self):
+        """Vincula la línea al catálogo por su código (las líneas de cotización
+        y las antiguas solo traen el código)."""
+        if self.repuesto_id or not self.codigo_repuesto or not self.orden_trabajo_id:
+            return
+        from apps.inventario.models import Repuesto
+
+        self.repuesto = Repuesto.objects.filter(
+            empresa_id=self.orden_trabajo.empresa_id, codigo=self.codigo_repuesto.strip().upper(),
+        ).first()
+
+    @property
+    def cantidad_pendiente_despacho(self):
+        return max(Decimal(self.cantidad) - Decimal(self.cantidad_despachada), Decimal('0.00'))
 
     def __str__(self):
         return f'{self.descripcion} - {self.orden_trabajo.numero_orden}'

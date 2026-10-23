@@ -8,9 +8,11 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from apps.authentication.utils import get_empresa_id_desde_request
+from apps.authentication.permisos_repo import acciones_en_request
+from apps.authentication.utils import get_contexto_desde_request, get_empresa_id_desde_request
 from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.core.ids_publicos import referencia_corta
 from apps.core.historial_documentos import (
@@ -43,6 +45,8 @@ from .models import (
     RecepcionVehiculo,
     TipoTrabajo,
 )
+from . import despacho
+from .despacho import validar_sin_despachos
 from .pdf_inspeccion import exportar_inspeccion_pdf
 from .pdf_orden import exportar_orden_pdf
 from apps.pagos.services import (
@@ -303,7 +307,10 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             )
             .prefetch_related(
                 Prefetch('servicios', queryset=DetalleServicioOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
-                Prefetch('repuestos', queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen')),
+                Prefetch(
+                    'repuestos',
+                    queryset=DetalleRepuestoOrdenTrabajo.objects.select_related('detalle_cotizacion_origen', 'despachado_por'),
+                ),
                 'cotizaciones_aplicadas',
                 'fotos',
                 'pagos',
@@ -461,6 +468,7 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             raise serializers.ValidationError(
                 'No se puede eliminar la orden: tiene pagos registrados. Anúlala si ya no se ejecutará.'
             )
+        validar_sin_despachos(orden, 'eliminar')
         if orden.estado != OrdenTrabajo.EstadoOrden.PENDIENTE:
             raise serializers.ValidationError(
                 'Solo se puede eliminar una orden de trabajo pendiente. '
@@ -1056,6 +1064,23 @@ class FotoInspeccionViewSet(LookupPublicoMixin, CreacionIdempotenteMixin, Filtro
         super().perform_destroy(instance)
 
 
+# Despachar mueve inventario: exige modificar la orden y el inventario.
+PERMISOS_DESPACHO = [
+    permissions.IsAuthenticated,
+    TienePermiso('ordenes', 'modificar'),
+    TienePermiso('inventario', 'modificar'),
+]
+
+
+def _bool(valor):
+    return valor is True or str(valor).lower() in ('1', 'true', 'si', 'sí')
+
+
+def puede_stock_negativo(request):
+    contexto = get_contexto_desde_request(request)
+    return 'stock_negativo' in acciones_en_request(request, contexto.rol, contexto.empresa_id)
+
+
 def _check_orden_editable(orden):
     if orden is None:
         logger.warning('_check_orden_editable called with orden=None (orden_trabajo not resolved)')
@@ -1218,7 +1243,59 @@ class DetalleRepuestoOrdenTrabajoViewSet(LookupPublicoMixin, FiltroDocumentoPadr
             raise serializers.ValidationError('No se puede eliminar un detalle procedente de una cotización aplicada.')
         orden = OrdenTrabajo.objects.select_for_update().get(pk=instance.orden_trabajo_id)
         _check_orden_editable(orden)
+        instance = DetalleRepuestoOrdenTrabajo.objects.select_for_update().get(pk=instance.pk)
+        if instance.cantidad_despachada:
+            raise serializers.ValidationError(
+                'La línea tiene repuestos despachados; devuélvelos al almacén antes de quitarla.'
+            )
         instance.orden_trabajo = orden
         registrar_linea(self.request, Evento.LINEA_ELIMINADA, instance)
         instance.delete()
         orden.calcular_totales()
+
+    def _linea_bloqueada(self):
+        linea = self.get_object()
+        orden = OrdenTrabajo.objects.select_for_update().get(pk=linea.orden_trabajo_id)
+        linea = DetalleRepuestoOrdenTrabajo.objects.select_for_update().get(pk=linea.pk)
+        linea.orden_trabajo = orden
+        return linea
+
+    def _respuesta_linea(self, linea):
+        linea = DetalleRepuestoOrdenTrabajo.objects.select_related('despachado_por').get(pk=linea.pk)
+        return Response(self.get_serializer(linea).data)
+
+    @action(detail=True, methods=['post'], url_path='despachar', permission_classes=PERMISOS_DESPACHO)
+    @transaction.atomic
+    def despachar(self, request, pk=None):
+        """Saca del almacén la cantidad (por defecto, lo pendiente) para esta línea.
+
+        Cuerpo: `cantidad?`, `autorizar_stock_negativo?` (exige la acción especial
+        `stock_negativo`).
+        """
+        linea = self._linea_bloqueada()
+        permitir = _bool(request.data.get('autorizar_stock_negativo'))
+        if permitir and not puede_stock_negativo(request):
+            raise PermissionDenied('No tienes autorización para dejar el stock en negativo.')
+        movimiento = despacho.despachar(
+            linea, usuario=request.user, cantidad=request.data.get('cantidad'), permitir_negativo=permitir,
+        )
+        registrar_evento(
+            request, linea.orden_trabajo, Evento.DESPACHO,
+            etiqueta=linea.descripcion, nuevo=f'{-movimiento.cantidad} (stock: {movimiento.stock_resultante})',
+        )
+        return self._respuesta_linea(linea)
+
+    @action(detail=True, methods=['post'], url_path='devolver', permission_classes=PERMISOS_DESPACHO)
+    @transaction.atomic
+    def devolver(self, request, pk=None):
+        """Devuelve al almacén (por defecto, todo lo despachado). Cuerpo: `cantidad?`, `motivo?`."""
+        linea = self._linea_bloqueada()
+        movimiento = despacho.devolver(
+            linea, usuario=request.user, cantidad=request.data.get('cantidad'),
+            motivo=str(request.data.get('motivo') or '').strip()[:255],
+        )
+        registrar_evento(
+            request, linea.orden_trabajo, Evento.DEVOLUCION_ALMACEN,
+            etiqueta=linea.descripcion, nuevo=f'{movimiento.cantidad} (stock: {movimiento.stock_resultante})',
+        )
+        return self._respuesta_linea(linea)

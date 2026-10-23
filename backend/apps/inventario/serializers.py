@@ -1,9 +1,11 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.core.ids_publicos import id_publico
 from apps.authentication.utils import get_empresa_id_desde_request
 
-from .models import Repuesto, RepuestoImagen, Servicio
+from .models import MovimientoInventario, Repuesto, RepuestoImagen, Servicio
 from apps.core.serializers import ImagenProcesadaField, ModelSerializerPublico
 
 
@@ -156,6 +158,13 @@ class RepuestoSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
 
     def validate(self, attrs):
         self._validar_codigo_unico(Repuesto)
+        # Después del alta, el stock solo cambia con movimientos (kardex).
+        if self.instance is not None and 'stock_actual' in attrs:
+            if attrs['stock_actual'] != self.instance.stock_actual:
+                raise serializers.ValidationError(
+                    {'stock_actual': 'El stock se cambia con «Ajustar stock», despachos o compras.'}
+                )
+            attrs.pop('stock_actual')
         return attrs
 
 
@@ -185,3 +194,31 @@ class ServicioSerializer(_CatalogoUnicoMixin, ModelSerializerPublico):
     def validate(self, attrs):
         self._validar_codigo_unico(Servicio)
         return attrs
+
+class MovimientoInventarioSerializer(ModelSerializerPublico):
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    usuario_nombre = serializers.SerializerMethodField()
+    numero_orden = serializers.CharField(source='orden_trabajo.numero_orden', read_only=True, default=None)
+    numero_factura = serializers.CharField(source='compra.numero_factura', read_only=True, default=None)
+
+    class Meta:
+        model = MovimientoInventario
+        fields = [
+            'id', 'tipo', 'tipo_display', 'cantidad', 'stock_resultante', 'costo_unitario', 'fecha',
+            'usuario_nombre', 'orden_trabajo', 'numero_orden', 'compra', 'numero_factura', 'referencia', 'motivo',
+        ]
+        read_only_fields = fields
+
+    def get_usuario_nombre(self, obj):
+        usuario = obj.usuario if obj.usuario_id else None
+        return (usuario.get_full_name() or usuario.username) if usuario else None
+
+
+class AjustarStockSerializer(serializers.Serializer):
+    """Ajuste por conteo físico: el stock pasa a `stock_contado`."""
+
+    stock_contado = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'))
+    motivo = serializers.CharField(
+        max_length=255,
+        error_messages={'required': 'Indica el motivo del ajuste.', 'blank': 'Indica el motivo del ajuste.'},
+    )
