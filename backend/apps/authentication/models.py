@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.contrib.auth.models import User
 from apps.core.ids_publicos import UuidPublicoModel
@@ -94,6 +97,11 @@ class UsuarioEmpresa(UuidPublicoModel, BaseModel):
         default=True,
         verbose_name="¿Tiene acceso al sistema?",
         help_text="Si se desactiva, la persona existe como empleado pero no puede iniciar sesión."
+    )
+    comision_porcentaje = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name='Comisión sobre mano de obra (%)',
     )
     # Sucursales de ESTA empresa específica a las que tiene acceso el usuario
     talleres = models.ManyToManyField(

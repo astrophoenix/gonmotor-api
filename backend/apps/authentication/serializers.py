@@ -558,6 +558,17 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class EmpleadoWriteSerializer(serializers.Serializer):
+    comision_porcentaje = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=0, max_value=100, required=False,
+    )
+
+    def validate_comision_porcentaje(self, value):
+        from .permissions import TienePermiso
+        request = self.context.get('request')
+        if not request or not TienePermiso('empleados', 'modificar')().has_permission(request, None):
+            raise serializers.ValidationError('No tienes permiso para configurar comisiones de empleados.')
+        return value
+
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     email = serializers.EmailField()
@@ -646,6 +657,7 @@ class EmpleadoWriteSerializer(serializers.Serializer):
                 'id': id_publico(instance.empresa),
                 'nombre': getattr(instance.empresa, 'nombre_comercial', getattr(instance.empresa, 'nombre', '')) if instance.empresa_id else None,
             } if instance.empresa_id else None,
+            'comision_porcentaje': str(instance.comision_porcentaje),
             'rol': instance.rol,
             'rol_display': nombre_rol(instance.rol),
             'tiene_acceso': instance.tiene_acceso,
@@ -664,7 +676,7 @@ class EmpleadoReadSerializer(ModelSerializerPublico):
 
     class Meta:
         model = UsuarioEmpresa
-        fields = ['id', 'user', 'empresa', 'rol', 'rol_display', 'talleres', 'is_active', 'tiene_acceso']
+        fields = ['id', 'user', 'empresa', 'rol', 'rol_display', 'talleres', 'is_active', 'tiene_acceso', 'comision_porcentaje']
 
     def get_user(self, obj):
         profile = getattr(obj.user, 'profile', None)
