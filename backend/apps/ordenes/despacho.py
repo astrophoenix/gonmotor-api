@@ -35,6 +35,8 @@ def _referencia(linea):
 
 
 def despachar(linea, *, usuario, cantidad=None, permitir_negativo=False):
+    if not linea.aprobado:
+        raise serializers.ValidationError('El repuesto adicional está pendiente de aprobación del cliente.')
     orden = linea.orden_trabajo
     if orden.estado == 'CANCELADO':
         raise serializers.ValidationError('La orden está anulada; no se despachan repuestos.')

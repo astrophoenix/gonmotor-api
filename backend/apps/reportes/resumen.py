@@ -234,7 +234,7 @@ def _top_servicios(empresa_id, talleres, desde, hasta, limite=5):
     ).values('pk')
     return [
         {'descripcion': fila['descripcion'], 'veces': fila['veces'], 'total': fila['total'] or CERO}
-        for fila in DetalleServicioOrdenTrabajo.objects.filter(orden_trabajo_id__in=entregadas)
+        for fila in DetalleServicioOrdenTrabajo.objects.filter(orden_trabajo_id__in=entregadas, aprobado=True)
         .values('descripcion').annotate(total=Sum('subtotal'), veces=Count('pk')).order_by('-total', 'descripcion')[:limite]
     ]
 

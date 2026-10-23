@@ -15,6 +15,7 @@ from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 from apps.inventario.models import Repuesto, Servicio
 from apps.pagos.services import resumen_pagos, saldo_para_entrega, validar_anulacion_orden, validar_entrega
 
+from .adicionales import preparar_linea
 from .despacho import validar_sin_despachos
 
 from .models import (
@@ -65,12 +66,16 @@ def _validar_detalle_aplicado(instance, attrs):
 
 class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
+    version_aprobacion = serializers.CharField(read_only=True)
+    aprobado_por_nombre = serializers.CharField(source='aprobado_por.username', read_only=True, default=None)
     campos_usuario = ('mecanico_asignado',)
 
     class Meta:
         model = DetalleServicioOrdenTrabajo
         fields = [
             'id',
+            'version_aprobacion', 'es_adicional', 'aprobado', 'medio_aprobacion', 'fecha_aprobacion',
+            'aprobado_por', 'aprobado_por_nombre',
             'orden_trabajo',
             'detalle_cotizacion_origen',
             'servicio',
@@ -88,7 +93,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
             'subtotal',
             'completado',
         ]
-        read_only_fields = ['detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+        read_only_fields = ['aprobado', 'medio_aprobacion', 'fecha_aprobacion', 'aprobado_por', 'detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
 
     def _get_empresa_id(self, attrs):
         ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
@@ -96,6 +101,7 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
 
     def validate(self, attrs):
         _validar_detalle_aplicado(self.instance, attrs)
+        preparar_linea(self.instance, dict(attrs))
         empresa_id = self._get_empresa_id(attrs)
         servicio = attrs.get('servicio')
         if servicio is not None and servicio.empresa_id != empresa_id:
@@ -127,6 +133,8 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
 
 class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
+    version_aprobacion = serializers.CharField(read_only=True)
+    aprobado_por_nombre = serializers.CharField(source='aprobado_por.username', read_only=True, default=None)
     despachado_por_nombre = serializers.SerializerMethodField()
     cantidad_pendiente_despacho = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
 
@@ -134,6 +142,8 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
         model = DetalleRepuestoOrdenTrabajo
         fields = [
             'id',
+            'version_aprobacion', 'es_adicional', 'aprobado', 'medio_aprobacion', 'fecha_aprobacion',
+            'aprobado_por', 'aprobado_por_nombre',
             'orden_trabajo',
             'detalle_cotizacion_origen',
             'contifico_producto_id',
@@ -154,7 +164,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
             'monto_iva',
             'subtotal',
         ]
-        read_only_fields = [
+        read_only_fields = ['aprobado', 'medio_aprobacion', 'fecha_aprobacion', 'aprobado_por',
             'detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea',
             'cantidad_despachada', 'fecha_despacho',
         ]
@@ -165,6 +175,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
 
     def validate(self, attrs):
         _validar_detalle_aplicado(self.instance, attrs)
+        preparar_linea(self.instance, dict(attrs))
         repuesto = attrs.get('repuesto')
         if repuesto is not None and not attrs.get('codigo_repuesto'):
             attrs['codigo_repuesto'] = repuesto.codigo
@@ -1086,6 +1097,10 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             ):
                 raise serializers.ValidationError({'cotizacion_origen': 'La cotización ya está aplicada a otra OT.'})
         estado = attrs.get('estado')
+        if estado in {'COMPLETADO', 'ENTREGADO'} and self.instance:
+            if (self.instance.servicios.filter(aprobado=False).exists()
+                    or self.instance.repuestos.filter(aprobado=False).exists()):
+                raise serializers.ValidationError({'estado': 'Aprueba o retira los adicionales pendientes antes de completar o entregar la orden.'})
         if estado == 'EN_ESPERA':
             motivo = attrs.get('motivo_espera')
             if self.instance and not motivo:

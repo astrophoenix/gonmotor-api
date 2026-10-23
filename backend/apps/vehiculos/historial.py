@@ -307,10 +307,10 @@ def _visita(request, docs, permitidos, ver):
     else:
         estado = {'documento': 'recepcion', 'valor': recepcion.estado, 'display': recepcion.get_estado_display()}
 
-    servicios = [s.descripcion for o in ordenes for s in o.servicios.all()] if 'ordenes' in ver else []
+    servicios = [s.descripcion for o in ordenes for s in o.servicios.all() if s.aprobado] if 'ordenes' in ver else []
     repuestos = [
         {'descripcion': r.descripcion, 'cantidad': str(r.cantidad.normalize())}
-        for o in ordenes for r in o.repuestos.all()
+        for o in ordenes for r in o.repuestos.all() if r.aprobado
     ] if 'ordenes' in ver else []
 
     fotos = []
@@ -407,7 +407,8 @@ def _pendientes(visitas_docs):
     for docs in visitas_docs:
         for orden in docs['orden']:
             for linea in list(orden.servicios.all()) + list(orden.repuestos.all()):
-                ejecutados.append((orden.fecha_ingreso, _normalizar(linea.descripcion)))
+                if linea.aprobado:
+                    ejecutados.append((orden.fecha_ingreso, _normalizar(linea.descripcion)))
 
     pendientes = []
     for docs in visitas_docs:
