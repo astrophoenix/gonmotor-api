@@ -5,6 +5,7 @@ from io import BytesIO
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from apps.caja.models import SesionCaja
 from apps.ordenes.models import DetalleRepuestoOrdenTrabajo
 
 from .models import PagoOrden
@@ -72,6 +73,8 @@ class ExportarPagosTests(ExportesBase):
 
     def setUp(self):
         super().setUp()
+        # La devolución en efectivo necesita efectivo en la caja (RF-04).
+        SesionCaja.objects.filter(caja__taller=self.taller_a1, estado='ABIERTA').update(monto_inicial=Decimal('50'))
         self.pago = self._pagar('40', forma_pago='TRANSFERENCIA', referencia='=HYPERLINK("x")')
         self._pagar('10', tipo='DEVOLUCION')
         anulado = self._pagar('5')

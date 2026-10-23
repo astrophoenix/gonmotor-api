@@ -12,7 +12,7 @@ Quien llame a estas funciones debe tener la orden bloqueada
 """
 from decimal import Decimal
 
-from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import DecimalField, Exists, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import serializers
@@ -130,6 +130,54 @@ def filtrar_por_estado_pago(queryset, estado):
     if estado not in filtros:
         return queryset
     return anotar_saldo(queryset.exclude(estado='CANCELADO')).filter(filtros[estado])
+
+
+def filtrar_sin_factura(queryset):
+    """Órdenes cobradas (algún pago vigente) sin comprobante externo registrado."""
+    pagos_vigentes = PagoOrden.objects.filter(
+        orden_trabajo=OuterRef('pk'), tipo=PagoOrden.Tipo.PAGO, anulado=False,
+    )
+    return queryset.exclude(estado='CANCELADO').filter(numero_factura='').filter(Exists(pagos_vigentes))
+
+
+def estado_tras_movimiento(pago):
+    """Pagado neto y saldo de la orden justo después de `pago` (para su recibo).
+
+    Cuenta los movimientos vigentes registrados hasta él, incluido él mismo si
+    no está anulado. El saldo usa el total actual de la orden.
+    """
+    orden = pago.orden_trabajo
+    previos = PagoOrden.objects.filter(orden_trabajo=orden, anulado=False).filter(
+        Q(fecha__lt=pago.fecha) | Q(fecha=pago.fecha, id__lte=pago.id)
+    )
+    totales = previos.aggregate(
+        pagos=Sum('monto', filter=Q(tipo=PagoOrden.Tipo.PAGO)),
+        devoluciones=Sum('monto', filter=Q(tipo=PagoOrden.Tipo.DEVOLUCION)),
+    )
+    neto = (totales['pagos'] or CERO) - (totales['devoluciones'] or CERO)
+    saldo = CERO if orden.estado == 'CANCELADO' else max(orden.total - neto, CERO)
+    return {'pagado_neto': neto, 'saldo': saldo}
+
+
+def registrar_comprobante(orden, *, tipo_comprobante, numero_factura, fecha_factura):
+    """Guarda (o borra, con número vacío) el comprobante externo de la orden."""
+    if orden.estado == 'CANCELADO' and numero_factura:
+        raise serializers.ValidationError('La orden está anulada; no admite comprobante.')
+    if numero_factura:
+        from apps.ordenes.models import OrdenTrabajo
+
+        repetida = OrdenTrabajo.objects.filter(
+            empresa_id=orden.empresa_id, tipo_comprobante=tipo_comprobante, numero_factura=numero_factura,
+        ).exclude(pk=orden.pk).first()
+        if repetida:
+            raise serializers.ValidationError(
+                {'numero_factura': f'Ese comprobante ya está registrado en la orden {repetida.numero_orden}.'}
+            )
+    orden.tipo_comprobante = tipo_comprobante if numero_factura else ''
+    orden.numero_factura = numero_factura
+    orden.fecha_factura = fecha_factura if numero_factura else None
+    orden.save(update_fields=['tipo_comprobante', 'numero_factura', 'fecha_factura', 'updated_at'])
+    return orden
 
 
 def saldo_para_entrega(orden):

@@ -1,8 +1,10 @@
 import logging
+from io import BytesIO
 
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Count, Sum
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, generics, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -14,7 +16,7 @@ from apps.authentication.permissions import TienePermiso, TieneRecurso
 from apps.authentication.utils import get_empresa_id_desde_request
 from apps.core.filters import BusquedaIndexadaFilter
 from apps.core.historial_documentos import Evento, registrar_evento
-from apps.core.ids_publicos import filtrar_por_id_publico, por_id_publico
+from apps.core.ids_publicos import filtrar_por_id_publico, por_id_publico, referencia_corta
 from apps.clientes.models import Cliente
 from apps.core.mixins import FiltroDocumentoPadreMixin, LookupPublicoMixin
 from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
@@ -25,6 +27,7 @@ from apps.ordenes.views import parsear_fecha
 
 from . import services
 from .models import PagoOrden
+from .pdf_recibo import exportar_recibo_pdf
 from .serializers import AnularPagoSerializer, CuentaPorCobrarSerializer, PagoOrdenSerializer
 
 logger = logging.getLogger(__name__)
@@ -180,6 +183,54 @@ class PagoOrdenViewSet(
         )
         pago = self.get_queryset().get(pk=pago.pk)
         return Response(self.get_serializer(pago).data)
+
+    def _pago_con_orden(self):
+        """El movimiento con su orden completa (cliente, vehículo, empresa, taller)."""
+        pago = self.get_object()
+        pago.orden_trabajo = OrdenTrabajo.objects.select_related(
+            'cliente', 'vehiculo', 'empresa', 'sucursal', 'mecanico_principal', 'asesor', 'cotizacion_origen',
+        ).get(pk=pago.orden_trabajo_id)
+        return pago
+
+    @action(detail=True, methods=['get'], url_path='recibo')
+    def recibo(self, request, pk=None):
+        """PDF del recibo del movimiento (también de uno anulado, con la marca)."""
+        pago = self._pago_con_orden()
+        usuario = request.user.get_full_name() or request.user.username
+        buffer = BytesIO()
+        exportar_recibo_pdf(buffer, pago, services.estado_tras_movimiento(pago), usuario=usuario)
+        buffer.seek(0)
+        return FileResponse(
+            buffer,
+            content_type='application/pdf',
+            filename=f'recibo_{pago.orden_trabajo.numero_orden}_{referencia_corta(pago).lstrip("#")}.pdf',
+            as_attachment=True,
+        )
+
+    @action(detail=True, methods=['post'], url_path='enviar-recibo')
+    def enviar_recibo(self, request, pk=None):
+        """Confirma el movimiento al cliente por WhatsApp o correo (texto, sin adjunto)."""
+        from apps.notificaciones.serializers import NotificacionProgramadaSerializer, NotificarRetiroSerializer
+        from apps.notificaciones.services import avisos
+
+        datos = NotificarRetiroSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        pago = self._pago_con_orden()
+        try:
+            notificacion, resultado = avisos.notificar_recibo(
+                pago, services.estado_tras_movimiento(pago)['saldo'],
+                user=request.user, canal=datos.validated_data['canal'],
+            )
+        except avisos.AvisoNoPermitido as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notificacion.refresh_from_db()
+        return Response(
+            {
+                'resultado': resultado,
+                'notificacion': NotificacionProgramadaSerializer(notificacion, context={'request': request}).data,
+            },
+            status=status.HTTP_201_CREATED if resultado.get('ok') else status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class CuentasPorCobrarView(generics.ListAPIView):

@@ -69,6 +69,8 @@ CAMPOS = {
         'asesor': 'Asesor', 'mecanico_principal': 'Técnico responsable', 'kilometraje': 'Kilometraje',
         'fecha_ingreso': 'Fecha de ingreso', 'fecha_entrega': 'Fecha de entrega',
         'observaciones': 'Observaciones', 'saldo_al_entregar': 'Entregada a crédito con saldo',
+        'tipo_comprobante': 'Tipo de comprobante', 'numero_factura': 'Número de comprobante',
+        'fecha_factura': 'Fecha del comprobante',
     },
     'cotizaciones.Cotizacion': {
         'estado': 'Estado', 'cliente': 'Cliente', 'vehiculo': 'Vehículo', 'asesor': 'Asesor',

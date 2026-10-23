@@ -968,6 +968,9 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'kilometraje',
             'entrega_a_credito',
             'saldo_al_entregar',
+            'tipo_comprobante',
+            'numero_factura',
+            'fecha_factura',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -991,6 +994,9 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
             'numero_orden',
             'is_active',
             'saldo_al_entregar',
+            'tipo_comprobante',
+            'numero_factura',
+            'fecha_factura',
             'subtotal_servicios',
             'subtotal_repuestos',
             'subtotal_base_0',
@@ -1098,6 +1104,7 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
         rep['sucursal_nombre'] = instance.sucursal.nombre if instance.sucursal_id else None
         rep.update({clave: str(valor) if isinstance(valor, Decimal) else valor
                     for clave, valor in resumen_pagos(instance).items()})
+        rep['tipo_comprobante_display'] = instance.get_tipo_comprobante_display() if instance.tipo_comprobante else None
         if instance.vehiculo_id:
             rep['vehiculo'] = {
                 'id': id_publico(instance.vehiculo),
