@@ -15,6 +15,8 @@ from apps.empresas.services import generar_codigo_secuencial, resolver_taller
 from apps.inventario.models import Repuesto, Servicio
 from apps.pagos.services import resumen_pagos, saldo_para_entrega, validar_anulacion_orden, validar_entrega
 
+from .despacho import validar_sin_despachos
+
 from .models import (
     DetalleRepuestoInspeccion,
     DetalleRepuestoOrdenTrabajo,
@@ -125,6 +127,8 @@ class DetalleServicioOrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, Validar
 
 class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSerializerPublico):
     campo_documento = 'orden_trabajo'
+    despachado_por_nombre = serializers.SerializerMethodField()
+    cantidad_pendiente_despacho = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
 
     class Meta:
         model = DetalleRepuestoOrdenTrabajo
@@ -134,6 +138,11 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
             'detalle_cotizacion_origen',
             'contifico_producto_id',
             'codigo_repuesto',
+            'repuesto',
+            'cantidad_despachada',
+            'cantidad_pendiente_despacho',
+            'fecha_despacho',
+            'despachado_por_nombre',
             'descripcion',
             'precio_unitario',
             'costo_unitario',
@@ -145,11 +154,43 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
             'monto_iva',
             'subtotal',
         ]
-        read_only_fields = ['detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea']
+        read_only_fields = [
+            'detalle_cotizacion_origen', 'id', 'subtotal', 'monto_iva', 'costo_total', 'margen_linea',
+            'cantidad_despachada', 'fecha_despacho',
+        ]
+
+    def get_despachado_por_nombre(self, obj):
+        usuario = obj.despachado_por if obj.despachado_por_id else None
+        return (usuario.get_full_name() or usuario.username) if usuario else None
 
     def validate(self, attrs):
         _validar_detalle_aplicado(self.instance, attrs)
+        repuesto = attrs.get('repuesto')
+        if repuesto is not None and not attrs.get('codigo_repuesto'):
+            attrs['codigo_repuesto'] = repuesto.codigo
+        self._validar_despachado(attrs)
+        # Otro código sin repuesto explícito: `save()` vuelve a buscarlo en el catálogo.
+        if (
+            self.instance is not None and 'repuesto' not in attrs
+            and attrs.get('codigo_repuesto', self.instance.codigo_repuesto) != self.instance.codigo_repuesto
+        ):
+            attrs['repuesto'] = None
         return attrs
+
+    def _validar_despachado(self, attrs):
+        """Con repuestos despachados la línea no cambia de repuesto ni baja de lo despachado."""
+        linea = self.instance
+        if linea is None or not linea.cantidad_despachada:
+            return
+        for campo in ('repuesto', 'codigo_repuesto', 'orden_trabajo'):
+            if campo in attrs and attrs[campo] != getattr(linea, campo):
+                raise serializers.ValidationError(
+                    {campo: 'La línea tiene repuestos despachados; devuélvelos al almacén antes de cambiarla.'}
+                )
+        if 'cantidad' in attrs and attrs['cantidad'] < linea.cantidad_despachada:
+            raise serializers.ValidationError(
+                {'cantidad': f'Ya se despacharon {linea.cantidad_despachada}; devuelve el excedente al almacén primero.'}
+            )
 
     def _get_empresa_id(self, attrs):
         ot = attrs.get('orden_trabajo') or (self.instance.orden_trabajo if self.instance else None)
@@ -165,6 +206,7 @@ class DetalleRepuestoOrdenTrabajoSerializer(ValidarDocumentoPadreMixin, ModelSer
                 ).first()
                 if rep:
                     validated_data['costo_unitario'] = rep.costo_referencial
+                    validated_data.setdefault('repuesto', rep)
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -1054,6 +1096,8 @@ class OrdenTrabajoSerializer(ValidarUsuariosEmpresaMixin, ValidarTenantMixin, Mo
                 )
         if estado == 'CANCELADO' and self.instance and self.instance.estado != 'CANCELADO':
             validar_anulacion_orden(self.instance)
+        if estado == 'CANCELADO' and self.instance and self.instance.estado != 'CANCELADO':
+            validar_sin_despachos(self.instance, 'anular')
         if estado == 'ENTREGADO' and self.instance and self.instance.estado != 'ENTREGADO':
             validar_entrega(self.instance, attrs.get('entrega_a_credito', False))
         self._validar_kilometraje(attrs)

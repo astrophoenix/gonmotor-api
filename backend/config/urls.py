@@ -69,6 +69,7 @@ urlpatterns = [
     path('api/gastos/', include('apps.gastos.urls')),
     path('api/pagos/', include('apps.pagos.urls')),
     path('api/caja/', include('apps.caja.urls')),
+    path('api/compras/', include('apps.compras.urls')),
     path('api/notificaciones/', include('apps.notificaciones.urls')),
 
     # 7. Endpoints del Módulo de Configuración (Empresa, Sucursales, Usuarios, Roles)

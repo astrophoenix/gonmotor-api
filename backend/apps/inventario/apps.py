@@ -5,3 +5,6 @@ class InventarioConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.inventario'
     verbose_name = 'Inventario y Catálogos'
+
+    def ready(self):
+        from . import signals  # noqa: F401

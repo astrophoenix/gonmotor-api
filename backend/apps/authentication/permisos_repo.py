@@ -58,6 +58,7 @@ RECURSOS = (
     'reportes',
     'gastos',           # egresos del taller
     'notificaciones',   # recordatorios de WhatsApp
+    'compras',          # compras a proveedores y cuentas por pagar
 )
 
 # Roles que ven TODOS los talleres activos de la empresa: el M2M
@@ -119,6 +120,8 @@ MATRIZ_ROLES = {
         'inventario': SOLO_VER,
         'facturacion': _TODOS,
         'reportes': SOLO_VER,
+        # Registra las facturas de proveedores y sus pagos.
+        'compras': _TODOS,
     },
 }
 
@@ -181,6 +184,7 @@ NOMBRES_RECURSOS = {
     'reportes': 'Reportes',
     'gastos': 'Gastos',
     'notificaciones': 'Notificaciones',
+    'compras': 'Compras',
 }
 
 
@@ -238,6 +242,12 @@ ACCIONES_CATALOGO = (
         'Permite reabrir el cierre de caja de un día (con motivo) para corregir o anular sus movimientos.',
         'facturacion',
     ),
+    (
+        'stock_negativo',
+        'Despachar sin stock suficiente',
+        'Permite despachar repuestos a una orden aunque el stock del almacén quede en negativo.',
+        'inventario',
+    ),
 )
 
 _ACCIONES_DASHBOARD = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.startswith('dashboard_'))
@@ -248,9 +258,9 @@ ACCIONES_HISTORIAL = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.
 # los veía cuando el panel exigía `reportes`; el MECANICO no los recibe. El
 # historial de cambios es de supervisión: solo los roles de administración.
 MATRIZ_ACCIONES = {
-    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
-    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
-    'ADMIN_TALLER': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
+    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja', 'stock_negativo'),
+    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja', 'stock_negativo'),
+    'ADMIN_TALLER': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja', 'stock_negativo'),
     'ASESOR': _ACCIONES_DASHBOARD,
     'CAJERO': _ACCIONES_DASHBOARD,
 }

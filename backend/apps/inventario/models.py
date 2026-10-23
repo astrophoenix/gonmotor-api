@@ -1,6 +1,8 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.core.ids_publicos import UuidPublicoModel
 from apps.core.models import BaseEmpresaModel
@@ -326,3 +328,58 @@ class Servicio(UuidPublicoModel, BaseEmpresaModel):
         if self.codigo:
             self.codigo = self.codigo.strip().upper()
         super().save(*args, **kwargs)
+
+class MovimientoInventario(UuidPublicoModel, models.Model):
+    """Kardex: cada entrada o salida de stock de un repuesto.
+
+    Inmutable: se crea solo desde `inventario.services.mover_stock`, que
+    actualiza `Repuesto.stock_actual` en la misma transacción. Un error se
+    corrige con otro movimiento (ajuste, devolución o anulación).
+    """
+
+    class Tipo(models.TextChoices):
+        ENTRADA_COMPRA = 'ENTRADA_COMPRA', 'Entrada por compra'
+        SALIDA_ORDEN = 'SALIDA_ORDEN', 'Salida a orden de trabajo'
+        DEVOLUCION_ORDEN = 'DEVOLUCION_ORDEN', 'Devolución de orden de trabajo'
+        AJUSTE = 'AJUSTE', 'Ajuste de inventario'
+        ANULACION_COMPRA = 'ANULACION_COMPRA', 'Anulación de compra'
+
+    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.CASCADE, related_name='movimientos_inventario')
+    repuesto = models.ForeignKey(Repuesto, on_delete=models.PROTECT, related_name='movimientos')
+    tipo = models.CharField(max_length=20, choices=Tipo.choices)
+    # Con signo: positiva entra al almacén, negativa sale.
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2)
+    stock_resultante = models.DecimalField(max_digits=10, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    fecha = models.DateTimeField(default=timezone.now, editable=False)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='movimientos_inventario',
+    )
+    # Documento de origen (opcionales). `referencia` conserva el texto aunque
+    # la línea de la orden se borre después.
+    orden_trabajo = models.ForeignKey(
+        'ordenes.OrdenTrabajo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='movimientos_inventario',
+    )
+    linea_orden = models.ForeignKey(
+        'ordenes.DetalleRepuestoOrdenTrabajo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='movimientos_inventario',
+    )
+    compra = models.ForeignKey(
+        'compras.Compra', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='movimientos_inventario',
+    )
+    referencia = models.CharField(max_length=255, blank=True, default='')
+    motivo = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        verbose_name = 'Movimiento de inventario'
+        verbose_name_plural = 'Movimientos de inventario'
+        ordering = ['-fecha', '-id']
+        indexes = [
+            models.Index(fields=['repuesto', '-fecha'], name='mov_inv_repuesto_fecha_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} {self.cantidad} - {self.repuesto_id}'

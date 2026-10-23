@@ -78,6 +78,8 @@ class EventoDocumento(UuidPublicoModel):
         PAGO = 'pago', 'Pago registrado'
         DEVOLUCION = 'devolucion', 'Devolución registrada'
         PAGO_ANULADO = 'pago_anulado', 'Pago anulado'
+        DESPACHO = 'despacho', 'Repuesto despachado'
+        DEVOLUCION_ALMACEN = 'devolucion_almacen', 'Repuesto devuelto al almacén'
         ELIMINADO = 'eliminado', 'Eliminado'
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT)
