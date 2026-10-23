@@ -8,13 +8,13 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 
 from apps.authentication.permisos_repo import acciones_en_request
 from apps.authentication.utils import get_contexto_desde_request, get_empresa_id_desde_request
 from apps.authentication.permissions import TienePermiso, TieneRecurso
-from apps.core.ids_publicos import referencia_corta
+from apps.core.ids_publicos import id_publico, por_id_publico, referencia_corta
 from apps.core.historial_documentos import (
     Evento, HistorialDocumentoMixin, instantanea, registrar_cambios, registrar_evento, registrar_foto, registrar_linea,
 )
@@ -353,6 +353,60 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
         """Vincula o desvincula relaciones de flujo sin borrar entidades."""
         return responder_relaciones(request, self.get_object(), 'orden')
 
+    # Visitas anteriores que se ofrecen para copiar sus trabajos.
+    VISITAS_PARA_COPIAR = 5
+
+    @action(detail=False, methods=['get'], url_path='datos-vehiculo')
+    def datos_vehiculo(self, request):
+        """Captura rápida de una OT: `?vehiculo=<id>` (y `excluir=<id de la OT>`).
+
+        Devuelve el dueño actual **en la empresa activa**, el odómetro y las
+        últimas visitas del vehículo con sus líneas, solo de los talleres al
+        alcance del usuario (`para_request`).
+        """
+        from apps.vehiculos.models import Vehiculo, propietario_actual
+
+        empresa_id = get_empresa_id_desde_request(request)
+        vehiculo = por_id_publico(
+            Vehiculo.objects.de_empresa(empresa_id), request.query_params.get('vehiculo'),
+        ).first()
+        if vehiculo is None:
+            raise NotFound('El vehículo no existe o no pertenece a tu empresa.')
+
+        propietario = propietario_actual(vehiculo, empresa_id)
+        cliente = propietario.cliente if propietario else None
+        visitas = (
+            OrdenTrabajo.objects.para_request(request)
+            .filter(vehiculo=vehiculo)
+            .exclude(estado=OrdenTrabajo.EstadoOrden.CANCELADO)
+            .select_related('sucursal')
+            .prefetch_related('servicios', 'repuestos')
+            .order_by('-fecha_ingreso', '-id')
+        )
+        excluir = request.query_params.get('excluir')
+        if excluir:
+            visitas = visitas.exclude(pk__in=por_id_publico(OrdenTrabajo.objects.all(), excluir).values('pk'))
+
+        return Response({
+            'vehiculo': {
+                'id': id_publico(vehiculo),
+                'placa': vehiculo.placa,
+                'marca': vehiculo.marca,
+                'modelo': vehiculo.modelo,
+                'anio': vehiculo.anio,
+                'color': vehiculo.color,
+                'kilometraje_actual': vehiculo.kilometraje_actual,
+            },
+            'cliente': {
+                'id': id_publico(cliente),
+                'nombre': cliente.nombre,
+                'identificacion': cliente.identificacion,
+                'telefono': cliente.telefono,
+                'email': cliente.email,
+            } if cliente else None,
+            'visitas': [_visita_para_copiar(orden) for orden in visitas[:self.VISITAS_PARA_COPIAR]],
+        })
+
     @action(
         detail=True,
         methods=['post'],
@@ -476,6 +530,46 @@ class OrdenTrabajoViewSet(HistorialDocumentoMixin, LookupPublicoMixin, SoftDelet
             )
         registrar_evento(request, orden, Evento.ELIMINADO)
         return super().destroy(request, *args, **kwargs)
+
+
+def _visita_para_copiar(orden):
+    """Resumen de una OT anterior con las líneas que se pueden copiar.
+
+    Solo datos comerciales de cada línea: nada de despacho, pagos, técnico ni
+    estado, que pertenecen a la visita original.
+    """
+    return {
+        'id': id_publico(orden),
+        'numero_orden': orden.numero_orden,
+        'fecha_ingreso': orden.fecha_ingreso,
+        'estado': orden.estado,
+        'estado_display': orden.get_estado_display(),
+        'kilometraje': orden.kilometraje,
+        'sucursal_nombre': orden.sucursal.nombre if orden.sucursal_id else None,
+        'total': str(orden.total),
+        'servicios': [
+            {
+                'descripcion': linea.descripcion,
+                'horas_aplicadas': str(linea.horas_aplicadas),
+                'precio_unitario': str(linea.precio_unitario),
+                'descuento': str(linea.descuento),
+                'iva_porcentaje': str(linea.iva_porcentaje),
+                'servicio_codigo': linea.servicio_codigo,
+            }
+            for linea in orden.servicios.all()
+        ],
+        'repuestos': [
+            {
+                'codigo_repuesto': linea.codigo_repuesto,
+                'descripcion': linea.descripcion,
+                'cantidad': str(linea.cantidad),
+                'precio_unitario': str(linea.precio_unitario),
+                'descuento': str(linea.descuento),
+                'iva_porcentaje': str(linea.iva_porcentaje),
+            }
+            for linea in orden.repuestos.all()
+        ],
+    }
 
 
 def parsear_fecha(valor):

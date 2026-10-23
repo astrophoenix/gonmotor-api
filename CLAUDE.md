@@ -72,7 +72,7 @@ gonmotor-api/
 | `api/token/refresh/` | refresco JWT (alias) |
 | `api/clientes/`, `api/proveedores/`, `api/vehiculos/`, `api/empresas/`, `api/citas/`, `api/gastos/` | CRUD de cada app |
 | `api/cotizaciones/` | cotizaciones + `servicios/` + `repuestos/` |
-| `api/ordenes/` | `ordenes-trabajo/`, `inspecciones/`, `inspeccion-*`, `orden-fotos/`, `ot-servicios/`, `ot-repuestos/` (+ `{id}/despachar/`, `{id}/devolver/`) |
+| `api/ordenes/` | `ordenes-trabajo/` (+ `datos-vehiculo/` para la captura rápida), `inspecciones/`, `inspeccion-*`, `orden-fotos/`, `ot-servicios/`, `ot-repuestos/` (+ `{id}/despachar/`, `{id}/devolver/`) |
 | `api/recepciones/` | **vive en `apps.ordenes`** (`apps/ordenes/recepciones_urls.py`) |
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/`; `repuestos/{id}/movimientos/` (kardex) y `repuestos/{id}/ajustar-stock/` |
 | `api/compras/` | compras (alta, lista con `resumen` por pagar, `{id}/anular/`; sin edición ni borrado) y `pagos/` (pagos a proveedores, `{id}/anular/`) |
@@ -188,6 +188,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - **Kilometraje de la orden**: `OrdenTrabajo.kilometraje` es obligatorio en la API (no menor al `kilometraje_actual` del vehículo, salvo conservar la lectura guardada); si es mayor, sube el odómetro del vehículo. Al generar la orden desde una cotización se toma con `OrdenTrabajo.kilometraje_de_visita()` (lectura más alta de la recepción/inspección, o la del vehículo).
 - **Historial del vehículo**: agrupa en memoria los documentos enlazados en visitas (union-find sobre las mismas FKs) en un número fijo de consultas; regresión en `apps/vehiculos/tests_historial.py`.
 - `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
+- **Captura rápida de la OT** (`GET ordenes-trabajo/datos-vehiculo/?vehiculo=&excluir=`, `ordenes`/`ver`): dueño actual **en la empresa activa** (`propietario_actual`), odómetro y las 5 últimas OT no anuladas del vehículo **solo de los talleres al alcance** (`para_request`, sin la excepción del historial), con sus líneas reducidas a datos comerciales (descripción, código, cantidad/horas, precio, descuento, IVA; nada de despacho, pagos, técnico ni `completado`). La copia de trabajos la hace el formulario: agrega filas nuevas que se guardan como cualquier línea (eventos `linea_agregada` normales). Tests: `apps/ordenes/tests_orden_rapida.py`.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
 
 ### Pagos de la orden (`apps/pagos/`)
