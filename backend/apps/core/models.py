@@ -75,6 +75,9 @@ class EventoDocumento(UuidPublicoModel):
         VINCULO = 'vinculo', 'Vínculo del flujo'
         FOTO_REEMPLAZADA = 'foto_reemplazada', 'Foto reemplazada'
         FOTO_ELIMINADA = 'foto_eliminada', 'Foto eliminada'
+        PAGO = 'pago', 'Pago registrado'
+        DEVOLUCION = 'devolucion', 'Devolución registrada'
+        PAGO_ANULADO = 'pago_anulado', 'Pago anulado'
         ELIMINADO = 'eliminado', 'Eliminado'
 
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT)

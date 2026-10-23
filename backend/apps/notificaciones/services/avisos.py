@@ -7,7 +7,9 @@ from django.utils import timezone
 
 from apps.notificaciones.models import NotificacionProgramada
 from .cola import procesar_notificacion
-from .mensajes import construir_mensaje_cita, construir_mensaje_retiro
+from .mensajes import (
+    construir_mensaje_cita, construir_mensaje_recibo, construir_mensaje_retiro, construir_mensaje_saldo,
+)
 from .recordatorios import get_preferencia
 
 Tipo = NotificacionProgramada.Tipo
@@ -54,6 +56,64 @@ def notificar_retiro(orden, *, user=None, canal='whatsapp'):
             orden=orden,
             asunto='Tu vehículo está listo',
             mensaje=construir_mensaje_retiro(orden),
+            creado_por=user,
+        )
+        resultado = procesar_notificacion(notificacion, user=user, origen='MANUAL')
+    return notificacion, resultado
+
+
+# ── Saldo pendiente ───────────────────────────────────────────────────────
+def notificar_saldo(orden, saldo, *, user=None, canal='whatsapp'):
+    """Envía en el acto el recordatorio de saldo de una orden entregada a crédito.
+
+    `saldo` lo calcula quien llama (`apps.pagos.services`) con la orden bloqueada.
+
+    Returns:
+        tuple(NotificacionProgramada, dict): la notificación y el resultado del envío.
+    """
+    if orden.estado != 'ENTREGADO' or saldo <= 0:
+        raise AvisoNoPermitido('Solo se recuerda el saldo de una orden entregada con saldo pendiente.')
+    with transaction.atomic():
+        notificacion = NotificacionProgramada.objects.create(
+            empresa=orden.empresa,
+            tipo=Tipo.SALDO,
+            canal=canal,
+            origen=NotificacionProgramada.Origen.MANUAL,
+            fecha_programada=timezone.now(),
+            cliente=orden.cliente,
+            vehiculo=orden.vehiculo,
+            orden=orden,
+            asunto='Saldo pendiente en el taller',
+            mensaje=construir_mensaje_saldo(orden, saldo),
+            creado_por=user,
+        )
+        resultado = procesar_notificacion(notificacion, user=user, origen='MANUAL')
+    return notificacion, resultado
+
+
+def notificar_recibo(pago, saldo, *, user=None, canal='whatsapp'):
+    """Envía en el acto la confirmación de un pago o devolución (texto, sin adjunto).
+
+    `saldo` es el de la orden después del movimiento (`apps.pagos.services`).
+
+    Returns:
+        tuple(NotificacionProgramada, dict): la notificación y el resultado del envío.
+    """
+    if pago.anulado:
+        raise AvisoNoPermitido('El movimiento está anulado; no se envía su recibo.')
+    orden = pago.orden_trabajo
+    with transaction.atomic():
+        notificacion = NotificacionProgramada.objects.create(
+            empresa=orden.empresa,
+            tipo=Tipo.RECIBO,
+            canal=canal,
+            origen=NotificacionProgramada.Origen.MANUAL,
+            fecha_programada=timezone.now(),
+            cliente=orden.cliente,
+            vehiculo=orden.vehiculo,
+            orden=orden,
+            asunto='Comprobante de pago' if pago.tipo == 'PAGO' else 'Comprobante de devolución',
+            mensaje=construir_mensaje_recibo(pago, saldo),
             creado_por=user,
         )
         resultado = procesar_notificacion(notificacion, user=user, origen='MANUAL')

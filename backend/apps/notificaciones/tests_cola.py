@@ -286,3 +286,59 @@ class PlantillasMetaTests(TestCase):
         with self.settings(WHATSAPP_META_PLANTILLA_AVISO=''):
             _, payload = self._enviar()
         self.assertEqual(payload['type'], 'text')
+
+
+class CorreoResendTests(TestCase):
+    """Con el backend de Resend (django-anymail) se guarda el ID del mensaje."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.empresa = Empresa.objects.create(
+            nombre_comercial='Taller Resend', ruc=_ruc_unico(), email_contacto='r@test.com',
+        )
+
+    @override_settings(
+        EMAIL_BACKEND='anymail.backends.resend.EmailBackend',
+        ANYMAIL={'RESEND_API_KEY': 're_prueba'},
+        DEFAULT_FROM_EMAIL='avisos@taller.test',
+    )
+    def test_envio_por_resend_registra_proveedor_e_id(self):
+        from .services.correo import correo_enviar_y_registrar
+
+        respuesta = mock.Mock(status_code=200)
+        respuesta.json.return_value = {'id': 're_msg_123'}
+        with mock.patch('requests.Session.request', return_value=respuesta) as peticion:
+            resultado, registro = correo_enviar_y_registrar(
+                empresa=self.empresa, correo='cliente@test.com', asunto='Aviso', mensaje='Hola',
+            )
+
+        self.assertTrue(resultado['ok'], resultado)
+        self.assertFalse(resultado['simulado'])
+        self.assertEqual(registro.proveedor, 'resend')
+        self.assertEqual(registro.id_externo, 're_msg_123')
+        self.assertEqual(registro.estado, RegistroMensajeWhatsApp.EstadoMensaje.ENVIADO)
+        llamada = peticion.call_args
+        url = llamada.kwargs.get('url') or llamada.args[-1]
+        self.assertIn('api.resend.com', url)
+        enviado = llamada.kwargs['data']
+        self.assertIn('avisos@taller.test', enviado)
+        self.assertIn('cliente@test.com', enviado)
+
+    @override_settings(
+        EMAIL_BACKEND='anymail.backends.resend.EmailBackend',
+        ANYMAIL={'RESEND_API_KEY': 're_prueba'},
+        DEFAULT_FROM_EMAIL='avisos@taller.test',
+    )
+    def test_error_de_resend_queda_en_la_bitacora(self):
+        from .services.correo import correo_enviar_y_registrar
+
+        respuesta = mock.Mock(status_code=403, text='{"message": "domain not verified"}')
+        respuesta.json.return_value = {'message': 'domain not verified'}
+        with mock.patch('requests.Session.request', return_value=respuesta):
+            resultado, registro = correo_enviar_y_registrar(
+                empresa=self.empresa, correo='cliente@test.com', asunto='Aviso', mensaje='Hola',
+            )
+
+        self.assertFalse(resultado['ok'])
+        self.assertEqual(registro.estado, RegistroMensajeWhatsApp.EstadoMensaje.ERROR)
+        self.assertIn('domain not verified', registro.error)

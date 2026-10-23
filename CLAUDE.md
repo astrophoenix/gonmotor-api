@@ -41,6 +41,8 @@ gonmotor-api/
         ├── cotizaciones/       # Cotizacion + detalles de servicio/repuesto + PDF
         ├── inventario/         # Repuesto, RepuestoImagen, Servicio
         ├── gastos/             # Gasto
+        ├── pagos/              # PagoOrden: pagos, abonos y devoluciones de la OT (recurso `facturacion`)
+        ├── caja/               # Caja, SesionCaja (apertura/cierre), MovimientoCaja (ingresos/egresos)
         ├── reportes/           # rentabilidad por taller / empresa (sin modelos)
         └── notificaciones/     # recordatorios WhatsApp de mantenimiento
 ```
@@ -73,6 +75,8 @@ gonmotor-api/
 | `api/recepciones/` | **vive en `apps.ordenes`** (`apps/ordenes/recepciones_urls.py`) |
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/` |
 | `api/reportes/` | `rentabilidad-taller/`, `rentabilidad-empresa/` |
+| `api/caja/` | `estado/`, `abrir/`, `sesiones/` (historial; `{id}/cerrar/`, `reabrir/`, `movimientos/`, `pdf/`), `movimientos/{id}/anular/` |
+| `api/pagos/` | pagos y devoluciones de órdenes (`?orden=`, `?cliente=`, `?fecha_desde/hasta=`, `?tipo=`, `?forma_pago=`, `?anulado=`; alta, `{id}/anular/`, `export-excel/`; sin edición ni borrado), `{id}/recibo/` (PDF), `{id}/enviar-recibo/`, `cuentas-por-cobrar/` (+ `export-excel/`) y `cuentas-por-cobrar/{orden}/recordar/`. Comprobante externo: `api/ordenes/ordenes-trabajo/{id}/factura/` |
 | `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar por vehículo/probar), `programadas/` (cola: listar, alta manual de mantenimiento, editar, `cancelar/`, `enviar-ahora/`), `campanas/` (CRUD en borrador, `audiencia/`, `lanzar/`, `cancelar/`), `cron/procesar/` (cola, con `X-Cron-Token`). Aviso de retiro: `api/ordenes/ordenes-trabajo/{id}/notificar-retiro/`; aviso manual de cita: `api/citas/{id}/notificar/` |
 | `api/configuracion/` | `empresa/`, `sucursales/` |
 
@@ -84,7 +88,7 @@ La mayoría de los módulos de listado exponen además `exportar-pdf/` y `export
 - **djangorestframework-simplejwt** (access 60 min, refresh 30 días, rotación + blacklist)
 - **PostgreSQL** vía `psycopg2-binary` (también en local; el `db.sqlite3` del directorio es residual)
 - `python-decouple` (config por `.env`), `django-cors-headers`, `django-countries`
-- `reportlab` (PDF), `openpyxl` (Excel), `Pillow` + `pillow-heif` (imágenes, HEIC), `requests` (LLM, WhatsApp)
+- `django-anymail` (correo vía Resend), `reportlab` (PDF), `openpyxl` (Excel), `Pillow` + `pillow-heif` (imágenes, HEIC), `requests` (LLM, WhatsApp)
 - Producción: `gunicorn` (2 workers × 2 hilos: una subida lenta o un PDF no bloquea al resto), `whitenoise` (estáticos comprimidos), SMTP para correo
 - Idioma `es-ec`, zona horaria `America/Guayaquil`
 
@@ -184,6 +188,24 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - `cotizaciones/signals.py` recalcula los totales de la cotización al guardar/borrar sus detalles de servicio o repuesto; `recepciones` tiene la acción `firmar` (firma del cliente → estado `ACEPTADA`). La firma es un archivo PNG (`firma_cliente`, `FirmaField`): se envía como archivo o como data URL y la API devuelve su URL.
 - Los documentos sin taller se rellenaron con un taller por defecto mediante migraciones de backfill; el filtro por taller es estricto (los registros con `sucursal` NULL quedan fuera).
 
+### Pagos de la orden (`apps/pagos/`)
+- `PagoOrden` cuelga de la OT (`FiltroDocumentoPadreMixin`: mismo alcance empresa/taller) y se protege con `TieneRecurso('facturacion')`. Tipos `PAGO` y `DEVOLUCION`; la `fecha` la fija el servidor (el cierre de caja cuenta los movimientos del día) y `es_anticipo` marca los pagos recibidos antes de `COMPLETADO`. Un movimiento no se edita ni se borra: se anula con motivo (`POST {id}/anular/`).
+- **No hay saldos a favor** (`services.py`): un pago no supera el saldo pendiente; una devolución no supera lo pagado neto; anular una devolución no puede dejar lo pagado por encima del total. `OrdenTrabajo.calcular_totales()` llama a `validar_total_cubre_pagos`: un cambio de líneas que deje el total por debajo de lo pagado responde 400 pidiendo registrar antes la devolución. Para anular la OT (`CANCELADO`) lo pagado neto debe ser 0, y una OT con pagos (aunque anulados) no se elimina.
+- La OT serializada trae `total_pagado`, `total_devuelto`, `pagado_neto`, `saldo`, `estado_pago` (`PENDIENTE`/`PARCIAL`/`PAGADO`) y `estado_pago_display`, calculados en memoria sobre `pagos` precargado (`resumen_pagos`). Los ve quien vea la orden; la lista de movimientos exige `facturacion`/`ver`.
+- Una OT anulada tiene `estado_pago` `SIN_COBRO` y saldo 0. El listado filtra con `?estado_pago=PENDIENTE|PARCIAL|PAGADO|SIN_COBRO` (`filtrar_por_estado_pago`, subconsultas sobre los pagos vigentes).
+- **Entrega a crédito**: pasar la OT a `ENTREGADO` con saldo pendiente responde 400 (`entrega_a_credito` + `saldo`) salvo que llegue `entrega_a_credito: true`; entonces se guardan `saldo_al_entregar` y `entrega_credito_autorizada_por` (el usuario de la petición), y el saldo queda en el historial.
+- **Cuentas por cobrar** (`CuentasPorCobrarView`, `facturacion`/`ver`): solo OT `ENTREGADO` con saldo > 0 (`services.cuentas_por_cobrar`); una OT en proceso con anticipo no es deuda. Filtros `search`, `cliente`, `sucursal`; orden por defecto `fecha_entrega` (la más antigua primero). La respuesta paginada trae `resumen` (`total_por_cobrar`, `ordenes`, `clientes`, `por_taller`). `recordar/` (`facturacion`/`modificar`) envía en el acto una `NotificacionProgramada` tipo `SALDO` por la cola, con respaldo de canal como el aviso de retiro; la fila trae `ultimo_recordatorio`.
+- **Exportes Excel para el contador** (mismos filtros, búsqueda y alcance que su listado): órdenes (`ordenes-trabajo/export-excel/`: bases 0 % y gravada, descuento, IVA, total, pagado, saldo y estado de pago anotados con `anotar_saldo`, sin N+1), pagos (`pagos/export-excel/`, devoluciones en negativo), cuentas por cobrar y gastos (`gastos/export-excel/`). `saldo_y_estado()` es la regla única de saldo/estado de pago (la usan `resumen_pagos` y los exportes). Tests: `apps/pagos/tests_exportes.py`.
+- **Recibo**: `GET {id}/recibo/` genera el PDF del movimiento (`pdf_recibo.py`, misma cabecera e identidad que el PDF de la orden; marca «ANULADO» si aplica). Pagado neto y saldo son los de la orden justo después del movimiento (`estado_tras_movimiento`, sobre el total actual). `POST {id}/enviar-recibo/` (`facturacion`/`modificar`) confirma el movimiento al cliente con una `NotificacionProgramada` tipo `RECIBO`: **texto sin adjunto**, por WhatsApp o correo con el respaldo de la cola (el PDF se descarga aparte); un movimiento anulado no se envía.
+- **Comprobante externo** (factura del facturador del SRI o nota de venta de talonario): `tipo_comprobante`, `numero_factura` (`^\d{3}-\d{3}-\d{9}$`) y `fecha_factura` en la OT, solo lectura en el serializer. Se escriben únicamente con `POST ordenes-trabajo/{id}/factura/` (`ordenes`/`ver` + `facturacion`/`modificar`; número vacío lo quita) y quedan en el historial. Único por empresa + tipo entre OT no eliminadas (`ot_comprobante_unico_vivo`; factura y nota de venta llevan secuencias distintas). El listado filtra «cobradas sin factura» con `?sin_factura=1` (`filtrar_sin_factura`: algún pago vigente, sin número, no anulada).
+- Cada pago, devolución y anulación deja un evento en el historial de la OT (`Evento.PAGO`, `DEVOLUCION`, `PAGO_ANULADO`). Tests: `apps/pagos/tests.py` y `tests_factura.py`.
+
+### Caja del taller (`apps/caja/`)
+- Una caja por taller («Caja principal», se crea al abrirla); el modelo admite varias. Una sola `SesionCaja` `ABIERTA` por caja (constraint parcial). Taller de la operación: `services.taller_de_operacion` (param `taller`, cabecera o perfil; con «Todos los talleres» hay que elegirlo).
+- **Sin caja abierta no se cobra**: `pagos.services.registrar_movimiento` asigna `PagoOrden.sesion_caja` a la sesión abierta (bloqueada) del taller de la OT o responde 400. Una devolución o egreso en efectivo no supera el efectivo esperado.
+- Efectivo esperado = inicial + pagos en efectivo − devoluciones en efectivo + ingresos − egresos (vigentes). El cierre guarda esperado, contado y diferencia; con diferencia la observación es obligatoria.
+- Sesión cerrada: no admite pagos, anulaciones de sus pagos ni movimientos. Reabrir exige `facturacion`/`modificar` + acción especial `reabrir_caja` (roles de administración; migración `authentication/0020`). Un egreso puede crear un `Gasto` si el usuario tiene `gastos`/`modificar`; anularlo elimina (lógico) ese gasto. Tests: `apps/caja/tests.py`.
+
 ### Historial de cambios de documentos
 - `apps/core/historial_documentos.py` + modelo `EventoDocumento`: valor anterior → nuevo de los campos sensibles declarados en `CAMPOS`, solo cuando cambian (comparados ya formateados; FKs por id). Complementa `RegistroAuditoria` (una fila por petición, sin valores), no lo reemplaza.
 - Las líneas registran en su documento padre (`registrar_linea`); operaciones masivas como `sincronizar_inspeccion` o `aplicar_cotizaciones` dejan **un** evento resumido, nunca bajas y altas por línea.
@@ -208,7 +230,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
   - Campañas: solo a clientes con `acepta_promociones` y algún contacto; plantillas con `{cliente}`, `{empresa}` (`renderizar_plantilla` ignora llaves desconocidas). Lanzar exige además `empresa`/`modificar`.
   - Tests: `apps/notificaciones/tests_disparadores.py`.
 - **IA de texto**: `POST /api/core/mejorar-texto/` `{texto, contexto?}` → `{mejorado}`. Máx. 500 caracteres. Variables `AI_TEXT_API_KEY`, `AI_TEXT_BASE_URL`, `AI_TEXT_MODEL` (opcional). No enviar datos personales.
-- **Correo**: reset de contraseña con token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL` (obligatoria en producción: su valor por defecto es de desarrollo).
+- **Correo**: en producción sale por **Resend** (API HTTP con `django-anymail`) cuando existe `RESEND_API_KEY`; sin ella, SMTP con `EMAIL_*`. `DEFAULT_FROM_EMAIL` debe ser de un dominio verificado en Resend. Lo usan el reset de contraseña (token de 1 hora y de un solo uso; enlaces hacia `FRONTEND_URL`, obligatoria en producción) y el canal correo de las notificaciones, que guarda el ID de Resend en `RegistroMensajeWhatsApp.id_externo`.
 
 ### Sesiones y límites de autenticación
 - JWT: access de 15 min (el cliente lo renueva solo) y refresh de 30 días con rotación + lista negra.

@@ -232,6 +232,12 @@ ACCIONES_CATALOGO = (
         'Muestra en cada orden de trabajo quién cambió qué y cuándo (estado, precios, descuentos y líneas).',
         'ordenes',
     ),
+    (
+        'reabrir_caja',
+        'Reabrir una caja cerrada',
+        'Permite reabrir el cierre de caja de un día (con motivo) para corregir o anular sus movimientos.',
+        'facturacion',
+    ),
 )
 
 _ACCIONES_DASHBOARD = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.startswith('dashboard_'))
@@ -242,9 +248,9 @@ ACCIONES_HISTORIAL = tuple(codigo for codigo, *_ in ACCIONES_CATALOGO if codigo.
 # los veía cuando el panel exigía `reportes`; el MECANICO no los recibe. El
 # historial de cambios es de supervisión: solo los roles de administración.
 MATRIZ_ACCIONES = {
-    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
-    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
-    'ADMIN_TALLER': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL,
+    'ADMIN_SISTEMA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
+    'ADMIN_EMPRESA': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
+    'ADMIN_TALLER': _ACCIONES_DASHBOARD + ACCIONES_HISTORIAL + ('reabrir_caja',),
     'ASESOR': _ACCIONES_DASHBOARD,
     'CAJERO': _ACCIONES_DASHBOARD,
 }

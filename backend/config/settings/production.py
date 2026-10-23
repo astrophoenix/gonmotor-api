@@ -27,7 +27,15 @@ STORAGES = {
     },
 }
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# Correo: con RESEND_API_KEY se envía por la API HTTP de Resend (django-anymail),
+# sin depender de que el host permita SMTP saliente. Sin ella, SMTP clásico.
+# El remitente (DEFAULT_FROM_EMAIL) debe ser de un dominio verificado en Resend.
+RESEND_API_KEY = config('RESEND_API_KEY', default='')
+if RESEND_API_KEY:
+    EMAIL_BACKEND = 'anymail.backends.resend.EmailBackend'
+    ANYMAIL = {'RESEND_API_KEY': RESEND_API_KEY}
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_PORT = config('EMAIL_PORT', cast=int, default=587)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool, default=True)
