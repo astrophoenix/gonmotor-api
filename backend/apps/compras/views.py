@@ -43,7 +43,7 @@ class CompraViewSet(
             self.request, explicito=self.request.query_params.get(self.taller_query_param),
         ).select_related('proveedor', 'taller', 'registrado_por', 'anulada_por').prefetch_related(
             Prefetch('detalles', queryset=DetalleCompra.objects.select_related('repuesto')),
-            Prefetch('pagos', queryset=PagoCompra.objects.select_related('registrado_por', 'anulado_por', 'compra')),
+            Prefetch('pagos', queryset=PagoCompra.objects.select_related('registrado_por', 'anulado_por', 'compra', 'movimiento_caja')),
         )
         queryset = services.anotar_saldo(queryset)
         params = self.request.query_params
@@ -122,7 +122,7 @@ class PagoCompraViewSet(
     ordering = ['-fecha', '-id']
     documento_padre = 'compra'
     documento_query_param = 'compra'
-    relaciones_extra = ('registrado_por', 'anulado_por')
+    relaciones_extra = ('registrado_por', 'anulado_por', 'movimiento_caja')
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -137,6 +137,8 @@ class PagoCompraViewSet(
     def anular(self, request, pk=None):
         datos = AnularSerializer(data=request.data)
         datos.is_valid(raise_exception=True)
-        pago = PagoCompra.objects.select_for_update().get(pk=self.get_object().pk)
+        visible = self.get_object()
+        Compra.objects.select_for_update().get(pk=visible.compra_id)
+        pago = PagoCompra.objects.select_for_update().get(pk=visible.pk)
         services.anular_pago(pago, usuario=request.user, motivo=datos.validated_data['motivo'].strip())
         return Response(self.get_serializer(self.get_queryset().get(pk=pago.pk)).data)

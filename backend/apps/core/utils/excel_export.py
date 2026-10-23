@@ -264,6 +264,10 @@ class ExcelExportService:
             ws.column_dimensions[get_column_letter(col_idx)].width = max(ancho_pulgadas * 8, 12)
 
         buffer = BytesIO()
+        # También la identidad de empresa puede contener texto ingresado por usuarios.
+        for row in ws.iter_rows():
+            for celda in row:
+                neutralizar_formula(celda)
         wb.save(buffer)
         buffer.seek(0)
 

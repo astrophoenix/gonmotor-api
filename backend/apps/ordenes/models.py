@@ -107,6 +107,7 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
 
     # Editable: el usuario puede registrar la fecha y hora reales de ingreso.
     fecha_ingreso = models.DateTimeField(default=timezone.now)
+    fecha_anulacion = models.DateTimeField(blank=True, null=True, editable=False)
     fecha_entrega = models.DateTimeField(blank=True, null=True)
 
     # Lectura del odómetro de la visita: obligatoria para el historial del
@@ -205,6 +206,12 @@ class OrdenTrabajo(UuidPublicoModel, BaseTallerModel):
         return getattr(vehiculo, 'kilometraje_actual', None) or 0
 
     def save(self, *args, **kwargs):
+        if self.estado == self.EstadoOrden.CANCELADO:
+            anterior = type(self).objects.filter(pk=self.pk).values_list('estado', flat=True).first() if self.pk else None
+            if anterior != self.EstadoOrden.CANCELADO:
+                self.fecha_anulacion = timezone.now()
+                if kwargs.get('update_fields') is not None:
+                    kwargs['update_fields'] = set(kwargs['update_fields']) | {'fecha_anulacion'}
         if self.kilometraje is None and self.vehiculo_id:
             self.kilometraje = self.kilometraje_de_visita(self.vehiculo)
         # El odómetro maestro solo sube (misma regla que la inspección).

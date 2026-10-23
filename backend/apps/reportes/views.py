@@ -246,6 +246,13 @@ def rentabilidad_empresa(request):
     return _respuesta(request, empresa_id, filters)
 
 
+INDICADORES_RESUMEN = {
+    'facturado': 'Facturado (con IVA)', 'ingresos': 'Ingresos sin IVA', 'cobrado': 'Cobrado',
+    'por_cobrar': 'Por cobrar al cierre', 'costo_trabajos': 'Costo de los trabajos', 'gastos': 'Gastos',
+    'utilidad': 'Utilidad', 'ticket_promedio': 'Ticket promedio',
+    'ordenes_entregadas': 'Órdenes entregadas', 'ordenes_creadas': 'Órdenes creadas',
+}
+
 # ── Resumen del negocio (RF-07) ───────────────────────────────────────────
 def _filtros_resumen(request):
     """Periodo obligatorio en días (por defecto, el mes en curso hasta hoy)."""
@@ -304,14 +311,8 @@ def resumen_negocio_pdf(request):
     def dinero(valor):
         return f'$ {Decimal(valor):,.2f}'
 
-    nombres = {
-        'facturado': 'Facturado (con IVA)', 'ingresos': 'Ingresos sin IVA', 'cobrado': 'Cobrado',
-        'por_cobrar': 'Por cobrar al cierre', 'costo_trabajos': 'Costo de los trabajos', 'gastos': 'Gastos',
-        'utilidad': 'Utilidad', 'ticket_promedio': 'Ticket promedio',
-        'ordenes_entregadas': 'Órdenes entregadas', 'ordenes_creadas': 'Órdenes creadas',
-    }
     filas = []
-    for clave, nombre in nombres.items():
+    for clave, nombre in INDICADORES_RESUMEN.items():
         kpi = datos['kpis'][clave]
         formato = str if clave.startswith('ordenes_') else dinero
         pct = f'{kpi["variacion_pct"]:+.1f} %' if kpi['variacion_pct'] is not None else '—'
@@ -359,3 +360,38 @@ def productividad_mecanicos(request):
         return error
     talleres = _talleres_alcance(request, empresa_id, filtros['parsed_taller_id'])
     return Response(calcular_productividad(empresa_id, talleres, filtros['desde'], filtros['hasta']))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, TienePermiso('reportes', 'ver')])
+def resumen_negocio_excel(request):
+    from apps.core.utils.excel_export import ExcelExportConfig, ExcelExportService
+    from apps.core.utils.pdf_export import contexto_reporte
+    from .resumen import calcular_resumen
+
+    empresa_id = get_empresa_id_desde_request(request)
+    if not empresa_id:
+        return Response({'error': 'No se pudo determinar la empresa activa.'}, status=400)
+    filtros, error = _filtros_resumen(request)
+    if error:
+        return error
+    talleres = _talleres_alcance(request, empresa_id, filtros['parsed_taller_id'])
+    datos = calcular_resumen(empresa_id, talleres, filtros['desde'], filtros['hasta'])
+    filas = []
+    for clave, nombre in INDICADORES_RESUMEN.items():
+        kpi = datos['kpis'][clave]
+        filas.append([nombre, kpi['actual'], kpi['anterior'], kpi['variacion'], kpi['variacion_pct']])
+    for fila in datos['actual']['cobrado']['por_forma']:
+        filas.append([f'Cobrado en {fila["forma_pago_display"].lower()}', fila['neto'], None, None, None])
+    for fila in datos['actual']['gastos']['por_categoria']:
+        filas.append([f'Gasto: {fila["categoria_display"]}', fila['total'], None, None, None])
+    empresa, taller, usuario = contexto_reporte(request, empresa_id)
+    periodo, anterior = datos['periodo'], datos['periodo_anterior']
+    return ExcelExportService(ExcelExportConfig(
+        title='Resumen del negocio',
+        filename=f'resumen_negocio_{periodo["desde"]}_{periodo["hasta"]}.xlsx',
+        headers=[('Indicador', 4), ('Periodo actual', 2), ('Periodo anterior', 2), ('Variación', 2), ('Variación (%)', 2)],
+        row_builder=lambda fila: fila, empresa=empresa, taller=taller, usuario=usuario,
+        metadata=f'Actual: {periodo["desde"]} a {periodo["hasta"]} · Anterior: {anterior["desde"]} a {anterior["hasta"]}. Importes en USD.',
+        alignments=['left', 'right', 'right', 'right', 'right'],
+    ), filas).generate_response()

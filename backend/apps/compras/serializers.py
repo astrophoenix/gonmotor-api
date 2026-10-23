@@ -52,9 +52,9 @@ class PagoCompraSerializer(ModelSerializerPublico):
         fields = [
             'id', 'compra', 'numero_factura', 'forma_pago', 'forma_pago_display', 'monto', 'fecha', 'referencia',
             'observacion', 'registrado_por_nombre', 'anulado', 'fecha_anulacion', 'anulado_por_nombre',
-            'motivo_anulacion',
+            'motivo_anulacion', 'movimiento_caja',
         ]
-        read_only_fields = ['id', 'fecha', 'anulado', 'fecha_anulacion', 'motivo_anulacion']
+        read_only_fields = ['id', 'fecha', 'anulado', 'fecha_anulacion', 'motivo_anulacion', 'movimiento_caja']
         extra_kwargs = {'monto': {'error_messages': {'min_value': 'El monto debe ser mayor a cero.'}}}
 
     def get_registrado_por_nombre(self, obj):
