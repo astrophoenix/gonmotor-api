@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.authentication.models import UsuarioEmpresa
+from apps.caja.services import abrir as abrir_caja
 from apps.clientes.models import Cliente
 from apps.core.models import EventoDocumento
 from apps.core.testing import fijar_empresa
@@ -51,6 +52,9 @@ class PagosBase(TestCase):
         cls.asesor = cls._usuario('pagos_asesor', cls.empresa, 'ASESOR', [cls.taller_a1])
         cls.admin = cls._usuario('pagos_admin', cls.empresa, 'ADMIN_EMPRESA')
         cls.cajero_ajeno = cls._usuario('pagos_cajero_b', cls.otra_empresa, 'CAJERO', [cls.taller_ajeno])
+        # Con la caja cerrada no se cobra: los tests de pagos parten con la caja abierta.
+        for taller in (cls.taller_a1, cls.taller_a2, cls.taller_ajeno):
+            abrir_caja(taller, monto_inicial=Decimal('0'), usuario=None)
 
     @staticmethod
     def _usuario(username, empresa, rol, talleres=None):

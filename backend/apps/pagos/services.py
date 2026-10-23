@@ -166,7 +166,13 @@ def validar_anulacion_orden(orden):
 
 
 def registrar_movimiento(orden, *, tipo, monto, usuario, **datos):
-    """Crea un pago o una devolución validando el saldo de la orden."""
+    """Crea un pago o una devolución validando el saldo de la orden.
+
+    Queda en la sesión abierta de la caja del taller de la orden; con la caja
+    cerrada no se registra.
+    """
+    from apps.caja import services as caja
+
     neto = pagado_neto(orden)
     if tipo == PagoOrden.Tipo.PAGO:
         if orden.estado == 'CANCELADO':
@@ -182,8 +188,12 @@ def registrar_movimiento(orden, *, tipo, monto, usuario, **datos):
         raise serializers.ValidationError(
             {'monto': f'La devolución supera lo pagado por el cliente ({_dinero(neto)}).'}
         )
+    sesion = caja.sesion_para_cobrar(orden)
+    if tipo == PagoOrden.Tipo.DEVOLUCION and datos.get('forma_pago') == PagoOrden.FormaPago.EFECTIVO:
+        caja.validar_salida_efectivo(sesion, monto)
     return PagoOrden.objects.create(
         orden_trabajo=orden,
+        sesion_caja=sesion,
         tipo=tipo,
         monto=monto,
         registrado_por=usuario,
@@ -194,8 +204,17 @@ def registrar_movimiento(orden, *, tipo, monto, usuario, **datos):
 
 def anular_movimiento(pago, *, usuario, motivo):
     """Anula un pago o devolución. Anular una devolución no puede dejar saldo a favor."""
+    from apps.caja import services as caja
+    from apps.caja.models import SesionCaja
+
     if pago.anulado:
         raise serializers.ValidationError('El movimiento ya está anulado.')
+    if pago.sesion_caja_id:
+        sesion = SesionCaja.objects.select_for_update().get(pk=pago.sesion_caja_id)
+        caja.validar_abierta(sesion, 'anular sus pagos')
+        # Anular un pago en efectivo saca ese dinero de la caja.
+        if pago.tipo == PagoOrden.Tipo.PAGO and pago.forma_pago == PagoOrden.FormaPago.EFECTIVO:
+            caja.validar_salida_efectivo(sesion, pago.monto)
     if pago.tipo == PagoOrden.Tipo.DEVOLUCION:
         orden = pago.orden_trabajo
         if orden.estado == 'CANCELADO':

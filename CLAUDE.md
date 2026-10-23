@@ -42,6 +42,7 @@ gonmotor-api/
         ├── inventario/         # Repuesto, RepuestoImagen, Servicio
         ├── gastos/             # Gasto
         ├── pagos/              # PagoOrden: pagos, abonos y devoluciones de la OT (recurso `facturacion`)
+        ├── caja/               # Caja, SesionCaja (apertura/cierre), MovimientoCaja (ingresos/egresos)
         ├── reportes/           # rentabilidad por taller / empresa (sin modelos)
         └── notificaciones/     # recordatorios WhatsApp de mantenimiento
 ```
@@ -74,6 +75,7 @@ gonmotor-api/
 | `api/recepciones/` | **vive en `apps.ordenes`** (`apps/ordenes/recepciones_urls.py`) |
 | `api/repuestos/`, `api/repuestos-imagenes/`, `api/servicios/` | `apps.inventario.urls` montado directamente en `api/` |
 | `api/reportes/` | `rentabilidad-taller/`, `rentabilidad-empresa/` |
+| `api/caja/` | `estado/`, `abrir/`, `sesiones/` (historial; `{id}/cerrar/`, `reabrir/`, `movimientos/`, `pdf/`), `movimientos/{id}/anular/` |
 | `api/pagos/` | pagos y devoluciones de órdenes (`?orden=`, `?cliente=`, alta, `{id}/anular/`; sin edición ni borrado), `cuentas-por-cobrar/` y `cuentas-por-cobrar/{orden}/recordar/` |
 | `api/notificaciones/` | estado, preferencias, recordatorios (listar/enviar por vehículo/probar), `programadas/` (cola: listar, alta manual de mantenimiento, editar, `cancelar/`, `enviar-ahora/`), `campanas/` (CRUD en borrador, `audiencia/`, `lanzar/`, `cancelar/`), `cron/procesar/` (cola, con `X-Cron-Token`). Aviso de retiro: `api/ordenes/ordenes-trabajo/{id}/notificar-retiro/`; aviso manual de cita: `api/citas/{id}/notificar/` |
 | `api/configuracion/` | `empresa/`, `sucursales/` |
@@ -194,6 +196,12 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 - **Entrega a crédito**: pasar la OT a `ENTREGADO` con saldo pendiente responde 400 (`entrega_a_credito` + `saldo`) salvo que llegue `entrega_a_credito: true`; entonces se guardan `saldo_al_entregar` y `entrega_credito_autorizada_por` (el usuario de la petición), y el saldo queda en el historial.
 - **Cuentas por cobrar** (`CuentasPorCobrarView`, `facturacion`/`ver`): solo OT `ENTREGADO` con saldo > 0 (`services.cuentas_por_cobrar`); una OT en proceso con anticipo no es deuda. Filtros `search`, `cliente`, `sucursal`; orden por defecto `fecha_entrega` (la más antigua primero). La respuesta paginada trae `resumen` (`total_por_cobrar`, `ordenes`, `clientes`, `por_taller`). `recordar/` (`facturacion`/`modificar`) envía en el acto una `NotificacionProgramada` tipo `SALDO` por la cola, con respaldo de canal como el aviso de retiro; la fila trae `ultimo_recordatorio`.
 - Cada pago, devolución y anulación deja un evento en el historial de la OT (`Evento.PAGO`, `DEVOLUCION`, `PAGO_ANULADO`). Tests: `apps/pagos/tests.py`.
+
+### Caja del taller (`apps/caja/`)
+- Una caja por taller («Caja principal», se crea al abrirla); el modelo admite varias. Una sola `SesionCaja` `ABIERTA` por caja (constraint parcial). Taller de la operación: `services.taller_de_operacion` (param `taller`, cabecera o perfil; con «Todos los talleres» hay que elegirlo).
+- **Sin caja abierta no se cobra**: `pagos.services.registrar_movimiento` asigna `PagoOrden.sesion_caja` a la sesión abierta (bloqueada) del taller de la OT o responde 400. Una devolución o egreso en efectivo no supera el efectivo esperado.
+- Efectivo esperado = inicial + pagos en efectivo − devoluciones en efectivo + ingresos − egresos (vigentes). El cierre guarda esperado, contado y diferencia; con diferencia la observación es obligatoria.
+- Sesión cerrada: no admite pagos, anulaciones de sus pagos ni movimientos. Reabrir exige `facturacion`/`modificar` + acción especial `reabrir_caja` (roles de administración; migración `authentication/0020`). Un egreso puede crear un `Gasto` si el usuario tiene `gastos`/`modificar`; anularlo elimina (lógico) ese gasto. Tests: `apps/caja/tests.py`.
 
 ### Historial de cambios de documentos
 - `apps/core/historial_documentos.py` + modelo `EventoDocumento`: valor anterior → nuevo de los campos sensibles declarados en `CAMPOS`, solo cuando cambian (comparados ya formateados; FKs por id). Complementa `RegistroAuditoria` (una fila por petición, sin valores), no lo reemplaza.

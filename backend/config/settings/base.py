@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'apps.proveedores',
     'apps.gastos',
     'apps.pagos',
+    'apps.caja',
     'apps.reportes',
 ]
 

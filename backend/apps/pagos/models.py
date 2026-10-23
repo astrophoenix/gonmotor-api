@@ -52,6 +52,14 @@ class PagoOrden(UuidPublicoModel, BaseModel):
         help_text='Número de comprobante, transferencia, voucher o cheque',
     )
     observacion = models.CharField(max_length=255, blank=True, default='')
+    # Jornada de caja en la que entró o salió el dinero (null: anterior a la caja).
+    sesion_caja = models.ForeignKey(
+        'caja.SesionCaja',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='pagos',
+    )
     # Pago recibido antes de que el trabajo esté completado.
     es_anticipo = models.BooleanField(default=False, editable=False)
     registrado_por = models.ForeignKey(
