@@ -92,7 +92,7 @@ class Vehiculo(UuidPublicoModel, SoftDeleteModel):
 
     #🚗 Opciones del tipo de transmisión con TextChoices
     class TipoTransmision(models.TextChoices):
-        MANUAL = 'M', 'Manual / Mecánica'
+        MANUAL = 'M', 'Manual'
         AUTOMATICA = 'A', 'Automática'
         CVT = 'C', 'CVT'
 
