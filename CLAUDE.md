@@ -14,7 +14,7 @@ Despliegue: Render (`render.yaml`, `rootDir: backend`, gunicorn, health check `G
 
 ```
 gonmotor-api/
-├── render.yaml                 # Servicio web en Render (build: pip + migrate + collectstatic)
+├── render.yaml                 # Blueprint de producción (Ohio): API, Postgres y cron de notificaciones
 ├── comandos                    # Notas personales de comandos (contiene credenciales locales: no copiar)
 └── backend/                    # rootDir del proyecto Django
     ├── manage.py               # DJANGO_SETTINGS_MODULE por defecto: config.settings.local
@@ -276,7 +276,7 @@ Equivalente para modelos `Base*Model`: `X.objects.para_request(request, explicit
 
 ### Integraciones externas
 - **WhatsApp**: `WHATSAPP_MODE=mock` en local (sin llamadas externas, escribe en `logs/whatsapp_mock.log`). Proveedores Twilio/Meta documentados en `apps/notificaciones/services/whatsapp.py`. Con `meta_api`, los avisos que inicia el taller salen con plantillas aprobadas (`WHATSAPP_META_PLANTILLA_AVISO`, `WHATSAPP_META_PLANTILLA_PROMOCION` para campañas, `WHATSAPP_META_IDIOMA`); sin ellas se envía texto libre, que Meta solo acepta dentro de las 24 h desde el último mensaje del cliente. El barrido periódico de vehículos se eliminó: todo aviso automático pasa por la cola.
-- **Cola de notificaciones** (`NotificacionProgramada`): los avisos al cliente (retiro, mantenimiento, citas, masivos) se encolan con `fecha_programada` y los envía `python manage.py procesar_notificaciones` o `POST /api/notificaciones/cron/procesar/` (sin JWT, cabecera `X-Cron-Token` = `NOTIFICACIONES_CRON_TOKEN`; vacío = 503). En Render lo dispara cada 15 min `.github/workflows/procesar-notificaciones.yml`. Canal preferido con respaldo al otro (WhatsApp ↔ correo); hasta 3 intentos con espera creciente. Cada envío queda en `RegistroMensajeWhatsApp` (guarda ambos canales, ver `canal`). Tests: `apps/notificaciones/tests_cola.py`.
+- **Cola de notificaciones** (`NotificacionProgramada`): los avisos al cliente (retiro, mantenimiento, citas, masivos) se encolan con `fecha_programada` y los envía `python manage.py procesar_notificaciones` o `POST /api/notificaciones/cron/procesar/` (sin JWT, cabecera `X-Cron-Token` = `NOTIFICACIONES_CRON_TOKEN`; vacío = 503). En producción lo corre cada 15 min el cron job `gonmotor-notificaciones` de Render (`render.yaml`); `.github/workflows/procesar-notificaciones.yml` queda como alternativa externa. Canal preferido con respaldo al otro (WhatsApp ↔ correo); hasta 3 intentos con espera creciente. Cada envío queda en `RegistroMensajeWhatsApp` (guarda ambos canales, ver `canal`). Tests: `apps/notificaciones/tests_cola.py`.
 - **Disparadores** (`apps/notificaciones/signals.py`, en `on_commit`; un fallo va al log y no rompe el guardado):
   - OT que **pasa** a `ENTREGADO` → próximo mantenimiento (`services/mantenimiento.py`): km objetivo = odómetro + intervalo; fecha = la menor entre el tope por meses y la estimada por el ritmo de km entre las dos últimas entregas del vehículo en la empresa; aviso `dias_antelacion` antes a las 09:00. Intervalos: el menor de los `Servicio.intervalo_km/intervalo_meses` de la OT, si no los de `PreferenciaMantenimiento`. Sin alerta para GARANTIA/ESTETICA/SINIESTRO. Reemplaza el pendiente del vehículo (único por empresa + vehículo) y actualiza `proximo_mantenimiento_km/fecha` del vehículo.
   - Cita guardada o eliminada → recordatorios `CITA_24H` y `CITA_2H` (se crean, mueven o cancelan; `recordatorios_cita_activos` en la preferencia). La cola vuelve a comprobar el estado de la cita antes de enviar.

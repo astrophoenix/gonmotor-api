@@ -5,7 +5,12 @@ DEBUG = False
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=lambda v: [s.strip() for s in v.split(',') if s.strip()])
 
 # Security settings for production
+# Render termina el TLS en su proxy y reenvía por HTTP con X-Forwarded-Proto:
+# sin esto Django vería toda petición como insegura y redirigiría sin fin.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = True
+# El health check interno de Render llega por HTTP sin esa cabecera.
+SECURE_REDIRECT_EXEMPT = [r'^api/core/health/$']
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
